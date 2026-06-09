@@ -5,9 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
-
 # bash extensions
 *.sh
+
+# BigData
+*_routes.json
 
 # Distribution / packaging
 .Python
