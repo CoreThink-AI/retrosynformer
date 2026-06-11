@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score
 
-from inference import RoutePredictor
+from .inference import RoutePredictor
 
 from .utils import utils
 

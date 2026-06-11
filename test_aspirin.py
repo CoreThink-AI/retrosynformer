@@ -9,7 +9,7 @@ from retrosynformer.runner import init_model
 from retrosynformer.inference import RoutePredictor
 
 REPO = Path(__file__).parent
-ASPIRIN_SMILES = "CC(=O)Oc1ccccc1C(=O)O"
+ASPIRIN_SMILES = "CC(C)Cc1ccc(cc1)C(C)C(=O)O"  # Ibuprofen (Aspirin is itself a building block)
 
 config = yaml.safe_load((REPO / "results/config.yaml").read_text())
 
@@ -19,7 +19,7 @@ config["context"]["templates_path"] = str(REPO / "data/standard_reaction_templat
 config["evaluation"]["beam_width"] = 3
 config["evaluation"]["max_depth"] = 5
 
-print(f"Target: Aspirin  SMILES={ASPIRIN_SMILES}")
+print(f"Target: Ibuprofen (Aspirin is a building block — trivially solved)  SMILES={ASPIRIN_SMILES}")
 print("Initializing model (random weights — no checkpoint available)...")
 model = init_model(config)
 

@@ -16,7 +16,7 @@ dependencies = [
     "cachedmethods==0.1.4",
     "certifi==2025.1.31",
     "cython",
-#    "cgrtools",
+    #    "cgrtools",
     "charset-normalizer==3.4.1",
     "cli-exit-tools==1.2.7",
     "click==8.1.8",
@@ -95,6 +95,7 @@ dependencies = [
     "xxhash>=3.0.0,<4.0.0",
     "zipfile-deflate64==0.2.0",
     "zipp==3.21.0",
+    "torch>=2.12.0",
 ]
 # packages = [
 #      "retrosynformer",
