@@ -50,7 +50,7 @@ class Evaluation:
             try:
                 self.eval_df = pd.read_json(result_dir + "/predicted_routes.json")
                 self.eval_df["run"] = "main"
-                self.train_progress_df = pd.read_csv(result_dir + "/train_progress.csv")
+                self.train_progress_df = pd.read_json(result_dir + "/train_progress.jsonl", lines=True)
             except:
                 try:
                     print("trying n1")

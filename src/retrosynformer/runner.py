@@ -205,9 +205,9 @@ def main(config_path, resume=False, n_epochs=None):
     if resume:
         results_path = config["train"]["results_path"].rstrip("/")
         model_path = results_path + "/model.pth"
-        progress_path = results_path + "/train_progress.csv"
+        progress_path = results_path + "/train_progress.jsonl"
         if pd.io.common.file_exists(progress_path):
-            prev = pd.read_csv(progress_path)
+            prev = pd.read_json(progress_path, lines=True)
             start_epoch = int(prev["epoch"].max()) + 1
         print(f"Resuming from checkpoint: {model_path}, starting at epoch {start_epoch}")
     model = init_model(config, model_path=model_path)

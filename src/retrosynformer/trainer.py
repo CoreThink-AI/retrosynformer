@@ -240,11 +240,12 @@ class RetroTrainer:
         )
         training_route_accuracy, validation_route_accuracy = [], []
 
+        progress_path = save_folder.rstrip("/") + "/train_progress.jsonl"
+        eval_path = save_folder.rstrip("/") + "/pred_routes_train_progress.json"
+
         if start_epoch > 0:
-            progress_path = save_folder.rstrip("/") + "/train_progress.csv"
-            eval_path = save_folder.rstrip("/") + "/pred_routes_train_progress.json"
             if os.path.exists(progress_path):
-                self.result_df = pd.read_csv(progress_path, index_col=0)
+                self.result_df = pd.read_json(progress_path, lines=True)
                 lowest_valid_loss = self.result_df["valid_loss"].min()
                 print(f"Restored training history ({len(self.result_df)} epochs). Best valid loss: {lowest_valid_loss:.6f}")
             if os.path.exists(eval_path):
@@ -253,6 +254,7 @@ class RetroTrainer:
 
         print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
         for epoch in range(start_epoch, n_epochs):
+            epoch_start = time.time()
 
             if verbose:
                 print("epoch: ", epoch)
@@ -268,6 +270,8 @@ class RetroTrainer:
             validation_loss.append(valid_loss)
             validation_accuracy.append(valid_action_accuracy)
             validation_route_accuracy.append(valid_route_accuracy)
+
+            seconds_this_epoch = time.time() - epoch_start
 
             eval_routes_frequency = self.config["evaluation"]["eval_routes_frequency"]
             if (
@@ -302,20 +306,18 @@ class RetroTrainer:
             else:
                 fraction_targets_solved = None
 
-            results_df_epoch = pd.DataFrame(
-                {
-                    "epoch": [epoch],
-                    "train_loss": [train_loss],
-                    "train_action_accuracy": [train_action_accuracy],
-                    "train_route_accuracy": [train_route_accuracy],
-                    "valid_loss": [valid_loss],
-                    "valid_action_accuracy": [valid_action_accuracy],
-                    "valid_route_accuracy": [valid_route_accuracy],
-                }
-            )
-
+            record = {
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "train_action_accuracy": train_action_accuracy,
+                "train_route_accuracy": train_route_accuracy,
+                "valid_loss": valid_loss,
+                "valid_action_accuracy": valid_action_accuracy,
+                "valid_route_accuracy": valid_route_accuracy,
+                "seconds_per_epoch": seconds_this_epoch,
+            }
             self.result_df = pd.concat(
-                [self.result_df, results_df_epoch], ignore_index=True
+                [self.result_df, pd.DataFrame([record])], ignore_index=True
             )
 
             if verbose:
@@ -332,23 +334,25 @@ class RetroTrainer:
                     "Valid route accuracy: ",
                     valid_route_accuracy,
                 )
+                print(f"Epoch time: {seconds_this_epoch:.1f}s")
 
             if valid_loss < lowest_valid_loss:
                 lowest_valid_loss = valid_loss
                 torch.save(self.model.state_dict(), save_folder + "/model.pth")
-            print("total loss:")
+            print(f"Total loss: {train_loss + valid_loss:.6f}")
 
-            self.result_df.to_csv(save_folder + "/train_progress.csv")
-            with open(save_folder + "/pred_routes_train_progress.json", "w") as results:
+            with open(progress_path, "a") as f:
+                f.write(json.dumps(record) + "\n")
+            with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
 
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(
-            save_folder + "/train_progress.csv",
+            save_folder + "/train_progress.jsonl",
             save_folder + "/train_progress_loss.png",
         )
         utils.plot_train_progress_accuracy(
-            save_folder + "/train_progress.csv",
+            save_folder + "/train_progress.jsonl",
             save_folder + "/train_progress_accuracy.png",
         )
         utils.plot_evaluation_results(

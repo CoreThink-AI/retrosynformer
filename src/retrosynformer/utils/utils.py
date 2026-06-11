@@ -225,7 +225,7 @@ def calculate_ted(calculator, route, target_routes):
 
 def plot_train_progress_accuracy(train_results_path, save_as):
     sns.set()
-    train_progress = pd.read_csv(train_results_path)
+    train_progress = pd.read_json(train_results_path, lines=True)
     # print(train_progress.keys())
     fig = plt.figure()
     plt.plot(
@@ -258,7 +258,7 @@ def plot_train_progress_accuracy(train_results_path, save_as):
 
 def plot_train_progress(train_results_path, save_as):
     sns.set()
-    train_progress = pd.read_csv(train_results_path)
+    train_progress = pd.read_json(train_results_path, lines=True)
 
     fig = plt.figure()
     plt.plot(train_progress["epoch"], train_progress["train_loss"], 
