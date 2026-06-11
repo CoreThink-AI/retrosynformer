@@ -2,7 +2,6 @@ import json
 import os
 import time
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 import torch
@@ -24,8 +23,6 @@ class RetroTrainer:
         self.state_dim = int(
             self.config["dataset"]["fp_dim"] * self.config["dataset"]["n_in_state"]
         )
-        self.model_file = "model.pth"
-        self.model_path = Path(self.config["train"]["results_path"]) / self.model_file
 
         lr = self.config["optimizer"]["lr"]
         momentum = self.config["optimizer"]["momentum"]
@@ -85,7 +82,7 @@ class RetroTrainer:
             rtgs,
         ), target_routes
 
-    def train_one_epoch(self, verbose=True):
+    def train_one_epoch(self):
         total_loss = 0
         actions_id_batch, actions_id_pred_batch, action_preds_batch = [], [], []
 
@@ -101,7 +98,7 @@ class RetroTrainer:
                 rtgs,
             ), target_routes = self.unpack_data(data)
 
-            self.model.train(verbose=verbose)
+            self.model.train(True)
             self.optimizer.zero_grad()
 
             _, action_preds, _ = self.model(
@@ -210,20 +207,22 @@ class RetroTrainer:
             actions_id_batch,
         )
 
-
-    def train(self, verbose=True, start_epoch=0, save_folder=None):
+    def train(self, verbose=True, start_epoch=0):
         start_time = time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
         )
 
         n_epochs = self.config["train"]["n_epochs"]
+        save_folder = self.config["train"]["results_path"]
 
         current_datetime = datetime.now()
-        if save_folder is None:
-            save_folder = Path(self.model_path).parent
+        if save_folder:
+            save_folder = self.config["train"]["results_path"]
+        else:
+            save_folder = f"results/{current_datetime.strftime('%Y-%m-%d-%H:%M:%S')}/"
 
-        print("Saving results in: ", save_folder)
+        print("Save result at: ", save_folder)
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
             print("Directory created successfully.")
@@ -337,8 +336,10 @@ class RetroTrainer:
                 print(f"Epoch time: {seconds_this_epoch:.1f}s")
 
             if valid_loss < lowest_valid_loss:
+                model_path = save_folder + "/model.pth"
+                print(f'saving model with {lowest_valid_loss - valid_loss} lower loss: {model_path}')
                 lowest_valid_loss = valid_loss
-                print('saving model ')
+                torch.save(self.model.state_dict(), model_path)
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
