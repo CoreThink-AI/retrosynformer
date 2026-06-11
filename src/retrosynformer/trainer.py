@@ -339,7 +339,7 @@ class RetroTrainer:
             if valid_loss < lowest_valid_loss:
                 lowest_valid_loss = valid_loss
                 torch.save(self.model.state_dict(), save_folder + "/model.pth")
-            print("total loss:")
+            print(f"Total loss: {train_loss + valid_loss:.6f}")
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
