@@ -8,7 +8,6 @@ import torch
 from sklearn.metrics import accuracy_score
 
 from .inference import RoutePredictor
-
 from .utils import utils
 
 
@@ -337,9 +336,10 @@ class RetroTrainer:
                 print(f"Epoch time: {seconds_this_epoch:.1f}s")
 
             if valid_loss < lowest_valid_loss:
+                model_path = save_folder + "/model.pth"
+                print(f'saving model with {lowest_valid_loss - valid_loss} lower loss: {model_path}')
                 lowest_valid_loss = valid_loss
-                torch.save(self.model.state_dict(), save_folder + "/model.pth")
-            print(f"Total loss: {train_loss + valid_loss:.6f}")
+                torch.save(self.model.state_dict(), model_path)
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
