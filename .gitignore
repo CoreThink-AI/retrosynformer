@@ -10,6 +10,8 @@ __pycache__/
 
 # BigData
 *_routes.json
+*.pt
+*.pth
 
 # Distribution / packaging
 .Python
