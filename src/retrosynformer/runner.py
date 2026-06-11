@@ -194,11 +194,23 @@ def init_model(config, model_path=None):
     return model
 
 
-def main(config_path):
+def main(config_path, resume=False, n_epochs=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
-    model = init_model(config)
+    if n_epochs is not None:
+        config["train"]["n_epochs"] = n_epochs
+    model_path = None
+    start_epoch = 0
+    if resume:
+        results_path = config["train"]["results_path"].rstrip("/")
+        model_path = results_path + "/model.pth"
+        progress_path = results_path + "/train_progress.csv"
+        if pd.io.common.file_exists(progress_path):
+            prev = pd.read_csv(progress_path)
+            start_epoch = int(prev["epoch"].max()) + 1
+        print(f"Resuming from checkpoint: {model_path}, starting at epoch {start_epoch}")
+    model = init_model(config, model_path=model_path)
     print("Model is loaded!")
     datasets = init_data(config)
     print("Dataset loaded!")
@@ -211,7 +223,7 @@ def main(config_path):
         validation_accuracy,
         validation_route_accuracy,
         fraction_targets_solved,
-    ) = trainer.train()
+    ) = trainer.train(start_epoch=start_epoch)
     print("Training is completed.")
     end_time = time.time()
     print("Training took: ", (end_time - begin_train_time) / (60 * 60), " hours.")
@@ -234,8 +246,22 @@ if __name__ == "__main__":
         "--config_path",
         type=str,
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Load model.pth from results_path before training",
+    )
+    parser.add_argument(
+        "-n",
+        "--n_epochs",
+        type=int,
+        default=None,
+        help="Override n_epochs from config",
+    )
 
     args = parser.parse_args()
     main(
         config_path=args.config_path,
+        resume=args.resume,
+        n_epochs=args.n_epochs,
     )

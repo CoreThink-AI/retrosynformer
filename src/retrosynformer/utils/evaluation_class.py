@@ -13,7 +13,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 import gzip
 import json
 from rxnutils.routes import base, comparison
-import utils
+from . import utils
 
 
 cmap1 = clr.LinearSegmentedColormap.from_list(

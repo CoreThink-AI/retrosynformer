@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 from rdkit import Chem
 
-import utils
+from . import utils
 
 cmap1 = clr.LinearSegmentedColormap.from_list(
     "custom blue red", ["#6BAED6", "#DF9076"], N=256

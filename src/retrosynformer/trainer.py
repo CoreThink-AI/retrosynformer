@@ -208,7 +208,7 @@ class RetroTrainer:
             actions_id_batch,
         )
 
-    def train(self, verbose=True):
+    def train(self, verbose=True, start_epoch=0):
         start_time = time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
@@ -240,10 +240,19 @@ class RetroTrainer:
         )
         training_route_accuracy, validation_route_accuracy = [], []
 
-        # import cProfile
-        # profiler = cProfile.Profile()
-        # profiler.enable()
-        for epoch in range(n_epochs):
+        if start_epoch > 0:
+            progress_path = save_folder.rstrip("/") + "/train_progress.csv"
+            eval_path = save_folder.rstrip("/") + "/pred_routes_train_progress.json"
+            if os.path.exists(progress_path):
+                self.result_df = pd.read_csv(progress_path, index_col=0)
+                lowest_valid_loss = self.result_df["valid_loss"].min()
+                print(f"Restored training history ({len(self.result_df)} epochs). Best valid loss: {lowest_valid_loss:.6f}")
+            if os.path.exists(eval_path):
+                with open(eval_path) as f:
+                    self.results_eval = json.load(f)
+
+        print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
+        for epoch in range(start_epoch, n_epochs):
 
             if verbose:
                 print("epoch: ", epoch)
