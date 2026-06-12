@@ -242,8 +242,16 @@ class RetroTrainer:
         if start_epoch > 0:
             if os.path.exists(progress_path):
                 self.result_df = pd.read_json(progress_path, lines=True)
-                lowest_valid_loss = self.result_df["valid_loss"].min()
-                print(f"Restored training history ({len(self.result_df)} epochs). Best valid loss: {lowest_valid_loss:.6f}")
+                # Use only the current dataset run's history to avoid mixing runs
+                all_epochs = self.result_df["epoch"].tolist()
+                restart_idx = 0
+                for i in range(1, len(all_epochs)):
+                    if all_epochs[i] < all_epochs[i - 1]:
+                        restart_idx = i
+                current_run = self.result_df.iloc[restart_idx:]
+                current_run = current_run[current_run["epoch"] < start_epoch]
+                lowest_valid_loss = current_run["valid_loss"].min() if len(current_run) > 0 else 1000
+                print(f"Restored training history ({len(self.result_df)} epochs). Best valid loss (current run): {lowest_valid_loss:.6f}")
             if os.path.exists(eval_path):
                 with open(eval_path) as f:
                     self.results_eval = json.load(f)
