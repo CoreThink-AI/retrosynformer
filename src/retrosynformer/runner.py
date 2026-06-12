@@ -201,7 +201,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -215,15 +215,19 @@ def main(config_path, resume=False, n_epochs=None, dataset=None):
         config["dataset"]["action_dim"] = ds["action_dim"]
         print(f"Dataset override: {dataset} ({ds['action_dim']} templates)")
     model_path = None
-    start_epoch = 0
+    derived_start_epoch = 0
     if resume:
         results_path = config["train"]["results_path"].rstrip("/")
         model_path = results_path + "/model.pth"
         progress_path = results_path + "/train_progress.jsonl"
         if pd.io.common.file_exists(progress_path):
             prev = pd.read_json(progress_path, lines=True)
-            start_epoch = int(prev["epoch"].max()) + 1
-        print(f"Resuming from checkpoint: {model_path}, starting at epoch {start_epoch}")
+            derived_start_epoch = int(prev["epoch"].max()) + 1
+        print(f"Resuming from checkpoint: {model_path}, starting at epoch {derived_start_epoch}")
+    if start_epoch is not None:
+        derived_start_epoch = start_epoch
+        print(f"Start epoch overridden to {derived_start_epoch}")
+    start_epoch = derived_start_epoch
     model = init_model(config, model_path=model_path)
     print("Model is loaded!")
     datasets = init_data(config)
@@ -237,7 +241,7 @@ def main(config_path, resume=False, n_epochs=None, dataset=None):
         validation_accuracy,
         validation_route_accuracy,
         fraction_targets_solved,
-    ) = trainer.train(start_epoch=start_epoch)
+    ) = trainer.train(start_epoch=derived_start_epoch)
     print("Training is completed.")
     end_time = time.time()
     print("Training took: ", (end_time - begin_train_time) / (60 * 60), " hours.")
@@ -279,6 +283,13 @@ if __name__ == "__main__":
         default=None,
         help="Override dataset paths and action_dim in config",
     )
+    parser.add_argument(
+        "--start-epoch",
+        type=int,
+        default=None,
+        dest="start_epoch",
+        help="Override the starting epoch (useful when resuming across mixed-dataset runs)",
+    )
 
     args = parser.parse_args()
     main(
@@ -286,4 +297,5 @@ if __name__ == "__main__":
         resume=args.resume,
         n_epochs=args.n_epochs,
         dataset=args.dataset,
+        start_epoch=args.start_epoch,
     )

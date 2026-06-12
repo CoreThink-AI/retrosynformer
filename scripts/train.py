@@ -33,10 +33,15 @@ if __name__ == "__main__":
         "-d", "--dataset", choices=["small", "standard", "large"], default=None,
         help="Override dataset paths and action_dim in config (small=589, standard=1573, large=2957 templates)",
     )
+    parser.add_argument(
+        "--start-epoch", type=int, default=None, dest="start_epoch",
+        help="Override the starting epoch (useful when resuming across mixed-dataset runs)",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
         resume=args.resume,
         n_epochs=args.n_epochs,
         dataset=args.dataset,
+        start_epoch=args.start_epoch,
     )

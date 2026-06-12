@@ -146,11 +146,8 @@ class RetroTrainer:
             dataloader = self.valid_dataloader
         total_loss = 0
         self.model.eval()
-        actions_id_batch, actions_id_pred_batch, actions_pred_batch = (
-            [],
-            [],
-            [],
-        )
+        # actions_pred_batch = []  # UNUSED!
+        actions_id_batch, actions_id_pred_batch = [], []
         actions_id_batch, actions_id_pred_batch = [], []
         with torch.no_grad():
             for _, data in enumerate(dataloader):
