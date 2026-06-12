@@ -42,28 +42,28 @@ def read_building_blocks(building_block_path):
 
 def plot_train_progress_accuracy(train_results_path, save_as):
     sns.set()
-    train_progress = pd.read_csv(train_results_path)
+    train_progress = pd.read_json(train_results_path, lines=True)
 
     fig = plt.figure()
     plt.plot(
         train_progress["epoch"],
-        train_progress["train_accuracy"],
-        label="train top-1",
+        train_progress["train_action_accuracy"],
+        label="train action accuracy",
     )
     plt.plot(
         train_progress["epoch"],
-        train_progress["valid_accuracy"],
-        label="valid top-1",
+        train_progress["valid_action_accuracy"],
+        label="valid action accuracy",
     )
     plt.plot(
         train_progress["epoch"],
-        train_progress["train_top3_accuracy"],
-        label="train top-3",
+        train_progress["train_route_accuracy"],
+        label="train route accuracy",
     )
     plt.plot(
         train_progress["epoch"],
-        train_progress["valid_top3_accuracy"],
-        label="valid top-3",
+        train_progress["valid_route_accuracy"],
+        label="valid route accuracy",
     )
     plt.ylabel("Accuracy")
     plt.xlabel("Epoch")
@@ -75,7 +75,7 @@ def plot_train_progress_accuracy(train_results_path, save_as):
 
 def plot_train_progress(train_results_path, save_as):
     sns.set()
-    train_progress = pd.read_csv(train_results_path)
+    train_progress = pd.read_json(train_results_path, lines=True)
 
     fig = plt.figure()
     plt.plot(train_progress["epoch"], train_progress["train_loss"], label="train loss")
@@ -216,7 +216,8 @@ def plot_ted_distribution(df, save_as):
 
 def get_stats_table(df):
     solvability = sum(df["route_solved"]) / len(df)
-    top1_accuracy = sum(df["TED to target"] == 0) / len(df)
+    ted_valid = df["TED to target"].dropna()
+    top1_accuracy = sum(ted_valid == 0) / len(df)
 
     min_time = min(df["time"])
     max_time = max(df["time"])
@@ -278,7 +279,7 @@ def get_stats_table(df):
             "Median route reward targets": median_route_reward_targets,
             "Mean route length predictions": mean_route_length_predictions,
             "Mean route length targets": mean_route_length_targets,
-            "Median route length predictions": median_route_reward_predictions,
+            "Median route length predictions": median_route_length_predictions,
             "Median route length targets": median_route_length_targets,
             "Mean TED to target": mean_TED_predictions,
             "Median TED to target": median_TED_predictions,
