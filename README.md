@@ -10,7 +10,7 @@ Start by cloning this repo.
 Then, create and activate the conda environment by executing the following commands at the root of the repository:
 
 ```sh
-uv venv -p 3.10
+uv venv -p 3.12
 source .venv/bin/activate
 uv pip install -e .
 ```
