@@ -194,12 +194,26 @@ def init_model(config, model_path=None):
     return model
 
 
-def main(config_path, resume=False, n_epochs=None):
+DATASET_CONFIGS = {
+    "small":    {"routes": "data/small_routes.json",    "building_blocks": "data/small_building_blocks.csv",    "templates": "data/small_reaction_templates.pickle",    "action_dim": 589},
+    "standard": {"routes": "data/standard_routes.json", "building_blocks": "data/standard_building_blocks.csv", "templates": "data/standard_reaction_templates.pickle", "action_dim": 1573},
+    "large":    {"routes": "data/large_routes.json",    "building_blocks": "data/large_building_blocks.csv",    "templates": "data/large_reaction_templates.pickle",    "action_dim": 2957},
+}
+
+
+def main(config_path, resume=False, n_epochs=None, dataset=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
     if n_epochs is not None:
         config["train"]["n_epochs"] = n_epochs
+    if dataset is not None:
+        ds = DATASET_CONFIGS[dataset]
+        config["dataset"]["routes_path"] = ds["routes"]
+        config["context"]["building_blocks"] = ds["building_blocks"]
+        config["context"]["templates_path"] = ds["templates"]
+        config["dataset"]["action_dim"] = ds["action_dim"]
+        print(f"Dataset override: {dataset} ({ds['action_dim']} templates)")
     model_path = None
     start_epoch = 0
     if resume:
@@ -258,10 +272,18 @@ if __name__ == "__main__":
         default=None,
         help="Override n_epochs from config",
     )
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        choices=["small", "standard", "large"],
+        default=None,
+        help="Override dataset paths and action_dim in config",
+    )
 
     args = parser.parse_args()
     main(
         config_path=args.config_path,
         resume=args.resume,
         n_epochs=args.n_epochs,
+        dataset=args.dataset,
     )
