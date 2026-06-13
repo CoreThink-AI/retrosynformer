@@ -1,6 +1,8 @@
 import argparse
+import random
 import time
 
+import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
@@ -233,6 +235,13 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         derived_start_epoch = start_epoch
         print(f"Start epoch overridden to {derived_start_epoch}")
     start_epoch = derived_start_epoch
+    seed = config["context"]["random_state"]
+    torch.manual_seed(seed)
+    np.random.seed(seed + 1)
+    random.seed(seed + 2)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed + 3)
+
     model = init_model(config, model_path=model_path)
     print("Model is loaded!")
     datasets = init_data(config)
