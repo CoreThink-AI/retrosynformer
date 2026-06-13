@@ -5,6 +5,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+import yaml
 from torch.utils.data import DataLoader
 
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
@@ -208,7 +209,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -225,6 +226,12 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         config["train"]["batch_size"] = batch_size
         config["evaluation"]["batch_size"] = batch_size
         print(f"Batch size override: {batch_size}")
+    if n_heads is not None:
+        config["model"]["n_heads"] = n_heads
+        print(f"n_heads override: {n_heads}")
+    if n_layers is not None:
+        config["model"]["n_layers"] = n_layers
+        print(f"n_layers override: {n_layers}")
     model_path = None
     derived_start_epoch = 0
     if resume:
@@ -239,6 +246,12 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         derived_start_epoch = start_epoch
         print(f"Start epoch overridden to {derived_start_epoch}")
     start_epoch = derived_start_epoch
+    results_path = config["train"]["results_path"].rstrip("/")
+    effective_config_path = results_path + "/model.config.yaml"
+    with open(effective_config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
+    print(f"Effective config saved to {effective_config_path}")
+
     seed = config["context"]["random_state"]
     torch.manual_seed(seed)
     np.random.seed(seed + 1)
@@ -316,6 +329,20 @@ if __name__ == "__main__":
         dest="batch_size",
         help="Override train and eval batch size from config",
     )
+    parser.add_argument(
+        "--n-heads",
+        type=int,
+        default=None,
+        dest="n_heads",
+        help="Override model.n_heads from config",
+    )
+    parser.add_argument(
+        "--n-layers",
+        type=int,
+        default=None,
+        dest="n_layers",
+        help="Override model.n_layers from config",
+    )
 
     args = parser.parse_args()
     main(
@@ -325,4 +352,6 @@ if __name__ == "__main__":
         dataset=args.dataset,
         start_epoch=args.start_epoch,
         batch_size=args.batch_size,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
     )

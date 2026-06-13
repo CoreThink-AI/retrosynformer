@@ -34,6 +34,14 @@ if __name__ == "__main__":
         "-b", "--batch-size", type=int, default=None, dest="batch_size",
         help="Override train and eval batch size from config",
     )
+    parser.add_argument(
+        "--n-heads", type=int, default=None, dest="n_heads",
+        help="Override model.n_heads from config",
+    )
+    parser.add_argument(
+        "--n-layers", type=int, default=None, dest="n_layers",
+        help="Override model.n_layers from config",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
@@ -42,4 +50,6 @@ if __name__ == "__main__":
         dataset=args.dataset,
         start_epoch=args.start_epoch,
         batch_size=args.batch_size,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
     )
