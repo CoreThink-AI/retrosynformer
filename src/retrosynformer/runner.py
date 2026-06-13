@@ -96,7 +96,7 @@ def init_data(config):
         and config["dataset"]["train_fraction"] < 1
     ):
         n = int(len(train_data) * config["dataset"]["train_fraction"])
-        train_data = train_data.sample()
+        train_data = train_data.sample(n=n, random_state=config["context"]["random_state"])
         print(
             f'Training on fraction: {config["dataset"]["train_fraction"]}. Len train data: {len(train_data)}'
         )
