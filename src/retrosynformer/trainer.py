@@ -54,9 +54,10 @@ class RetroTrainer:
 
         rewards = rewards.to(device=self.device, dtype=torch.float32)
 
-        # Calculate the return to go from the rewards
-        cumulative_reward = torch.cumsum(rewards.squeeze(-1), dim=1)  # new
-        rtgs = torch.sum(rewards, dim=1).repeat(1, episode_length) - cumulative_reward
+        # RTG[t] = sum(r[t], r[t+1], ..., r[T]) — inclusive of current step.
+        # Reverse cumsum over the time dimension gives this directly.
+        r = rewards.squeeze(-1)  # (batch, episode_length)
+        rtgs = torch.flip(torch.cumsum(torch.flip(r, dims=[1]), dim=1), dims=[1])
         rtgs = rtgs.unsqueeze(-1).to(
             device=self.device, dtype=torch.float32
         )  # (batch_size, episode_length, 1
