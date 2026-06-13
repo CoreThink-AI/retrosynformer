@@ -169,12 +169,13 @@ def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
     train_batch_size = batch_size or config["train"]["batch_size"]
     eval_batch_size = batch_size or config["evaluation"]["batch_size"]
     num_workers = config["train"].get("num_workers", 0)
+    pin_memory = torch.cuda.is_available()
 
     train_dataloader = DataLoader(
-        train_dataset, train_batch_size, collate_fn=collate_fn, num_workers=num_workers
+        train_dataset, train_batch_size, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory
     )
-    valid_dataloader = DataLoader(valid_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
-    test_dataloader = DataLoader(test_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
+    valid_dataloader = DataLoader(valid_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory)
+    test_dataloader = DataLoader(test_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory)
     return train_dataloader, valid_dataloader, test_dataloader
 
 
