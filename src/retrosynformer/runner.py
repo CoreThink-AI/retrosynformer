@@ -209,7 +209,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -232,6 +232,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if n_layers is not None:
         config["model"]["n_layers"] = n_layers
         print(f"n_layers override: {n_layers}")
+    if seed is not None:
+        config["context"]["random_state"] = seed
+        print(f"seed override: {seed}")
     model_path = None
     derived_start_epoch = 0
     if resume:
@@ -351,6 +354,13 @@ if __name__ == "__main__":
         dest="n_layers",
         help="Override model.n_layers from config",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        dest="seed",
+        help="Override context.random_state from config",
+    )
 
     args = parser.parse_args()
     main(
@@ -362,4 +372,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
+        seed=args.seed,
     )

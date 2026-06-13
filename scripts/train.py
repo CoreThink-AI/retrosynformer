@@ -42,6 +42,10 @@ if __name__ == "__main__":
         "--n-layers", type=int, default=None, dest="n_layers",
         help="Override model.n_layers from config",
     )
+    parser.add_argument(
+        "--seed", type=int, default=None, dest="seed",
+        help="Override context.random_state from config",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
@@ -52,4 +56,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
+        seed=args.seed,
     )
