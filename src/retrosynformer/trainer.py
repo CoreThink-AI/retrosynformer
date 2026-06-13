@@ -33,7 +33,7 @@ class RetroTrainer:
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, "min"
         )
-        self.loss_fn = torch.nn.CrossEntropyLoss()
+        self.loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
     def unpack_data(self, data):
 
@@ -114,7 +114,7 @@ class RetroTrainer:
 
             actions_id_pred = action_preds.argmax(dim=-1)
 
-            loss = self.loss_fn(action_preds, actions)
+            loss = self.loss_fn(action_preds, actions) / attention_mask.sum()
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
@@ -147,8 +147,6 @@ class RetroTrainer:
             dataloader = self.valid_dataloader
         total_loss = 0
         self.model.eval()
-        # actions_pred_batch = []  # UNUSED!
-        actions_id_batch, actions_id_pred_batch = [], []
         actions_id_batch, actions_id_pred_batch = [], []
         with torch.no_grad():
             for _, data in enumerate(dataloader):
@@ -179,7 +177,7 @@ class RetroTrainer:
                 ]
                 actions_id_pred_batch.extend(filtered_actions_id_pred)
 
-                loss = self.loss_fn(action_preds, actions)
+                loss = self.loss_fn(action_preds, actions) / attention_mask.sum()
                 total_loss += loss.item()
 
             flat_actions_id_batch = utils.flatten(actions_id_batch)
