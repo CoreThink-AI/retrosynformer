@@ -19,6 +19,7 @@ evaluation:
   max_depth: 6
   test_frac: 0.1
   sort_on: trajectory_prob
+  ted_exhaustive_limit: 64
 model:
   action_tanh: false
   activation_function: relu
