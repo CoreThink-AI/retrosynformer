@@ -211,11 +211,13 @@ class RetroGymEnvironment:
             if done:
                 n_open_reactants -= 1
 
-        is_branching = True if n_open_reactants > 1 else False
+        is_branching = n_open_reactants > 1
         if is_branching:
             self.number_of_branchings += 1
 
-        self._get_reward(n=len(reactants))
+        reward = self._get_reward(n=len(reactants))
+        branch_done = n_open_reactants == 0
+        return reward, branch_done
 
     def _check_if_branch_done(self, reactant):
         is_building_block = self.check_if_building_block(reactant)
