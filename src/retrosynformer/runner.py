@@ -186,10 +186,13 @@ def init_model(config, model_path=None):
     dt_config.state_dim = state_dim
     dt_config.max_ep_len = config["model"]["max_ep_len"]
     dt_config.hidden_size = config["model"]["hidden_size"]
-    dt_config.n_layers = config["model"]["n_layers"]
-    dt_config.n_heads = config["model"]["n_heads"]
+    dt_config.n_layer = config["model"]["n_layers"]
+    dt_config.n_head = config["model"]["n_heads"]
     dt_config.activation_function = config["model"]["activation_function"]
     dt_config.action_tanh = config["model"]["action_tanh"]
+    dt_config.attn_pdrop = config["model"]["attn_pdrop"]
+    dt_config.embd_pdrop = config["model"]["embd_pdrop"]
+    dt_config.resid_pdrop = config["model"]["resid_pdrop"]
 
     model = DecisionTransformerModel(dt_config)
     if model_path:
