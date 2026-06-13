@@ -37,7 +37,7 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int) -> float:
 
     _, _, _, fraction_solved = train(
         config_path=config_path,
-        dataset="small",
+        dataset="large",
         n_epochs=n_epochs,
         n_heads=n_heads,
         n_layers=n_layers,
