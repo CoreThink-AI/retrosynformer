@@ -1,6 +1,6 @@
 [project]
 name = "retrosynformer"
-version = "0.1.1"
+version = "0.1.2"
 description = "RetroSynFormer"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -47,7 +47,15 @@ amdgpu = [
     "torch>=2.12.0",
 ]
 
+# Development / testing:  uv sync --extra dev
+dev = [
+    "pytest>=8",
+]
+
 # uv resolves torch from the ROCm index when the amdgpu extra is active
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.uv.sources]
 torch = [
     { index = "pytorch-rocm", extra = "amdgpu" },
