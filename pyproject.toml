@@ -22,6 +22,7 @@ dependencies = [
     "dask",
     "dill",
     "numpy",
+    "optuna",
     "pandas",
     "partd",
     "rdkit",

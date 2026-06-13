@@ -187,7 +187,7 @@ def init_model(config, model_path=None):
     state_dim = int(config["dataset"]["fp_dim"] * config["dataset"]["n_in_state"])
     dt_config.state_dim = state_dim
     dt_config.max_ep_len = config["model"]["max_ep_len"]
-    dt_config.hidden_size = config["model"]["hidden_size"]
+    dt_config.hidden_size = config["model"]["hidden_size"]  # derived: n_heads * head_dim
     dt_config.n_layer = config["model"]["n_layers"]
     dt_config.n_head = config["model"]["n_heads"]
     dt_config.activation_function = config["model"]["activation_function"]
@@ -209,7 +209,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -235,6 +235,15 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if seed is not None:
         config["context"]["random_state"] = seed
         print(f"seed override: {seed}")
+    if head_dim is not None:
+        config["model"]["head_dim"] = head_dim
+        print(f"head_dim override: {head_dim}")
+    if results_path is not None:
+        config["train"]["results_path"] = results_path
+        print(f"results_path override: {results_path}")
+    # Derive hidden_size from n_heads * head_dim whenever head_dim is present in config.
+    if "head_dim" in config["model"]:
+        config["model"]["hidden_size"] = config["model"]["n_heads"] * config["model"]["head_dim"]
     model_path = None
     derived_start_epoch = 0
     if resume:
@@ -361,6 +370,13 @@ if __name__ == "__main__":
         dest="seed",
         help="Override context.random_state from config",
     )
+    parser.add_argument(
+        "--head-dim",
+        type=int,
+        default=None,
+        dest="head_dim",
+        help="Override model.head_dim from config (hidden_size = n_heads * head_dim)",
+    )
 
     args = parser.parse_args()
     main(
@@ -373,4 +389,5 @@ if __name__ == "__main__":
         n_heads=args.n_heads,
         n_layers=args.n_layers,
         seed=args.seed,
+        head_dim=args.head_dim,
     )
