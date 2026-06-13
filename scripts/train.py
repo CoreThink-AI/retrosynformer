@@ -50,6 +50,14 @@ if __name__ == "__main__":
         "--head-dim", type=int, default=None, dest="head_dim",
         help="Override model.head_dim from config (hidden_size = n_heads * head_dim)",
     )
+    parser.add_argument(
+        "--lr", type=float, default=None, dest="lr",
+        help="Override optimizer.lr from config",
+    )
+    parser.add_argument(
+        "--dropout", type=float, default=None, dest="dropout",
+        help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
@@ -62,4 +70,6 @@ if __name__ == "__main__":
         n_layers=args.n_layers,
         seed=args.seed,
         head_dim=args.head_dim,
+        lr=args.lr,
+        dropout=args.dropout,
     )

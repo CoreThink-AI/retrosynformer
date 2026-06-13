@@ -209,7 +209,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -241,6 +241,14 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if results_path is not None:
         config["train"]["results_path"] = results_path
         print(f"results_path override: {results_path}")
+    if lr is not None:
+        config["optimizer"]["lr"] = lr
+        print(f"lr override: {lr}")
+    if dropout is not None:
+        config["model"]["attn_pdrop"] = dropout
+        config["model"]["embd_pdrop"] = dropout
+        config["model"]["resid_pdrop"] = dropout
+        print(f"dropout override: {dropout} (attn/embd/resid)")
     # Derive hidden_size from n_heads * head_dim whenever head_dim is present in config.
     if "head_dim" in config["model"]:
         config["model"]["hidden_size"] = config["model"]["n_heads"] * config["model"]["head_dim"]
@@ -377,6 +385,20 @@ if __name__ == "__main__":
         dest="head_dim",
         help="Override model.head_dim from config (hidden_size = n_heads * head_dim)",
     )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        dest="lr",
+        help="Override optimizer.lr from config",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=None,
+        dest="dropout",
+        help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
+    )
 
     args = parser.parse_args()
     main(
@@ -390,4 +412,6 @@ if __name__ == "__main__":
         n_layers=args.n_layers,
         seed=args.seed,
         head_dim=args.head_dim,
+        lr=args.lr,
+        dropout=args.dropout,
     )

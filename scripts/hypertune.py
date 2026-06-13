@@ -20,13 +20,15 @@ CONFIG_PATH_DEFAULT = "results/config.yaml"
 RESULTS_BASE = "results/hypertune"
 
 # Fixed first trial — matches early taco-branch architecture for comparison.
-BASELINE_TRIAL = {"n_heads": 1, "n_layers": 3, "head_dim": 256}
+BASELINE_TRIAL = {"n_heads": 1, "n_layers": 3, "head_dim": 256, "lr": 0.211, "dropout": 0.1}
 
 
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int) -> float:
     n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
-    n_layers = trial.suggest_int("n_layers", 2, 32)
+    n_layers = trial.suggest_int("n_layers", 2, 32, log=True)
     head_dim = trial.suggest_categorical("head_dim", [64, 128, 256])
+    lr = trial.suggest_float("lr", 1e-4, 1.0, log=True)
+    dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.01)
 
     trial_dir = os.path.join(RESULTS_BASE, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
@@ -38,6 +40,8 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int) -> float:
         n_heads=n_heads,
         n_layers=n_layers,
         head_dim=head_dim,
+        lr=lr,
+        dropout=dropout,
         results_path=trial_dir,
     )
 
