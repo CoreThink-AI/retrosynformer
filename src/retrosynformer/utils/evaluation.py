@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 
 import matplotlib.colors as clr
 import matplotlib.pyplot as plt
@@ -348,7 +349,10 @@ def get_average_table(summary_paths):
 
 def main(result_dir, file_type="json", target_set=None):
     print("in main: ", result_dir, target_set)
-    config = utils.read_config(result_dir + "/config.yaml")
+    cfg_path = result_dir + "/config.yaml"
+    if not os.path.exists(cfg_path):
+        cfg_path = result_dir + "/model.config.yaml"
+    config = utils.read_config(cfg_path)
     if file_type == "json":
         if target_set == "n1":
             print("n1 loaded")

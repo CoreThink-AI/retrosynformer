@@ -307,7 +307,10 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     end_time = time.time()
     print("Training took: ", (end_time - begin_train_time) / (60 * 60), " hours.")
     result_dir = config["train"]["results_path"]
-    evaluation.main(result_dir=result_dir)
+    try:
+        evaluation.main(result_dir=result_dir)
+    except Exception as exc:
+        logger.error("Post-training evaluation failed (non-fatal): %s", exc)
 
     return (
         validation_loss,
