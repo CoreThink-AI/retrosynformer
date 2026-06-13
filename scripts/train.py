@@ -2,14 +2,7 @@
 """Train RetroSynFormer. Requires the retrosynformer package to be installed."""
 import argparse
 
-try:
-    from retrosynformer.runner import main
-except ImportError:
-    raise SystemExit(
-        "retrosynformer package not found. Install it first:\n"
-        "  uv sync\n"
-        "  # or: pip install -e ."
-    )
+from retrosynformer.runner import main
 
 DATASET_CONFIGS = {
     "small":    {"routes": "data/small_routes.json",    "building_blocks": "data/small_building_blocks.csv",    "templates": "data/small_reaction_templates.pickle",    "action_dim": 589},
