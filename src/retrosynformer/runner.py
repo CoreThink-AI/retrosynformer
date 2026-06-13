@@ -181,7 +181,7 @@ def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
 
 def init_model(config, model_path=None):
 
-    dt_config = DecisionTransformerConfig()
+    dt_config = DecisionTransformerConfig(bos_token_id=None, eos_token_id=None)
     dt_config.act_dim = config["dataset"]["action_dim"]
     state_dim = int(config["dataset"]["fp_dim"] * config["dataset"]["n_in_state"])
     dt_config.state_dim = state_dim
