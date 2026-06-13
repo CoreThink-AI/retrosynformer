@@ -101,6 +101,6 @@ dependencies = [
 #      "retrosynformer",
 # ]
 
-[tool.uv]
-exclude-newer="3 weeks"
+# [tool.uv]
+# exclude-newer="3 weeks"
 
