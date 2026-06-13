@@ -224,7 +224,7 @@ def get_stats_table(df):
     median_time = np.median(df["time"])
     mean_time = np.mean(df["time"])
 
-    df = df[df["route_solved"] == True]
+    df = df[df["route_solved"] == True].copy()
     df.loc[:, "total_pred_reward"] = [
         sum(rewards) for rewards in df["predicted_rewards"]
     ]

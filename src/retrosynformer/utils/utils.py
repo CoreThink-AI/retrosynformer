@@ -11,6 +11,7 @@ import yaml
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rxnutils.routes import base, readers
+from rxnutils.routes.ted.reactiontree import ReactionTreeWrapper
 
 
 def flatten(xss):
@@ -208,6 +209,24 @@ def convert_batches_to_action_ids_batch(actions, action_preds):
         actions_id,
         actions_id_pred,
     )  # action_preds
+
+
+def make_ted_calculator(exhaustive_limit=20, content="both"):
+    """Return a TED calculator with a configurable exhaustive_limit.
+
+    The default rxnutils ted_distances_calculator hardcodes exhaustive_limit=20.
+    This factory passes the limit through to both ReactionTreeWrapper (pre-enumeration)
+    and distance_to (pairwise comparison).
+    """
+    def calculator(routes):
+        distances = np.zeros([len(routes), len(routes)])
+        wrappers = [ReactionTreeWrapper(r, content, exhaustive_limit=exhaustive_limit) for r in routes]
+        for i, iw in enumerate(wrappers):
+            for j, jw in enumerate(wrappers[i + 1:], i + 1):
+                distances[i, j] = iw.distance_to(jw, exhaustive_limit=exhaustive_limit)
+                distances[j, i] = distances[i, j]
+        return distances
+    return calculator
 
 
 def calculate_ted(calculator, route, target_routes):

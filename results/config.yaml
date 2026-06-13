@@ -19,12 +19,13 @@ evaluation:
   max_depth: 6
   test_frac: 0.1
   sort_on: trajectory_prob
+  ted_exhaustive_limit: 64
 model:
   action_tanh: false
   activation_function: relu
   attn_pdrop: 0.02
   embd_pdrop: 0.2
-  hidden_size: 256
+  head_dim: 256
   max_ep_len: 20
   n_heads: 4
   n_layers: 26

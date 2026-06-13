@@ -34,6 +34,30 @@ if __name__ == "__main__":
         "-b", "--batch-size", type=int, default=None, dest="batch_size",
         help="Override train and eval batch size from config",
     )
+    parser.add_argument(
+        "--n-heads", type=int, default=None, dest="n_heads",
+        help="Override model.n_heads from config",
+    )
+    parser.add_argument(
+        "--n-layers", type=int, default=None, dest="n_layers",
+        help="Override model.n_layers from config",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, dest="seed",
+        help="Override context.random_state from config",
+    )
+    parser.add_argument(
+        "--head-dim", type=int, default=None, dest="head_dim",
+        help="Override model.head_dim from config (hidden_size = n_heads * head_dim)",
+    )
+    parser.add_argument(
+        "--lr", type=float, default=None, dest="lr",
+        help="Override optimizer.lr from config",
+    )
+    parser.add_argument(
+        "--dropout", type=float, default=None, dest="dropout",
+        help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
@@ -42,4 +66,10 @@ if __name__ == "__main__":
         dataset=args.dataset,
         start_epoch=args.start_epoch,
         batch_size=args.batch_size,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
+        seed=args.seed,
+        head_dim=args.head_dim,
+        lr=args.lr,
+        dropout=args.dropout,
     )

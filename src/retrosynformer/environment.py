@@ -284,9 +284,8 @@ class RetroGymEnvironment:
         return building_block
 
     def _decide_reactant_order(self, reactants):
-        """Simple sorting function based on alphabetical order."""
-        reactants.sort(key=len, reverse=True)
-
+        """Sort reactants lexicographically for a canonical, unambiguous ordering."""
+        reactants.sort()
         return reactants
 
 

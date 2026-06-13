@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 import tqdm
 from rdkit import Chem
-from rxnutils.routes import base, comparison
+from rxnutils.routes import base
 
 from .data import convert_smiles_states_to_fp
 from .environment import RetroGymEnvironment
@@ -26,7 +26,8 @@ class RoutePredictor:
         self.softmax = torch.nn.Softmax(dim=-1)
         self.templates_df = pd.read_pickle(self.config["context"]["templates_path"])
         self.reward_mapping = reward_functions.get_reward_mapping(config)
-        self.calculator = comparison.route_distances_calculator("ted")
+        exhaustive_limit = config["evaluation"].get("ted_exhaustive_limit", 20)
+        self.calculator = utils.make_ted_calculator(exhaustive_limit=exhaustive_limit)
         self.softmax = torch.nn.Softmax(dim=-1)
         self.max_depth = self.config["evaluation"]["max_depth"]
         self.result_df = pd.DataFrame({})

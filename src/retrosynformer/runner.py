@@ -1,8 +1,11 @@
 import argparse
+import random
 import time
 
+import numpy as np
 import pandas as pd
 import torch
+import yaml
 from torch.utils.data import DataLoader
 
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
@@ -96,7 +99,7 @@ def init_data(config):
         and config["dataset"]["train_fraction"] < 1
     ):
         n = int(len(train_data) * config["dataset"]["train_fraction"])
-        train_data = train_data.sample()
+        train_data = train_data.sample(n=n, random_state=config["context"]["random_state"])
         print(
             f'Training on fraction: {config["dataset"]["train_fraction"]}. Len train data: {len(train_data)}'
         )
@@ -167,12 +170,13 @@ def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
     train_batch_size = batch_size or config["train"]["batch_size"]
     eval_batch_size = batch_size or config["evaluation"]["batch_size"]
     num_workers = config["train"].get("num_workers", 0)
+    pin_memory = torch.cuda.is_available()
 
     train_dataloader = DataLoader(
-        train_dataset, train_batch_size, collate_fn=collate_fn, num_workers=num_workers
+        train_dataset, train_batch_size, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory
     )
-    valid_dataloader = DataLoader(valid_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
-    test_dataloader = DataLoader(test_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
+    valid_dataloader = DataLoader(valid_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory)
+    test_dataloader = DataLoader(test_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers, pin_memory=pin_memory)
     return train_dataloader, valid_dataloader, test_dataloader
 
 
@@ -183,11 +187,14 @@ def init_model(config, model_path=None):
     state_dim = int(config["dataset"]["fp_dim"] * config["dataset"]["n_in_state"])
     dt_config.state_dim = state_dim
     dt_config.max_ep_len = config["model"]["max_ep_len"]
-    dt_config.hidden_size = config["model"]["hidden_size"]
-    dt_config.n_layers = config["model"]["n_layers"]
-    dt_config.n_heads = config["model"]["n_heads"]
+    dt_config.hidden_size = config["model"]["hidden_size"]  # derived: n_heads * head_dim
+    dt_config.n_layer = config["model"]["n_layers"]
+    dt_config.n_head = config["model"]["n_heads"]
     dt_config.activation_function = config["model"]["activation_function"]
     dt_config.action_tanh = config["model"]["action_tanh"]
+    dt_config.attn_pdrop = config["model"]["attn_pdrop"]
+    dt_config.embd_pdrop = config["model"]["embd_pdrop"]
+    dt_config.resid_pdrop = config["model"]["resid_pdrop"]
 
     model = DecisionTransformerModel(dt_config)
     if model_path:
@@ -202,7 +209,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -219,6 +226,32 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         config["train"]["batch_size"] = batch_size
         config["evaluation"]["batch_size"] = batch_size
         print(f"Batch size override: {batch_size}")
+    if n_heads is not None:
+        config["model"]["n_heads"] = n_heads
+        print(f"n_heads override: {n_heads}")
+    if n_layers is not None:
+        config["model"]["n_layers"] = n_layers
+        print(f"n_layers override: {n_layers}")
+    if seed is not None:
+        config["context"]["random_state"] = seed
+        print(f"seed override: {seed}")
+    if head_dim is not None:
+        config["model"]["head_dim"] = head_dim
+        print(f"head_dim override: {head_dim}")
+    if results_path is not None:
+        config["train"]["results_path"] = results_path
+        print(f"results_path override: {results_path}")
+    if lr is not None:
+        config["optimizer"]["lr"] = lr
+        print(f"lr override: {lr}")
+    if dropout is not None:
+        config["model"]["attn_pdrop"] = dropout
+        config["model"]["embd_pdrop"] = dropout
+        config["model"]["resid_pdrop"] = dropout
+        print(f"dropout override: {dropout} (attn/embd/resid)")
+    # Derive hidden_size from n_heads * head_dim whenever head_dim is present in config.
+    if "head_dim" in config["model"]:
+        config["model"]["hidden_size"] = config["model"]["n_heads"] * config["model"]["head_dim"]
     model_path = None
     derived_start_epoch = 0
     if resume:
@@ -233,6 +266,27 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         derived_start_epoch = start_epoch
         print(f"Start epoch overridden to {derived_start_epoch}")
     start_epoch = derived_start_epoch
+
+    # Write all effective values back into config before saving so that
+    # model.config.yaml always reflects what was actually used.
+    config["train"]["start_epoch"] = derived_start_epoch
+    config["train"]["resume"] = resume
+    if dataset is not None:
+        config["dataset"]["dataset_name"] = dataset
+
+    results_path = config["train"]["results_path"].rstrip("/")
+    effective_config_path = results_path + "/model.config.yaml"
+    with open(effective_config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
+    print(f"Effective config saved to {effective_config_path}")
+
+    seed = config["context"]["random_state"]
+    torch.manual_seed(seed)
+    np.random.seed(seed + 1)
+    random.seed(seed + 2)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed + 3)
+
     model = init_model(config, model_path=model_path)
     print("Model is loaded!")
     datasets = init_data(config)
@@ -303,6 +357,48 @@ if __name__ == "__main__":
         dest="batch_size",
         help="Override train and eval batch size from config",
     )
+    parser.add_argument(
+        "--n-heads",
+        type=int,
+        default=None,
+        dest="n_heads",
+        help="Override model.n_heads from config",
+    )
+    parser.add_argument(
+        "--n-layers",
+        type=int,
+        default=None,
+        dest="n_layers",
+        help="Override model.n_layers from config",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        dest="seed",
+        help="Override context.random_state from config",
+    )
+    parser.add_argument(
+        "--head-dim",
+        type=int,
+        default=None,
+        dest="head_dim",
+        help="Override model.head_dim from config (hidden_size = n_heads * head_dim)",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        dest="lr",
+        help="Override optimizer.lr from config",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=None,
+        dest="dropout",
+        help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
+    )
 
     args = parser.parse_args()
     main(
@@ -312,4 +408,10 @@ if __name__ == "__main__":
         dataset=args.dataset,
         start_epoch=args.start_epoch,
         batch_size=args.batch_size,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
+        seed=args.seed,
+        head_dim=args.head_dim,
+        lr=args.lr,
+        dropout=args.dropout,
     )
