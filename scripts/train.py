@@ -37,6 +37,10 @@ if __name__ == "__main__":
         "--start-epoch", type=int, default=None, dest="start_epoch",
         help="Override the starting epoch (useful when resuming across mixed-dataset runs)",
     )
+    parser.add_argument(
+        "-b", "--batch-size", type=int, default=None, dest="batch_size",
+        help="Override train and eval batch size from config",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
@@ -44,4 +48,5 @@ if __name__ == "__main__":
         n_epochs=args.n_epochs,
         dataset=args.dataset,
         start_epoch=args.start_epoch,
+        batch_size=args.batch_size,
     )

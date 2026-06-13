@@ -161,17 +161,18 @@ def create_dataloaders_n1_n5(datasets, config, shuffle=False):
     return n1_dataloader, n5_dataloader
 
 
-def create_dataloaders(datasets, config, shuffle=False):
+def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
     train_dataset, valid_dataset, test_dataset = datasets
 
-    train_batch_size = config["train"]["batch_size"]
-    eval_batch_size = config["evaluation"]["batch_size"]
+    train_batch_size = batch_size or config["train"]["batch_size"]
+    eval_batch_size = batch_size or config["evaluation"]["batch_size"]
+    num_workers = config["train"].get("num_workers", 0)
 
     train_dataloader = DataLoader(
-        train_dataset, train_batch_size, collate_fn=collate_fn
+        train_dataset, train_batch_size, collate_fn=collate_fn, num_workers=num_workers
     )
-    valid_dataloader = DataLoader(valid_dataset, eval_batch_size, collate_fn=collate_fn)
-    test_dataloader = DataLoader(test_dataset, eval_batch_size, collate_fn=collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
+    test_dataloader = DataLoader(test_dataset, eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
     return train_dataloader, valid_dataloader, test_dataloader
 
 
@@ -201,7 +202,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -214,6 +215,10 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         config["context"]["templates_path"] = ds["templates"]
         config["dataset"]["action_dim"] = ds["action_dim"]
         print(f"Dataset override: {dataset} ({ds['action_dim']} templates)")
+    if batch_size is not None:
+        config["train"]["batch_size"] = batch_size
+        config["evaluation"]["batch_size"] = batch_size
+        print(f"Batch size override: {batch_size}")
     model_path = None
     derived_start_epoch = 0
     if resume:
@@ -232,7 +237,7 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     print("Model is loaded!")
     datasets = init_data(config)
     print("Dataset loaded!")
-    dataloaders = create_dataloaders(datasets, config)
+    dataloaders = create_dataloaders(datasets, config, batch_size=batch_size)
     begin_train_time = time.time()
     print("Begin training after: ", (begin_train_time - start_time) / 60, " minutes.")
     trainer = RetroTrainer(dataloaders, model, config)
@@ -290,6 +295,14 @@ if __name__ == "__main__":
         dest="start_epoch",
         help="Override the starting epoch (useful when resuming across mixed-dataset runs)",
     )
+    parser.add_argument(
+        "-b",
+        "--batch-size",
+        type=int,
+        default=None,
+        dest="batch_size",
+        help="Override train and eval batch size from config",
+    )
 
     args = parser.parse_args()
     main(
@@ -298,4 +311,5 @@ if __name__ == "__main__":
         n_epochs=args.n_epochs,
         dataset=args.dataset,
         start_epoch=args.start_epoch,
+        batch_size=args.batch_size,
     )
