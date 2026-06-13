@@ -246,6 +246,14 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         derived_start_epoch = start_epoch
         print(f"Start epoch overridden to {derived_start_epoch}")
     start_epoch = derived_start_epoch
+
+    # Write all effective values back into config before saving so that
+    # model.config.yaml always reflects what was actually used.
+    config["train"]["start_epoch"] = derived_start_epoch
+    config["train"]["resume"] = resume
+    if dataset is not None:
+        config["dataset"]["dataset_name"] = dataset
+
     results_path = config["train"]["results_path"].rstrip("/")
     effective_config_path = results_path + "/model.config.yaml"
     with open(effective_config_path, "w") as f:
