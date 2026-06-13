@@ -9,6 +9,7 @@ Usage:
     python scripts/hypertune.py -c results/config.yaml [--n-trials 20]
 """
 import argparse
+import csv
 import os
 
 import optuna
@@ -18,6 +19,7 @@ from retrosynformer.runner import main as train
 
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 RESULTS_BASE = "results/hypertune"
+TRIALS_CSV = os.path.join(RESULTS_BASE, "trials.csv")
 
 # Fixed first trial — matches early taco-branch architecture for comparison.
 BASELINE_TRIAL = {"n_heads": 1, "n_layers": 3, "head_dim": 256, "lr": 0.211, "dropout": 0.1}
@@ -84,9 +86,22 @@ def main():
     # Pin the first trial to the taco-branch baseline for direct comparison.
     study.enqueue_trial(BASELINE_TRIAL)
 
+    def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        """Append one row per completed trial to trials.csv."""
+        if trial.state != optuna.trial.TrialState.COMPLETE:
+            return
+        row = {"trial": trial.number, "value": trial.value, **trial.params}
+        write_header = not os.path.exists(TRIALS_CSV)
+        with open(TRIALS_CSV, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=row.keys())
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+
     study.optimize(
         lambda trial: objective(trial, args.config_path, args.n_epochs),
         n_trials=args.n_trials,
+        callbacks=[log_trial],
     )
 
     print("\n=== Best trial ===")
