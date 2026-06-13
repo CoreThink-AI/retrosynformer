@@ -1,17 +1,19 @@
 import copy
+import logging
 import time
 from collections import namedtuple
 from operator import attrgetter
 
 import pandas as pd
 import torch
-import tqdm
 from rdkit import Chem
 from rxnutils.routes import base
 
 from .data import convert_smiles_states_to_fp
 from .environment import RetroGymEnvironment
 from .utils import reward_functions, utils
+
+logger = logging.getLogger(__name__)
 
 
 class RoutePredictor:
@@ -79,12 +81,10 @@ class RoutePredictor:
         timesteps = torch.zeros((1, 1))
         attention_mask = torch.ones((1, 1)).to(self.device)
 
-        logits_unmasked = []
-        logits = []
         episode_length = 1
         batch_size = 1
 
-        actions_tensor = actions.to(
+        actions.to(
             device=self.device, dtype=torch.float32
         )  # (batch_size, episode_length, state_dim)
         rtgs_tensor = rtgs_tensor.to(
@@ -233,7 +233,7 @@ class RoutePredictor:
             top50_action_idx[available_actions]
         ]
 
-        if type(avail_actions) == str:
+        if isinstance(avail_actions, str):
             avail_actions = [avail_actions]
         else:
             avail_actions = avail_actions.tolist()
@@ -395,7 +395,8 @@ class RoutePredictor:
                                 most_similar_target_route_idx
                             ]
                             route["valid_route"] = True
-                        except:
+                        except Exception as exc:
+                            logger.error(exc)
                             route["valid_route"] = False
                     else:
                         route["route_solved"] = False

@@ -1,8 +1,11 @@
 import copy
+import logging
 
 from rdkit import Chem
 
 from .utils import utils
+
+logger = logging.getLogger(__name__)
 
 
 class RetroGymEnvironment:
@@ -132,28 +135,26 @@ class RetroGymEnvironment:
         return route_done
 
     def step(self, action):
-        branch_done = False
-        route_done = self._check_if_route_done()
+        self._check_if_route_done()
         reactants = []
 
         if action == 0 or action[0] == "<eos>":
             ordered_reactants = []
-            reward = 0
-            branch_done = True
             self.rewards.append(0)
             return ordered_reactants
         template = None
-        if type(action) == int:
+        if isinstance(action, int):
             templates = self.action2template[action]
-        elif type(action) == list:
+        elif isinstance(action, list):
             templates = action
-        elif type(action) == str:
+        elif isinstance(action, str):
             templates = [action]
         product_smiles = self.state[-1][0]
         for template in templates:
             try:
                 reactants = utils.apply_template(template, product_smiles)
-            except:
+            except Exception as exc:
+                logger.error(exc)
                 print(
                     "reactants = apply_template(template, product_smiles) command failed"
                 )
@@ -192,9 +193,8 @@ class RetroGymEnvironment:
             print("State is empty. Route already done.")
             return self.rewards, True
 
-        branch_done = False
         self.visited_intermediates_branch = self.state.pop()
-        assert type(self.visited_intermediates_branch) == list
+        assert isinstance(self.visited_intermediates_branch, list)
         # adjust the depth and branching parameter
         self.current_depth += 1
         if self.current_depth > self.route_depth:

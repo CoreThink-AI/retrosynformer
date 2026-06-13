@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 import matplotlib.colors as clr
 import matplotlib.pyplot as plt
@@ -8,6 +9,8 @@ import seaborn as sns
 from rdkit import Chem
 
 from . import utils
+
+logger = logging.getLogger(__name__)
 
 cmap1 = clr.LinearSegmentedColormap.from_list(
     "custom blue red", ["#6BAED6", "#DF9076"], N=256
@@ -32,11 +35,6 @@ sns.set_style("whitegrid")
 plt.tight_layout()
 
 
-def read_building_blocks(building_block_path):
-    return pd.read_csv(building_block_path)["inchi_key"].tolist()
-
-
-
 # ----------- PLOT RESULTS -----------
 
 
@@ -44,7 +42,7 @@ def plot_train_progress_accuracy(train_results_path, save_as):
     sns.set()
     train_progress = pd.read_json(train_results_path, lines=True)
 
-    fig = plt.figure()
+    plt.figure()
     plt.plot(
         train_progress["epoch"],
         train_progress["train_action_accuracy"],
@@ -77,7 +75,7 @@ def plot_train_progress(train_results_path, save_as):
     sns.set()
     train_progress = pd.read_json(train_results_path, lines=True)
 
-    fig = plt.figure()
+    plt.figure()
     plt.plot(train_progress["epoch"], train_progress["train_loss"], label="train loss")
     plt.plot(train_progress["epoch"], train_progress["valid_loss"], label="valid loss")
     plt.ylabel("Loss")
@@ -102,7 +100,7 @@ def plot_evaluation_results(evaluation_results_path, save_as):
         percent_solved.append(solved * 100)
 
     sns.set()
-    fig = plt.figure()
+    plt.figure()
     plt.plot(epochs, percent_solved, marker="o", label="Percent targets solved")
     plt.ylabel("% targets solved")
     plt.xlabel("Epoch")
@@ -134,7 +132,7 @@ def plot_reward_distribution(df, save_as):
         ignore_index=True,
     )
 
-    fig = plt.figure()
+    plt.figure()
     sns.histplot(df_rewards, x="Route reward", hue="Route set", bins=20)
     # plt.legend()
     plt.tight_layout()
@@ -144,10 +142,10 @@ def plot_reward_distribution(df, save_as):
 
 def plot_length_distribution(df, save_as):
 
-    new_name_pred_len = (
+    (
         f"Route length predictions, median = {np.median(df['len_predicted_actions'])}"
     )
-    new_name_target_len = (
+    (
         f"Route length targets, median = {np.median(df['len_target_actions'])}"
     )
 
@@ -170,7 +168,7 @@ def plot_length_distribution(df, save_as):
         ignore_index=True,
     )
 
-    fig = plt.figure()
+    plt.figure()
     sns.histplot(df_lengths, x="Route length", hue="Route set", bins=10)
     plt.tight_layout()
     plt.savefig(save_as)
@@ -178,14 +176,14 @@ def plot_length_distribution(df, save_as):
 
 
 def plot_ted_distribution(df, save_as):
-    new_name_solved_ted = (
+    (
         f"Tree Edit Distance solved routes, median = {np.median(df['TED to target'])}"
     )
-    new_name_unsolved_ted = (
+    (
         f"Tree Edit Distance unsolved routes, median = {np.median(df['TED to target'])}"
     )
-    df_solved = df[df["route_solved"] == True]
-    df_unsolved = df[df["route_solved"] == False]
+    df_solved = df[df["route_solved"]]
+    df_unsolved = df[not df["route_solved"]]
     df_ted = pd.DataFrame(
         {
             "TED to target": df_unsolved["TED to target"],
@@ -224,7 +222,7 @@ def get_stats_table(df):
     median_time = np.median(df["time"])
     mean_time = np.mean(df["time"])
 
-    df = df[df["route_solved"] == True].copy()
+    df = df[df["route_solved"]].copy()
     df.loc[:, "total_pred_reward"] = [
         sum(rewards) for rewards in df["predicted_rewards"]
     ]
@@ -250,8 +248,8 @@ def get_stats_table(df):
     mean_TED_predictions = np.mean(df["TED to target"])
     median_TED_predictions = np.median(df["TED to target"])
 
-    mean_n_leafs_prediction = np.mean([len(l) for l in df["leafs"]])
-    median_n_leafs_prediction = np.median([len(l) for l in df["leafs"]])
+    mean_n_leafs_prediction = np.mean([len(leafs) for leafs in df["leafs"]])
+    median_n_leafs_prediction = np.median([len(leafs) for leafs in df["leafs"]])
 
     mean_branches_prediction = np.mean(df["n_branchings"])
     median_branches_prediction = np.median(df["n_branchings"])
@@ -300,7 +298,7 @@ def check_route_leafs(rxn, bb):
     is_not_bb = []
     # print(rxn)
     for i in str(rxn).split("'smiles': '"):
-        if not "children" in i:
+        if "children" not in i:
             if "}" in i:
                 i = i.split("'}")[0]
                 i = i.split("',")[0]
@@ -366,13 +364,14 @@ def main(result_dir, file_type="json", target_set=None):
                 routes_path = result_dir + "/predicted_routes.json"
                 df = pd.read_json(routes_path)
                 print("test targets: ", len(df))
-            except:
+            except Exception as exc:
+                logger.error(exc)
                 routes_path = result_dir + "/pred_routes_train_progress.json"
                 df = pd.read_json(routes_path)
         if "epoch" in df.columns:
             latest_epoch = df["epoch"].values[-1]
             df = pd.DataFrame(df[df["epoch"] == latest_epoch]["result"].tolist()[0])
-        elif type(df) == list:
+        elif isinstance(df, list):
             df = df[-1]
     building_blocks = read_building_blocks(config["context"]["building_blocks"])
 
@@ -380,7 +379,7 @@ def main(result_dir, file_type="json", target_set=None):
     pred_trees_corrected = []
     for i, row in df.iterrows():
         pred_tree = row["pred_tree"]
-        if type(pred_tree) == dict:
+        if isinstance(pred_tree, dict):
             corr_tree, tree_solved = utils.add_in_stock_property_to_trees(
                 pred_tree, building_blocks
             )

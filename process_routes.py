@@ -1,5 +1,4 @@
 from retrosynformer.data import RouteDataset
-import pandas as pd
 import argparse
 
 

@@ -50,7 +50,7 @@ def main(
     with open(new_config_path, "w") as file:
         yaml.dump(model_config, file)
 
-    start_time = time.time()
+    time.time()
     print("Initiate training.")
     model = init_model(model_config, model_path=model_path)
     print("Model is loaded!")

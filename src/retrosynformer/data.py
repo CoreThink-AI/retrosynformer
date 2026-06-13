@@ -1,3 +1,4 @@
+import logging
 import pickle
 import random
 from collections import namedtuple
@@ -10,6 +11,8 @@ from tqdm import tqdm
 
 from .environment import RetroGymEnvironment
 from .utils import utils
+
+logger = logging.getLogger(__name__)
 
 
 class RouteDatasetTorch(Dataset):
@@ -111,7 +114,7 @@ class RouteDataset:
         self.template_library = template_library[
             template_library["template_hash_corr"].isin(list(self.templates_df["hash"]))
         ]
-        if type(routes_path) == str:
+        if isinstance(routes_path, str):
             with open(routes_path, "rb") as file:
                 self.routes = pickle.load(file)
         else:
@@ -175,7 +178,7 @@ class RouteDataset:
                         self.reaction_hash2template_general_hash[hash]
                         for hash in hash_in_route
                     ]
-                    template_in_route = [
+                    [
                         self.template_general_hash2template_general[hash]
                         for hash in template_hash_in_route
                     ]
@@ -190,7 +193,7 @@ class RouteDataset:
 
                 reaction_list = []
                 target = route["smiles"]
-                template = self.template_general_hash2template_general[template_hash]
+                self.template_general_hash2template_general[template_hash]
 
                 env = RetroGymEnvironment(
                     self.building_blocks,
@@ -214,7 +217,8 @@ class RouteDataset:
                     elif key_in_route == "template_hash_corr":
                         try:
                             template_from_route = product2reaction_hash[target]
-                        except:
+                        except Exception as exc:
+                            logger.error(exc)
                             template_from_route = None
                             route_done = True
                     if template_from_route:
@@ -252,7 +256,8 @@ class RouteDataset:
                             depth=depths_in_route,
                         )
                         self.data.append(route_data)
-            except:
+            except Exception as exc:
+                logger.error(exc)
                 invalid_routes_count += 1
 
         print("Faild to reconstruct ", invalid_routes_count, " routes.")

@@ -1,10 +1,9 @@
-import sys
+import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rdchiral.main as rdc
-import rdkit
 import seaborn as sns
 import torch
 import yaml
@@ -12,6 +11,8 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rxnutils.routes import base, readers
 from rxnutils.routes.ted.reactiontree import ReactionTreeWrapper
+
+logger = logging.getLogger(__name__)
 
 
 def flatten(xss):
@@ -64,14 +65,16 @@ def route_to_list(route):
         rxn_dict = {"smiles": r["reaction_smiles"]}
         try:
             rxn_dict["hash"] = r["reaction_hash"]
-        except:
+        except Exception as exc:
+            logger.error(exc)
             try:
                 rxn_dict["hash_corr"] = r["template_hash_corr"]
-            except:
+            except Exception as exc:
+                logger.error(exc)
                 try:
                     rxn_dict["hash_corr"] = r["template_hash"]
-                except:
-                    pass
+                except Exception as exc:
+                    logger.error(exc)
 
         reactions.append(rxn_dict)
     return reactions  # reaction_list, reaction_hash_list
@@ -118,7 +121,7 @@ def check_available_actions(
     if use_template:
         template_products = []
         for template_list in available_reactions:
-            if type(template_list) == list:
+            if isinstance(template_list, list):
                 template_list = template_list[0]
 
             if template_list == "<eos>":
@@ -246,7 +249,7 @@ def plot_train_progress_accuracy(train_results_path, save_as):
     sns.set()
     train_progress = pd.read_json(train_results_path, lines=True)
     # print(train_progress.keys())
-    fig = plt.figure()
+    plt.figure()
     plt.plot(
         train_progress["epoch"],
         train_progress["train_action_accuracy"],
@@ -279,7 +282,7 @@ def plot_train_progress(train_results_path, save_as):
     sns.set()
     train_progress = pd.read_json(train_results_path, lines=True)
 
-    fig = plt.figure()
+    plt.figure()
     plt.plot(train_progress["epoch"], train_progress["train_loss"], 
              label="Train loss")
     plt.plot(train_progress["epoch"], train_progress["valid_loss"], label="Valid loss")
@@ -305,7 +308,7 @@ def plot_evaluation_results(evaluation_results_path, save_as):
         percent_solved.append(solved * 100)
 
     sns.set()
-    fig = plt.figure()
+    plt.figure()
     plt.plot(epochs, percent_solved, marker="o", label="Percent targets solved")
     plt.ylabel("% targets solved")
     plt.xlabel("Epoch")
@@ -388,7 +391,7 @@ def check_route_leafs(rxn, bb):
     all_is_bb = True
     is_not_bb = []
     for i in str(rxn).split("'smiles': '"):
-        if not "children" in i:
+        if "children" not in i:
             if "}" in i:
                 i = i.split("'}")[0]
                 i = i.split("',")[0]

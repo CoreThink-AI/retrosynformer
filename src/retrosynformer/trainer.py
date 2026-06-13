@@ -84,7 +84,7 @@ class RetroTrainer:
 
     def train_one_epoch(self):
         total_loss = 0
-        actions_id_batch, actions_id_pred_batch, action_preds_batch = [], [], []
+        actions_id_batch, actions_id_pred_batch, _action_preds_batch = [], [], []
 
         for i, data in enumerate(self.train_dataloader):
 
@@ -205,7 +205,7 @@ class RetroTrainer:
         )
 
     def train(self, verbose=True, start_epoch=0):
-        start_time = time.time()
+        time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
         )

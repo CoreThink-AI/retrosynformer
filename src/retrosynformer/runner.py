@@ -48,7 +48,6 @@ def init_data(config):
 
     # Split data into train, valid and test
     test_frac = config["evaluation"]["test_frac"]
-    train_frac = 1 - 2 * test_frac
 
     n_test = int(len(routes_data.drop_duplicates(subset=["target"])) * test_frac)
 
@@ -69,7 +68,7 @@ def init_data(config):
     elif config["dataset"]["valid_set"] == "n1+n5":
         print("n1+n5")
         test_data = routes_data[
-            (routes_data["n1_target"] == True) | (routes_data["n5_target"] == True)
+            (routes_data["n1_target"]) | (routes_data["n5_target"])
         ]
         print(
             "len(test_data)",
@@ -135,10 +134,10 @@ def init_data(config):
 
 def create_dataloaders_n1_n5(datasets, config, shuffle=False):
     train_dataset, valid_dataset, test_dataset = datasets
-    n1_data = test_dataset.data[test_dataset.data["n1_target"] == True].drop_duplicates(
+    n1_data = test_dataset.data[test_dataset.data["n1_target"]].drop_duplicates(
         subset=["target"]
     )
-    n5_data = test_dataset.data[test_dataset.data["n5_target"] == True].drop_duplicates(
+    n5_data = test_dataset.data[test_dataset.data["n5_target"]].drop_duplicates(
         subset=["target"]
     )
 
@@ -209,7 +208,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -244,6 +243,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if lr is not None:
         config["optimizer"]["lr"] = lr
         print(f"lr override: {lr}")
+    if momentum is not None:
+        config["optimizer"]["momentum"] = momentum
+        print(f"momentum override: {momentum}")
     if dropout is not None:
         config["model"]["attn_pdrop"] = dropout
         config["model"]["embd_pdrop"] = dropout
@@ -399,6 +401,13 @@ if __name__ == "__main__":
         dest="dropout",
         help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
     )
+    parser.add_argument(
+        "--momentum",
+        type=float,
+        default=None,
+        dest="momentum",
+        help="Override optimizer.momentum from config",
+    )
 
     args = parser.parse_args()
     main(
@@ -414,4 +423,5 @@ if __name__ == "__main__":
         head_dim=args.head_dim,
         lr=args.lr,
         dropout=args.dropout,
+        momentum=args.momentum,
     )

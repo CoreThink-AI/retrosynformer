@@ -58,6 +58,10 @@ if __name__ == "__main__":
         "--dropout", type=float, default=None, dest="dropout",
         help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
     )
+    parser.add_argument(
+        "--momentum", type=float, default=None, dest="momentum",
+        help="Override optimizer.momentum from config",
+    )
     args = parser.parse_args()
     main(
         config_path=args.config_path,
@@ -72,4 +76,5 @@ if __name__ == "__main__":
         head_dim=args.head_dim,
         lr=args.lr,
         dropout=args.dropout,
+        momentum=args.momentum,
     )

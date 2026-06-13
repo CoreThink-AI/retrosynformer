@@ -67,7 +67,7 @@ def main(path, beam_widths, n_runs, n1=False, n5=False):
             ]
 
         for tmp_path in paths:
-            summary_file = tmp_path + 'result_summary.csv'
+            tmp_path + 'result_summary.csv'
             if True:
                 print(n1, n5)
                 if n1:
@@ -128,7 +128,7 @@ def main(path, beam_widths, n_runs, n1=False, n5=False):
                 ]
 
             for tmp_path in paths:
-                summary_file = tmp_path + 'result_summary.csv'
+                tmp_path + 'result_summary.csv'
                 if True:
                     print(n1, n5)
                     if n1:
@@ -147,7 +147,7 @@ def main(path, beam_widths, n_runs, n1=False, n5=False):
             success_rate.extend(avg_succesrate)
             accuracy.extend(avg_accuracy)
             time.extend(avg_time)
-            runs.extend([f'N5' for i in range(len(avg_time))])
+            runs.extend(['N5' for i in range(len(avg_time))])
             beam_widths_all.extend([bw for _ in range(len(avg_time))])
             teds.extend(ted)
             lengths.extend(length)

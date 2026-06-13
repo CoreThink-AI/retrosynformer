@@ -1,19 +1,20 @@
-import os
+import gzip
+import json
+import logging
 from collections import Counter
 
+import matplotlib.colors as clr
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import LogNorm
-import matplotlib.colors as clr
-from rdkit import Chem
+from rxnutils.routes import base, comparison
 from sklearn.metrics import accuracy_score, confusion_matrix
 
-import gzip
-import json
-from rxnutils.routes import base, comparison
 from . import utils
+
+logger = logging.getLogger(__name__)
 
 
 cmap1 = clr.LinearSegmentedColormap.from_list(
@@ -45,28 +46,31 @@ TEMPLATES_DF_PATH = "uspto_routes/uspto_routes_top3000.pickle"  # adjust path ac
 class Evaluation:
     def __init__(self, result_dir):
         self.result_dir = result_dir
-        if type(result_dir) == str:
+        if isinstance(result_dir, str):
             self.config = utils.read_config(result_dir + "/config.yaml")
             try:
                 self.eval_df = pd.read_json(result_dir + "/predicted_routes.json")
                 self.eval_df["run"] = "main"
                 self.train_progress_df = pd.read_json(result_dir + "/train_progress.jsonl", lines=True)
-            except:
+            except Exception as exc:
+                logger.error(exc)
                 try:
                     print("trying n1")
                     routes_path = result_dir + "/predicted_routes_n1.json"
                     self.eval_df = pd.read_json(routes_path)
                     print("n1 loaded: ", len(self.eval_df))
-                except:
+                except Exception as exc:
+                    logger.error(exc)
                     try:
                         print("trying n5")
                         routes_path = result_dir + "/predicted_routes_n5.json"
                         self.eval_df = pd.read_json(routes_path)
                         print("n5 loaded: ", len(self.eval_df))
-                    except:
+                    except Exception as exc:
+                        logger.error(exc)
                         print("WARNING: no file is loaded!!!")
 
-        elif type(result_dir) == list:
+        elif isinstance(result_dir, list):
             self.eval_df = pd.DataFrame({})
             for folder in result_dir:
                 eval_df_tmp = pd.read_json(folder + "/predicted_routes.json")
@@ -80,15 +84,15 @@ class Evaluation:
                     0
                 ]
             )
-        elif type(self.eval_df) == list:
+        elif isinstance(self.eval_df, list):
             self.eval_df = self.eval_df[-1]
 
         self.eval_df["total_pred_reward"] = [
-            sum(r) if type(r) == list else None
+            sum(r) if isinstance(r, list) else None
             for r in self.eval_df["predicted_rewards"]
         ]
         self.eval_df["total_target_reward"] = [
-            sum([p[0] for p in r]) if type(r) == list else None
+            sum([p[0] for p in r]) if isinstance(r, list) else None
             for r in self.eval_df["target_rewards"]
         ]
         self.building_blocks = pd.read_csv(self.config["context"]["building_blocks"])["inchi_key"].tolist()
@@ -129,14 +133,16 @@ class Evaluation:
             tree = row["pred_tree"]
             tree_list = utils.route_to_list(tree)
             actions = []
-            target = tree["smiles"]
+            tree["smiles"]
             for rxn in tree_list:
                 try:
                     idx = templates_df[templates_df["hash"] == rxn["hash_corr"]].index[0]
-                except:
+                except Exception as exc:
+                    logger.error(exc)
                     try:
                         idx = templates_df[templates_df["hash"] == rxn["hash"]].index[0]
-                    except:
+                    except Exception as exc:
+                        logger.error(exc)
                         print("error:", rxn.keys())
                         idx = templates_df[
                             templates_df["hash"] == rxn["metadata"]["template_hash"]
@@ -169,18 +175,18 @@ class Evaluation:
         lengths_target = [
             len([t for t in target if t != 0])
             for target in self.actions_df_target["target_action_list"].tolist()
-            if type(target) == list
+            if isinstance(target, list)
         ]
         print("Len targets: ", np.mean(lengths_target), len(lengths_target))
         if only_solved_targets:
             aizynth_targets = set(
-                self.actions_df_aizynth[self.actions_df_aizynth["is_solved"] == True][
+                self.actions_df_aizynth[self.actions_df_aizynth["is_solved"]][
                     "target"
                 ].tolist()
             )
             retrosyn_targets = set(
                 self.actions_df_retrosyn[
-                    self.actions_df_retrosyn["route_solved"] == True
+                    self.actions_df_retrosyn["route_solved"]
                 ]["target"].tolist()
             )
             common_targets = aizynth_targets.intersection(retrosyn_targets)
@@ -257,7 +263,7 @@ class Evaluation:
         )
         df_actions = pd.concat([df_actions, df_actions_tmp], ignore_index=True)
 
-        fig = plt.figure(figsize=(8, 4))
+        plt.figure(figsize=(8, 4))
         sns.barplot(
             data=df_actions[df_actions["Template id"].isin(set(top_n_actions))],
             x="Template id",
@@ -289,14 +295,15 @@ class Evaluation:
         ]
         print(
             "Average route length (solved): ",
-            np.mean(data[data["is_solved"] == True]["route length"]),
+            np.mean(data[data["is_solved"]]["route length"]),
         )
         for i, route in data.iterrows():
             reference = route["target_tree"]
 
             try:
                 ref_route = base.SynthesisRoute(reference)
-            except:
+            except Exception as exc:
+                logger.error(exc)
                 ref_route = base.SynthesisRoute(reference[0])
 
             route_ = base.SynthesisRoute(route["pred_tree"])
@@ -312,7 +319,7 @@ class Evaluation:
 
         print(
             "Avg TED: (solved)",
-            np.mean(data[data["is_solved"] == True]["TED to target"]),
+            np.mean(data[data["is_solved"]]["TED to target"]),
         )
 
         print(f'Top-1 accuracy = {len(data[data["TED to target"] == 0]) / len(data)}')
@@ -329,7 +336,7 @@ class Evaluation:
         print("n_labels", len(set(labels)))
 
         c_matrix = confusion_matrix(labels_targets, labels_predictions)
-        fig = plt.figure(figsize=(5, 4))
+        plt.figure(figsize=(5, 4))
         sns.heatmap(
             c_matrix, xticklabels=labels, yticklabels=labels, norm=LogNorm(), cmap=cmap2
         )
@@ -361,8 +368,8 @@ class Evaluation:
                 labels_predictions=retrosyn_actions_class,
                 save_as=save_as,
             )
-        except:
-            pass
+        except Exception as exc:
+            logger.error(exc)
 
         target_actions = []
         for route in actions_df_retrosyn_valid["target_action_list"].tolist():
@@ -396,8 +403,8 @@ class Evaluation:
             assert len(target_actions_class) == len(aizynth_actions_class)
             acc = accuracy_score(target_actions_class, aizynth_actions_class)
             print("Class accuracy for AiZynth: ", acc)
-        except:
-            pass
+        except Exception as exc:
+            logger.error(exc)
 
         target_actions = []
         for route in df["target_action_list"].tolist():
@@ -498,7 +505,7 @@ class Evaluation:
             )
         )
 
-        fig = plt.figure(figsize=(8, 4))
+        plt.figure(figsize=(8, 4))
         df_classes["Reaction class"] = [
             class2name[str(cla)] for cla in df_classes["Reaction class"]
         ]
@@ -537,8 +544,8 @@ class Evaluation:
             "Number of solved target by only aizynth: ",
             len(
                 df_solved[
-                    (df_solved["aizynth_solved"] == True)
-                    & (df_solved["retrosyn_solved"] == False)
+                    (df_solved["aizynth_solved"])
+                    & (not df_solved["retrosyn_solved"])
                 ]
             ),
         )
@@ -546,8 +553,8 @@ class Evaluation:
             "Number of solved target only retrosynformer: ",
             len(
                 df_solved[
-                    (df_solved["aizynth_solved"] == False)
-                    & (df_solved["retrosyn_solved"] == True)
+                    (not df_solved["aizynth_solved"])
+                    & (df_solved["retrosyn_solved"])
                 ]
             ),
         )
@@ -555,8 +562,8 @@ class Evaluation:
             "Number of solved targets by both: ",
             len(
                 df_solved[
-                    (df_solved["aizynth_solved"] == True)
-                    & (df_solved["retrosyn_solved"] == True)
+                    (df_solved["aizynth_solved"])
+                    & (df_solved["retrosyn_solved"])
                 ]
             ),
         )
@@ -564,8 +571,8 @@ class Evaluation:
             "Number of solved targets by none: ",
             len(
                 df_solved[
-                    (df_solved["aizynth_solved"] == False)
-                    & (df_solved["retrosyn_solved"] == False)
+                    (not df_solved["aizynth_solved"])
+                    & (not df_solved["retrosyn_solved"])
                 ]
             ),
         )
@@ -587,40 +594,40 @@ def plot_length_distribution(df, df_aizy, save_as=None):
         len([i for i in tree if i != 0]) for tree in df["predicted_action_list"]
     ]
 
-    new_name_pred_len = (
+    (
         f"Route length RetroSynFormer, median = {np.median(df['n_reactions'])}"
     )
-    new_name_target_len = (
+    (
         f"Route length targets, median = {np.median(df['n_reactions_target'])}"
     )
 
     df_lengths_pred = pd.DataFrame(
         {
             "Route length": df["n_reactions_target"],
-            "Route set": f"Targets",  # , \nmedian = {int(np.median(df['n_reactions_target']))}",
+            "Route set": "Targets",  # , \nmedian = {int(np.median(df['n_reactions_target']))}",
         }
     )
     df_lengths_target = pd.DataFrame(
         {
             "Route length": df["n_reactions"],
-            "Route set": f"RetroSynFormer",  # , \nmedian = {int(np.median(df['n_reactions']))}",
+            "Route set": "RetroSynFormer",  # , \nmedian = {int(np.median(df['n_reactions']))}",
         }
     )
     df_lengths = pd.concat((df_lengths_target, df_lengths_pred), ignore_index=True)
 
     try:
-        df_aizy = df_aizy[df_aizy["is_solved"] == True]
+        df_aizy = df_aizy[df_aizy["is_solved"]]
         df_lengths_aizy = pd.DataFrame(
             {
                 "Route length": df_aizy["number_of_steps"].tolist(),
-                "Route set": f"AiZynthFinder",  # , \nmedian = {int(np.median(df_aizy['number_of_steps'].tolist()))}",
+                "Route set": "AiZynthFinder",  # , \nmedian = {int(np.median(df_aizy['number_of_steps'].tolist()))}",
             }
         )
         df_lengths = pd.concat((df_lengths, df_lengths_aizy), ignore_index=True)
-    except:
-        pass
+    except Exception as exc:
+        logger.error(exc)
 
-    fig = plt.figure(figsize=(4, 3))
+    plt.figure(figsize=(4, 3))
     sns.countplot(
         df_lengths,
         x="Route length",
@@ -635,8 +642,8 @@ def plot_length_distribution(df, df_aizy, save_as=None):
 
 
 def plot_ted_distribution(df, save_as):
-    df_solved = df[df["route_solved"] == True]
-    df_unsolved = df[df["route_solved"] == False]
+    df_solved = df[df["route_solved"]]
+    df_unsolved = df[not df["route_solved"]]
     df_ted = pd.DataFrame(
         {
             "TED to target": df_unsolved["TED to target"],
@@ -666,7 +673,7 @@ def plot_reward_distribution(df, save_as):
     df_rewards = pd.DataFrame(
         {
             "Route reward": df["total_target_reward"],
-            "Route set": f"Targets",  # , median = {np.round(np.median(df['total_target_reward']),2)}",
+            "Route set": "Targets",  # , median = {np.round(np.median(df['total_target_reward']),2)}",
         }
     )
     df_rewards = pd.concat(
@@ -675,14 +682,14 @@ def plot_reward_distribution(df, save_as):
             pd.DataFrame(
                 {
                     "Route reward": df["total_pred_reward"],
-                    "Route set": f"RetroSynFormer",  # , median = {np.round(np.median(df['total_pred_reward']),2)}",
+                    "Route set": "RetroSynFormer",  # , median = {np.round(np.median(df['total_pred_reward']),2)}",
                 }
             ),
         ),
         ignore_index=True,
     )
 
-    fig = plt.figure(figsize=(4, 3))
+    plt.figure(figsize=(4, 3))
     sns.histplot(
         df_rewards,
         x="Route reward",
