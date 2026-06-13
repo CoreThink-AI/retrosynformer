@@ -275,27 +275,60 @@ def extract_all_leaves(routes: list) -> list:
 
 
 def create_building_block_df(leaves: list) -> pd.DataFrame:
+    """Wrap a list of InChI keys in a single-column DataFrame.
+
+    >>> create_building_block_df(['key1', 'key2'])['inchi_key'].tolist()
+    ['key1', 'key2']
+    """
     df = pd.DataFrame({"inchi_key": leaves})
     return df
 
 
 def extract_template_products(available_templates: list, retro: bool = True) -> list:
+    """Extract the product (retro=True) or reactant side (retro=False) of each template.
+
+    >>> extract_template_products(['C.Br>>CBr', 'O.C>>OC'])
+    ['C.Br', 'O.C']
+    >>> extract_template_products(['C.Br>>CBr', 'O.C>>OC'], retro=False)
+    ['CBr', 'OC']
+    """
     product_idx = 0 if retro else 1
     return [t.split(">>")[product_idx] for t in available_templates]
 
 
 # Create Dictionaries
 def get_reaction_string(reactants: list, product: str) -> str:
+    """Format reactants and product into a reaction SMILES string.
+
+    >>> get_reaction_string(['CCl', 'NCC'], 'CCNCC')
+    'CCl.NCC>>CCNCC'
+    >>> get_reaction_string(['C'], 'CO')
+    'C>>CO'
+    """
     return ".".join(reactants) + ">>" + product
 
 
 def get_reaction2template_hash_general(template_df: pd.DataFrame) -> dict:
+    """Map reaction_hash → template_hash from a template DataFrame.
+
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'reaction_hash': ['r1', 'r2'], 'template_hash': ['t1', 't2']})
+    >>> get_reaction2template_hash_general(df)
+    {'r1': 't1', 'r2': 't2'}
+    """
     return {
         row["reaction_hash"]: row["template_hash"] for _, row in template_df.iterrows()
     }
 
 
 def get_reaction_hash2template_general(template_df: pd.DataFrame) -> dict:
+    """Map reaction_hash → retro_template_corr from a template DataFrame.
+
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'reaction_hash': ['h1'], 'retro_template_corr': ['tmpl']})
+    >>> get_reaction_hash2template_general(df)
+    {'h1': 'tmpl'}
+    """
     return {
         row["reaction_hash"]: row["retro_template_corr"]
         for _, row in template_df.iterrows()
@@ -303,6 +336,13 @@ def get_reaction_hash2template_general(template_df: pd.DataFrame) -> dict:
 
 
 def get_reaction_hash2template_general_hash(template_df: pd.DataFrame) -> dict:
+    """Map reaction_hash → template_hash_corr from a template DataFrame.
+
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'reaction_hash': ['r1', 'r2'], 'template_hash_corr': ['th1', 'th2']})
+    >>> get_reaction_hash2template_general_hash(df)
+    {'r1': 'th1', 'r2': 'th2'}
+    """
     return {
         row["reaction_hash"]: row["template_hash_corr"]
         for _, row in template_df.iterrows()
@@ -310,6 +350,13 @@ def get_reaction_hash2template_general_hash(template_df: pd.DataFrame) -> dict:
 
 
 def get_template_general_hash2template_general(template_df: pd.DataFrame) -> dict:
+    """Map template hash → SMARTS string from a template DataFrame.
+
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'hash': ['h1', 'h2'], 'smiles': ['A>>B', 'C>>D']})
+    >>> get_template_general_hash2template_general(df)
+    {'h1': 'A>>B', 'h2': 'C>>D'}
+    """
     return {row["hash"]: row["smiles"] for _, row in template_df.iterrows()}
 
 

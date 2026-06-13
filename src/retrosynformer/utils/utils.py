@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 def flatten(xss):
+    """Flatten one level of nesting from a list of lists.
+
+    >>> flatten([[1, 2], [3, 4], [5]])
+    [1, 2, 3, 4, 5]
+    >>> flatten([['a'], ['b', 'c'], []])
+    ['a', 'b', 'c']
+    """
     return [x for xs in xss for x in xs]
 
 def get_product2reactants(route):
@@ -150,6 +157,13 @@ def check_available_actions(
 
 
 def one_hot_encoder(i, dim):
+    """Return a 1-D float tensor of length *dim* with a 1 at position *i*.
+
+    >>> one_hot_encoder(2, 5).tolist()
+    [0.0, 0.0, 1.0, 0.0, 0.0]
+    >>> one_hot_encoder(0, 3).tolist()
+    [1.0, 0.0, 0.0]
+    """
     one_hot_vector = torch.zeros(dim)
     one_hot_vector[i] = 1
 
@@ -319,6 +333,15 @@ def plot_evaluation_results(evaluation_results_path, save_as):
 
 
 def flatten_list(nested_list):
+    """Recursively flatten an arbitrarily-nested list.
+
+    >>> flatten_list([[1, 2], [3, [4, 5]], 6])
+    [1, 2, 3, 4, 5, 6]
+    >>> flatten_list([[[1]], [2, [3, [4]]]])
+    [1, 2, 3, 4]
+    >>> flatten_list([1, 2, 3])
+    [1, 2, 3]
+    """
     flat_list = []
     for item in nested_list:
         if isinstance(item, list):

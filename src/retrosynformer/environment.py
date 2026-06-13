@@ -290,8 +290,21 @@ class RetroGymEnvironment:
 
 
 def get_specific_rewards(states, current_depth, reward_mapping):
-    """Convert a nested list to 1D tensor. Convert the general reward to specific according to some mapping.
-    In input 0 represent intermediate, 1 represents buildingblock and -1 represents a dead end.
+    """Compute the scaled reward for one reaction step from the environment state strings.
+
+    States are the raw frontier entries: ``"<BRANCH_SOLVED>"``, ``"<DEADEND_BRANCH>"``,
+    or a SMILES string for an open intermediate.
+
+    >>> mapping = {
+    ...     "scale_score":      {-1: -2, 0: -2, 1: 0},
+    ...     "scale_with_depth": {-1:  2, 0:  1, 1: 2},
+    ... }
+    >>> get_specific_rewards(["<BRANCH_SOLVED>"], 3, mapping)
+    0
+    >>> get_specific_rewards(["<DEADEND_BRANCH>"], 3, mapping)
+    -12
+    >>> get_specific_rewards(["CC"], 2, mapping)
+    -4
     """
 
     reward = 0
@@ -329,6 +342,15 @@ def get_specific_rewards(states, current_depth, reward_mapping):
 
 
 def get_general_rewards(states, current_depth):
+    """Return a general {1, 0, -1} reward for each state in the frontier.
+
+    ``current_depth`` is accepted for API symmetry but is not used.
+
+    >>> get_general_rewards(["<BRANCH_SOLVED>", "CC", "<DEADEND_BRANCH>"], 2)
+    [1, 0, -1]
+    >>> get_general_rewards(["<BRANCH_SOLVED>", "<BRANCH_SOLVED>"], 0)
+    [1, 1]
+    """
 
     reward = []
 
