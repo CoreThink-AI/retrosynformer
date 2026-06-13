@@ -21,15 +21,11 @@ dependencies = [
     "pydantic",
     "dask",
     "dill",
-    "pandas",
-    "sympy==1.13.1",
-# uv pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
-#    "-e ../rdchiral/",
     "numpy",
     "pandas",
     "partd",
     "rdkit",
-    "reaction-utils==1.9.3",    # "reaction-utils",
+    "reaction-utils==1.9.3",
     "scipy",
     "scikit-learn",
     "matplotlib",
@@ -37,13 +33,32 @@ dependencies = [
     "markupsafe",
     "huggingface-hub",
     "filelock",
-    "markupsafe",
+    "sympy==1.13.1",
     "transformers",
+    "torch>=2.12.0",
 ]
-# packages = [
-#      "retrosynformer",
-# ]
 
-# [tool.uv]
-# exclude-newer="3 weeks"
+[project.optional-dependencies]
+# AMD ROCm GPU (Radeon / Strix Halo iGPU):
+#   uv sync --extra amdgpu
+#   pip install retrosynformer[amdgpu] --extra-index-url https://download.pytorch.org/whl/rocm6.2
+amdgpu = [
+    "torch>=2.12.0",
+]
 
+# uv resolves torch from the ROCm index when the amdgpu extra is active
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-rocm", extra = "amdgpu" },
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm6.2"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
