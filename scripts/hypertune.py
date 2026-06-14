@@ -33,7 +33,8 @@ import time
 
 import optuna
 
-from retrosynformer.runner import main as train, read_config
+from retrosynformer.runner import main as train
+from retrosynformer.runner import read_config
 
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 RESULTS_BASE = "results/hypertune"
