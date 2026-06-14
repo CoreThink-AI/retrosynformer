@@ -98,6 +98,28 @@ def _setup_jsonl_logging() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Config validation
+# ---------------------------------------------------------------------------
+
+def _validate_config(config: dict) -> None:
+    """Raise ValueError for known config inconsistencies before any trial starts.
+
+    Catches the case where the optuna search space includes
+    ``structured_dropout_bottleneck`` but ``model.use_structured_dropout`` is
+    False — the parameter would be sampled every trial yet never used.
+    """
+    optuna_keys = set(config.get("optuna", {}))
+    use_sd = config.get("model", {}).get("use_structured_dropout", False)
+    if not use_sd and "structured_dropout_bottleneck" in optuna_keys:
+        raise ValueError(
+            "Config conflict: 'optuna.structured_dropout_bottleneck' is in the "
+            "search space but 'model.use_structured_dropout' is false. "
+            "Either set use_structured_dropout: true or remove "
+            "structured_dropout_bottleneck from the optuna section."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Search-space dispatcher
 # ---------------------------------------------------------------------------
 
@@ -149,6 +171,7 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
 
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str, eval_n_batches: int | None = None) -> float:
     config = read_config(config_path)
+    _validate_config(config)
     optuna_config = config.get("optuna", {})
     params = {name: _suggest(trial, name, spec) for name, spec in optuna_config.items()}
 

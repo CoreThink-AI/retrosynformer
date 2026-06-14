@@ -1,3 +1,15 @@
+optuna:
+  n_heads: [1, 2, 4, 8]
+  n_layers: [2, 3, 4, 6, 8, 12, 16, 24, 32]
+  head_dim: [64, 128, 256]
+  lr:
+    low: 1.0e-4
+    high: 1.0
+    log: true
+  dropout:
+    low: 0.0
+    high: 0.3
+
 context:
   building_blocks: data/standard_building_blocks.csv
   random_state: 1
@@ -12,9 +24,9 @@ dataset:
   synthetic_routes_path: false
   valid_set: n1+n5
 evaluation:
-  batch_size: 512
+  batch_size: 64
   beam_width: 1
-  eval_n_batches: 10
+  eval_n_batches: 2
   eval_routes_frequency: 100
   max_depth: 6
   test_frac: 0.1

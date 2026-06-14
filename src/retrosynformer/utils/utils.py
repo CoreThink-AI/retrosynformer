@@ -180,6 +180,17 @@ def one_hot_encoder(i, dim):
 
 
 def get_morgan_fingerprint(smiles, radius, n_bits=1024):
+    """Return a binary Morgan fingerprint as a 1-D integer tensor of length *n_bits*.
+
+    >>> fp = get_morgan_fingerprint("c1ccccc1", radius=2)
+    >>> fp.shape
+    torch.Size([1024])
+    >>> int(fp.sum()) > 0
+    True
+    >>> fp_methane = get_morgan_fingerprint("C", radius=2)
+    >>> bool((fp != fp_methane).any())
+    True
+    """
     mol = Chem.MolFromSmiles(smiles)
     fingerprint = AllChem.GetMorganFingerprintAsBitVect(mol, radius, n_bits)
     fingerprint_list = [int(bit) for bit in fingerprint]

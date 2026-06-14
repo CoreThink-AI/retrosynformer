@@ -55,12 +55,23 @@ class MoleculeConditionedMaskGenerator(nn.Module):
         nn.init.constant_(self.net[2].bias, -2.2)
 
     def forward(self, fingerprint: torch.Tensor) -> torch.Tensor:
-        """Return per-channel drop probabilities.
+        """Return per-channel drop probabilities in (0, 1).
 
         Args:
             fingerprint: (batch, fp_dim)
         Returns:
-            drop_prob:   (batch, hidden_size)  values in (0, 1)
+            drop_prob:   (batch, hidden_size)
+
+        >>> import torch
+        >>> gen = MoleculeConditionedMaskGenerator(fp_dim=8, hidden_size=4, bottleneck=2)
+        >>> p = gen(torch.zeros(1, 8))
+        >>> p.shape
+        torch.Size([1, 4])
+        >>> bool((p >= 0).all() and (p <= 1).all())
+        True
+        >>> p2 = gen(torch.ones(1, 8))
+        >>> bool((p != p2).any())
+        True
         """
         return self.net(fingerprint)
 
@@ -70,8 +81,20 @@ class MoleculeConditionedMaskGenerator(nn.Module):
         Returns a tensor of shape (batch, 1, hidden_size) ready to broadcast
         over (batch, n_tokens, hidden_size).
 
-        Training: inverted-dropout Bernoulli mask.
-        Eval:     deterministic expected-value mask (1 - p).
+        Training: inverted-dropout Bernoulli mask (stochastic).
+        Eval:     deterministic expected-value mask ``(1 - p)``.
+
+        >>> import torch
+        >>> gen = MoleculeConditionedMaskGenerator(fp_dim=8, hidden_size=4, bottleneck=2)
+        >>> _ = gen.eval()
+        >>> mask = gen.get_mask(torch.zeros(1, 8))
+        >>> mask.shape
+        torch.Size([1, 1, 4])
+        >>> bool((mask >= 0).all() and (mask <= 1).all())
+        True
+        >>> mask2 = gen.get_mask(torch.ones(1, 8))
+        >>> bool((mask != mask2).any())
+        True
         """
         drop_prob = self(fingerprint).clamp(0.0, 0.9)  # never drop > 90%
         keep_prob = 1.0 - drop_prob                    # (batch, hidden_size)

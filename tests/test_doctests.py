@@ -14,6 +14,7 @@ DOCTEST_MODULES = [
     "retrosynformer.utils.reward_functions",
     "retrosynformer.data",
     "retrosynformer.environment",
+    "retrosynformer.structured_dropout",
 ]
 
 
