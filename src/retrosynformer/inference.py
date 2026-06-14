@@ -66,8 +66,9 @@ class RoutePredictor:
         """Predict route with beam search.
         beam_width=1 is equivalent to greedy or no beam search"""
         self.model.eval()
+        # default RetroGymEnvironment.process_routes is False
         self.env = RetroGymEnvironment(
-            self.building_blocks, self.templates_df, self.reward_mapping, self.max_depth
+            self.building_blocks, self.templates_df, self.reward_mapping, self.max_depth, process_routes=False,
         )
         self.env.set_target_compound(
             target,
@@ -401,6 +402,6 @@ class RoutePredictor:
                     else:
                         route["route_solved"] = False
                         route["valid_route"] = False
-                    
+
                     routes.append(route)
         return routes

@@ -21,7 +21,6 @@ import optuna
 
 from retrosynformer.runner import main as train
 
-
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 RESULTS_BASE = "results/hypertune"
 RUN_JSONL = os.path.join(RESULTS_BASE, "run.jsonl")
@@ -141,7 +140,7 @@ def main():
         help="Optuna study name",
     )
     parser.add_argument(
-        "--storage", default=f"sqlite:///{RESULTS_BASE}/study.db",
+        "--storage", default=f"sqlite:///{RESULTS_BASE}/study.db",  # results/hypertune/study.db
         help="Optuna storage URL (default: sqlite in results/hypertune/study.db)",
     )
     args = parser.parse_args()
@@ -192,7 +191,7 @@ def main():
             "dir": os.path.join(RESULTS_BASE, f"trial_{best.number:03d}"),
         },
     })
-    print(f"\n=== Best trial ===")
+    print("\n=== Best trial ===")
     print(f"  fraction_targets_solved: {best.value:.4f}")
     print(f"  params: {best.params}")
     print(f"  results: {os.path.join(RESULTS_BASE, f'trial_{best.number:03d}')}")

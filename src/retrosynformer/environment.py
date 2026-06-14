@@ -71,20 +71,22 @@ class RetroGymEnvironment:
         # Create a new instance with the copied attributes
         return copied_environment
 
+    # remove reward_function argument as it is only ever called from inference.predict_route where it always choses specific
     def set_target_compound(self, target_compound, reward_function=None):
-        # self.all_reward_functions = all_reward_functions or self.all_reward_functions
         self.state = [[target_compound]]
         self.visited_intermediates = []
         self.visited_intermediates_branch = []
         if reward_function:
             self.all_reward_functions = [reward_function]
-        elif self.process_routes:
+        elif self.process_routes:  # default is False->reward_general and reward_specific
             self.all_reward_functions = ["reward_general"]
         else:
+            # TODO: make this always exactly one function and have reward_specific call reward_general or vice-versa
             self.all_reward_functions = [
                 "reward_general",
                 "reward_specific",
             ]
+        # k: reward function name, v: list of rewards computed from get_{specific|general}_rewards(state, )
         self.all_rewards = {r: [] for r in self.all_reward_functions}
         self.rewards = []
         self.branching_depths = [0]
@@ -98,12 +100,15 @@ class RetroGymEnvironment:
         self.leafs = []
 
     def _get_reward(self, n):
-        """
-        Reward function. Return the reward for each state. The reward here is calculated for each reaction step.
-        The reward is calculated as the mean of the reward for each reactant, after evaluating for branch-ending criterias such as: building block and maximum depth.
+        """ Return the reward for each state, calculated for each reaction step.
+
+        Total reward is calculated as the mean of the reward for each reactant, after evaluating
+        branch-ending criteria:
+          - building block
+          - maximum depth
+          - ...
         """
         states = self.state[-n:]
-        # TODO: delete self.reward_function, only self.all_reward_functions
 
         for reward_fn in self.all_reward_functions:
             if reward_fn == "reward_specific":
@@ -114,7 +119,7 @@ class RetroGymEnvironment:
                 reward = get_general_rewards(states, self.current_depth)
 
             self.all_rewards[reward_fn].append(reward)
-        self.rewards = self.all_rewards[reward_functions[0]]
+        self.rewards = self.all_rewards[self.all_reward_functions[0]]
 
         return self.rewards[-1]
 
@@ -343,7 +348,7 @@ def get_specific_rewards(states, current_depth, reward_mapping):
 
 
 def get_general_rewards(states, current_depth):
-    """Return a general {1, 0, -1} reward for each state in the frontier.
+    """ Return a general {1, 0, -1} reward for each state in the frontier.
 
     ``current_depth`` is accepted for API symmetry but is not used.
 
