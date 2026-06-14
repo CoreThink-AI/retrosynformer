@@ -14,13 +14,30 @@ per line covering trial start/end, per-trial accuracy, warnings, and errors.
 Config-driven search space (results/config/*.yaml under the "optuna" key):
 
     optuna:
-      n_heads: [1, 2, 4, 8]           # list  → suggest_categorical
-      n_layers: [2, 3, 4, 8, 16, 32]  # list  → suggest_categorical
-      lr:                              # dict  → suggest_float
-        type: float
+      # list of values → suggest_categorical
+      n_heads: [1, 2, 4, 8]
+
+      # dict with choices → suggest_categorical (explicit form)
+      head_dim:
+        choices: [64, 128, 256]
+
+      # dict with low/high (both int) → suggest_int; log: true for log-scale
+      n_layers:
+        low: 2
+        high: 32
+        log: true
+
+      # dict with low/high (float) → suggest_float
+      lr:
         low: 1.0e-4
         high: 1.0
         log: true
+
+      # float range with a fixed step
+      dropout:
+        low: 0.0
+        high: 0.3
+        step: 0.01
 
 Any key in the optuna section must match a keyword argument accepted by
 runner.main() (n_heads, n_layers, head_dim, lr, dropout, momentum, …).
@@ -85,26 +102,45 @@ def _setup_jsonl_logging() -> None:
 # ---------------------------------------------------------------------------
 
 def _suggest(trial: optuna.Trial, name: str, spec) -> object:
-    """Call the appropriate trial.suggest_* based on spec.
+    """Dispatch to the appropriate trial.suggest_* based on the YAML spec.
 
-    spec is either:
-      - a list  → suggest_categorical(name, spec)
-      - a dict  → suggest_int / suggest_float driven by spec["type"]
+    Three forms are supported:
+
+    1. List  →  suggest_categorical
+         n_heads: [1, 2, 4, 8]
+
+    2. Dict with choices key  →  suggest_categorical
+         n_heads:
+           choices: [1, 2, 4, 8]
+
+    3. Dict with low/high  →  suggest_int or suggest_float
+       Type is inferred: both int → suggest_int, otherwise suggest_float.
+       Optional keys: log (bool), step (number).
+         lr:
+           low: 1.0e-4
+           high: 1.0
+           log: true
+         n_layers:
+           low: 2
+           high: 32
+           log: true
+         dropout:
+           low: 0.0
+           high: 0.3
+           step: 0.01
     """
     if isinstance(spec, list):
         return trial.suggest_categorical(name, spec)
-    ptype = spec["type"]
-    if ptype == "int":
-        return trial.suggest_int(
-            name, spec["low"], spec["high"],
-            step=spec.get("step", 1), log=spec.get("log", False),
-        )
-    if ptype == "float":
-        return trial.suggest_float(
-            name, spec["low"], spec["high"],
-            step=spec.get("step"), log=spec.get("log", False),
-        )
-    raise ValueError(f"Unknown optuna param type {ptype!r} for {name!r}")
+    if "choices" in spec:
+        return trial.suggest_categorical(name, spec["choices"])
+    low, high = spec["low"], spec["high"]
+    log = spec.get("log", False)
+    step = spec.get("step")
+    if isinstance(low, int) and isinstance(high, int):
+        return trial.suggest_int(name, low, high,
+                                 step=int(step) if step is not None else 1,
+                                 log=log)
+    return trial.suggest_float(name, low, high, step=step, log=log)
 
 
 # ---------------------------------------------------------------------------
