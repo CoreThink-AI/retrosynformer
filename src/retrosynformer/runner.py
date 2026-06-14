@@ -200,7 +200,14 @@ def init_model(config, model_path=None):
     dt_config.embd_pdrop = config["model"]["embd_pdrop"]
     dt_config.resid_pdrop = config["model"]["resid_pdrop"]
 
-    model = DecisionTransformerModel(dt_config)
+    if config["model"].get("use_structured_dropout", False):
+        from .structured_dropout import StructuredDropoutDecisionTransformer
+        fp_dim = config["dataset"]["fp_dim"]
+        bottleneck = config["model"].get("structured_dropout_bottleneck", 128)
+        model = StructuredDropoutDecisionTransformer(dt_config, fp_dim, bottleneck)
+        print(f"Using StructuredDropoutDecisionTransformer (fp_dim={fp_dim}, bottleneck={bottleneck})")
+    else:
+        model = DecisionTransformerModel(dt_config)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=torch.device(DEVICE)))
     return model
