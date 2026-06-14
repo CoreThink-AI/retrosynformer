@@ -9,6 +9,10 @@ optuna:
   dropout:
     low: 0.0
     high: 0.3
+  structured_dropout_bottleneck:
+    low: 32
+    high: 512
+    log: true
 
 context:
   building_blocks: data/standard_building_blocks.csv
