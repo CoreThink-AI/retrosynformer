@@ -3,13 +3,27 @@
 
 The first trial is fixed (n_heads=1, n_layers=3, head_dim=256, large dataset,
 200 epochs) to establish a baseline comparable to early taco-branch runs.
-Subsequent trials explore the search space defined below.
+Subsequent trials explore the search space defined in config["optuna"].
 
 Usage:
-    python scripts/hypertune.py -c results/config.yaml [--n-trials 20]
+    python scripts/hypertune.py -c results/config/small.yaml [--n-trials 20]
 
 Structured logs are written to results/hypertune/run.jsonl — one JSON object
 per line covering trial start/end, per-trial accuracy, warnings, and errors.
+
+Config-driven search space (results/config/*.yaml under the "optuna" key):
+
+    optuna:
+      n_heads: [1, 2, 4, 8]           # list  → suggest_categorical
+      n_layers: [2, 3, 4, 8, 16, 32]  # list  → suggest_categorical
+      lr:                              # dict  → suggest_float
+        type: float
+        low: 1.0e-4
+        high: 1.0
+        log: true
+
+Any key in the optuna section must match a keyword argument accepted by
+runner.main() (n_heads, n_layers, head_dim, lr, dropout, momentum, …).
 """
 import argparse
 import json
@@ -19,13 +33,14 @@ import time
 
 import optuna
 
-from retrosynformer.runner import main as train
+from retrosynformer.runner import main as train, read_config
 
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 RESULTS_BASE = "results/hypertune"
 RUN_JSONL = os.path.join(RESULTS_BASE, "run.jsonl")
 
 # Fixed first trial — matches early taco-branch architecture for comparison.
+# Every value here must be a valid choice in the corresponding optuna config list.
 BASELINE_TRIAL = {"n_heads": 1, "n_layers": 3, "head_dim": 256, "lr": 0.211, "dropout": 0.1}
 
 
@@ -49,6 +64,7 @@ class _JsonlHandler(logging.Handler):
                 "log": {
                     "level": record.levelname,
                     "logger": record.name,
+                    "file": f"{record.filename}:{record.lineno}",
                     "msg": self.format(record),
                 },
             })
@@ -64,15 +80,40 @@ def _setup_jsonl_logging() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Search-space dispatcher
+# ---------------------------------------------------------------------------
+
+def _suggest(trial: optuna.Trial, name: str, spec) -> object:
+    """Call the appropriate trial.suggest_* based on spec.
+
+    spec is either:
+      - a list  → suggest_categorical(name, spec)
+      - a dict  → suggest_int / suggest_float driven by spec["type"]
+    """
+    if isinstance(spec, list):
+        return trial.suggest_categorical(name, spec)
+    ptype = spec["type"]
+    if ptype == "int":
+        return trial.suggest_int(
+            name, spec["low"], spec["high"],
+            step=spec.get("step", 1), log=spec.get("log", False),
+        )
+    if ptype == "float":
+        return trial.suggest_float(
+            name, spec["low"], spec["high"],
+            step=spec.get("step"), log=spec.get("log", False),
+        )
+    raise ValueError(f"Unknown optuna param type {ptype!r} for {name!r}")
+
+
+# ---------------------------------------------------------------------------
 # Optuna objective
 # ---------------------------------------------------------------------------
 
-def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str) -> float:
-    n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
-    n_layers = trial.suggest_int("n_layers", 2, 32, log=True)
-    head_dim = trial.suggest_categorical("head_dim", [64, 128, 256])
-    lr = trial.suggest_float("lr", 1e-4, 1.0, log=True)
-    dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.01)
+def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str, eval_n_batches: int | None = None) -> float:
+    config = read_config(config_path)
+    optuna_config = config.get("optuna", {})
+    params = {name: _suggest(trial, name, spec) for name, spec in optuna_config.items()}
 
     trial_dir = os.path.join(RESULTS_BASE, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
@@ -82,7 +123,7 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         "trial": {"number": trial.number, "dir": trial_dir},
         "params": dict(trial.params),
     })
-    print(f"\n=== Trial {trial.number} params ===")
+    print(f"\n### Trial {trial.number} params")
     for k, v in trial.params.items():
         print(f"  {k}: {v}")
 
@@ -91,16 +132,13 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         config_path=config_path,
         dataset=dataset,
         n_epochs=n_epochs,
-        n_heads=n_heads,
-        n_layers=n_layers,
-        head_dim=head_dim,
-        lr=lr,
-        dropout=dropout,
         results_path=trial_dir,
+        eval_n_batches=eval_n_batches,
+        **params,
     )
 
     value = fraction_solved if fraction_solved is not None else 0.0
-    _write({
+    trial_results = {
         "event": "trial_end",
         "trial": {"number": trial.number, "dir": trial_dir},
         "params": dict(trial.params),
@@ -113,7 +151,11 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
                 "valid_route_accuracy": float(val_route_acc[-1]) if val_route_acc else None,
             },
         },
-    })
+    }
+    _write(trial_results)
+    print("\n#### Results")
+    for k, v in trial_results.items():
+        print(f"    {k}: {v}")
     return value
 
 
@@ -137,14 +179,18 @@ def main():
     )
     parser.add_argument(
         "--dataset", default="large", choices=["small", "standard", "large"],
-        help="Dataset size preset (default: large)",
+        help="Dataset preset: small=589, standard=1573, large=2957 templates (default: large)",
+    )
+    parser.add_argument(
+        "--eval-n-batches", type=int, default=None, dest="eval_n_batches",
+        help="Override evaluation.eval_n_batches from config (reduce for faster CPU runs)",
     )
     parser.add_argument(
         "--study-name", default="retrosynformer_hypertune",
         help="Optuna study name",
     )
     parser.add_argument(
-        "--storage", default=f"sqlite:///{RESULTS_BASE}/study.db",  # results/hypertune/study.db
+        "--storage", default=f"sqlite:///{RESULTS_BASE}/study.db",
         help="Optuna storage URL (default: sqlite in results/hypertune/study.db)",
     )
     args = parser.parse_args()
@@ -155,6 +201,7 @@ def main():
         "n_trials": args.n_trials, "n_epochs": args.n_epochs,
         "dataset": args.dataset, "storage": args.storage,
         "config_path": args.config_path,
+        "eval_n_batches": args.eval_n_batches,
     }})
 
     study = optuna.create_study(
@@ -181,7 +228,7 @@ def main():
         })
 
     study.optimize(
-        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset),
+        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset, args.eval_n_batches),
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )

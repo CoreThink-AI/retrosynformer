@@ -26,6 +26,7 @@ dependencies = [
     "pandas",
     "partd",
     "rdkit",
+    "rdchiral @ git+https://github.com/CoreThink-AI/rdchiral",
     "reaction-utils==1.9.3",
     "scipy",
     "scikit-learn",
@@ -58,6 +59,7 @@ dev = [
 testpaths = ["tests"]
 
 [tool.uv.sources]
+rdchiral = { path = "../rdchiral", editable = true }
 torch = [
     { index = "pytorch-rocm", extra = "amdgpu" },
     { index = "pytorch-cpu" },
