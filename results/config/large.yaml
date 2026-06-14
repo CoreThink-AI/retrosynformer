@@ -3,7 +3,7 @@ context:
   random_state: 1
   templates_path: data/standard_reaction_templates.pickle
 dataset:
-  action_dim: 589  # large=2957, medium=1573, small=589
+  action_dim: 2957  # large=2957, medium=1573, small=589
   drop_duplicates: true
   fp_dim: 1024
   n_in_state: 2
