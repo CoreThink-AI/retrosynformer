@@ -67,7 +67,7 @@ def _setup_jsonl_logging() -> None:
 # Optuna objective
 # ---------------------------------------------------------------------------
 
-def objective(trial: optuna.Trial, config_path: str, n_epochs: int) -> float:
+def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str) -> float:
     n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
     n_layers = trial.suggest_int("n_layers", 2, 32, log=True)
     head_dim = trial.suggest_categorical("head_dim", [64, 128, 256])
@@ -89,7 +89,7 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int) -> float:
     t0 = time.time()
     val_loss, val_acc, val_route_acc, fraction_solved = train(
         config_path=config_path,
-        dataset="large",
+        dataset=dataset,
         n_epochs=n_epochs,
         n_heads=n_heads,
         n_layers=n_layers,
@@ -136,6 +136,10 @@ def main():
         help="Training epochs per trial",
     )
     parser.add_argument(
+        "--dataset", default="large", choices=["small", "standard", "large"],
+        help="Dataset size preset (default: large)",
+    )
+    parser.add_argument(
         "--study-name", default="retrosynformer_hypertune",
         help="Optuna study name",
     )
@@ -149,7 +153,8 @@ def main():
     _setup_jsonl_logging()
     _write({"event": "study_start", "config": {
         "n_trials": args.n_trials, "n_epochs": args.n_epochs,
-        "storage": args.storage, "config_path": args.config_path,
+        "dataset": args.dataset, "storage": args.storage,
+        "config_path": args.config_path,
     }})
 
     study = optuna.create_study(
@@ -176,7 +181,7 @@ def main():
         })
 
     study.optimize(
-        lambda trial: objective(trial, args.config_path, args.n_epochs),
+        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset),
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )
