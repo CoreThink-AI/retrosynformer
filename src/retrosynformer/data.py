@@ -34,9 +34,9 @@ class RouteDatasetTorch(Dataset):
 
         if shuffle:
             random.shuffle(self.data)
-        self.target_routes = self.data.dict.tolist()
+        target_to_routes = self.data_full.groupby("target")["dict"].apply(list).to_dict()
         self.target_routes = [
-            self.data_full[self.data_full["target"] == target]["dict"].tolist()
+            target_to_routes[target]
             for target in self.data["target"].tolist()
         ]
         self.action_labels = self.data.actions.tolist()
