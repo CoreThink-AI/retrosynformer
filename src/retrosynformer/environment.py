@@ -71,10 +71,15 @@ class RetroGymEnvironment:
         # Create a new instance with the copied attributes
         return copied_environment
 
-    def set_target_compound(self, target_compound, reward_function=None):
+    def set_target_compound(self, target_compound)  #, reward_function=None):
+        # self.all_reward_functions = all_reward_functions or self.all_reward_functions
         self.state = [[target_compound]]
-        self.visited_intermediates, self.visited_intermediates_branch = [], []
-        self.reward_function = reward_function
+        self.visited_intermediates = []
+        self.visited_intermediates_branch = []
+        # TODO: delete self.reward_function and replace with self.all_reward_functions in 3 places
+        # [ ] 1. here within set_target_compound
+        # [ ] 2. within _get_reward
+        # [ ] 3. within __init__ 
         if self.process_routes:
             self.all_reward_functions = ["reward_general"]
         else:
@@ -100,6 +105,7 @@ class RetroGymEnvironment:
         The reward is calculated as the mean of the reward for each reactant, after evaluating for branch-ending criterias such as: building block and maximum depth.
         """
         states = self.state[-n:]
+        # TODO: delete self.reward_function, only self.all_reward_functions
         reward_functions = (
             [self.reward_function]
             if self.reward_function
