@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import random
 import time
 
@@ -313,10 +314,13 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     end_time = time.time()
     print("Training took: ", (end_time - begin_train_time) / (60 * 60), " hours.")
     result_dir = config["train"]["results_path"]
-    try:
-        evaluation.main(result_dir=result_dir)
-    except Exception as exc:
-        logger.error("Post-training evaluation failed (non-fatal): %s", exc)
+    _pred = result_dir.rstrip("/") + "/predicted_routes.json"
+    _alt  = result_dir.rstrip("/") + "/pred_routes_train_progress.json"
+    if os.path.exists(_pred) or os.path.exists(_alt):
+        try:
+            evaluation.main(result_dir=result_dir)
+        except Exception as exc:
+            logger.error("Post-training evaluation failed (non-fatal): %s", exc)
 
     return (
         validation_loss,
