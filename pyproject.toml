@@ -1,6 +1,6 @@
 [project]
 name = "retrosynformer"
-version = "0.1.2"
+version = "0.1.3"
 description = "RetroSynFormer"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -34,9 +34,9 @@ dependencies = [
     "markupsafe",
     "huggingface-hub",
     "filelock",
-    "sympy==1.13.1",
+    # "sympy>=1.13.3",
     "transformers",
-    "torch>=2.12.0",
+    "torch==2.12.0+cpu",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +45,7 @@ dependencies = [
 #   pip install retrosynformer[amdgpu] --extra-index-url https://download.pytorch.org/whl/rocm6.2
 amdgpu = [
     "torch>=2.12.0",
+    "sympy==1.13.1",
 ]
 
 # Development / testing:  uv sync --extra dev

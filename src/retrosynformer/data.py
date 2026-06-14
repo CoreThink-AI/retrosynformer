@@ -1,3 +1,17 @@
+# +                # default RetroGymEnvironment.process_routes is False
+#                  env = RetroGymEnvironment(
+#                      self.building_blocks,
+#                      self.templates_df,
+#                      None,
+#                      None,
+# -                    process_routes=True,
+# +                    process_routes=True,  # defaults to False->s
+#                  )
+# -                env.set_target_compound(target)
+# +                # self.process_routes used instead of reward_function arg
+# +                env.set_target_compound(target)  # reward_function=None defaults to self.process_routes to chose [specific] or [general]
+#                  route_done, route_done, _ = env._check_if_done()
+
 import logging
 import pickle
 import random
@@ -195,14 +209,18 @@ class RouteDataset:
                 target = route["smiles"]
                 self.template_general_hash2template_general[template_hash]
 
+                # default RetroGymEnvironment.process_routes is False
                 env = RetroGymEnvironment(
                     self.building_blocks,
                     self.templates_df,
                     None,
                     None,
-                    process_routes=True,
+                    process_routes=True,  # defaults to False
                 )
                 env.set_target_compound(target)
+                # because target, reward_function=None) self.process_routes used instead of reward_function arg
+                env.set_target_compound(target)  # reward_function=None defaults to self.process_routes to chose [specific] or [general]
+
                 route_done, route_done, _ = env._check_if_done()
 
                 states_smiles = [[target]]
