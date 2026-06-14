@@ -71,16 +71,14 @@ class RetroGymEnvironment:
         # Create a new instance with the copied attributes
         return copied_environment
 
-    def set_target_compound(self, target_compound)  #, reward_function=None):
+    def set_target_compound(self, target_compound, reward_function=None):
         # self.all_reward_functions = all_reward_functions or self.all_reward_functions
         self.state = [[target_compound]]
         self.visited_intermediates = []
         self.visited_intermediates_branch = []
-        # TODO: delete self.reward_function and replace with self.all_reward_functions in 3 places
-        # [ ] 1. here within set_target_compound
-        # [ ] 2. within _get_reward
-        # [ ] 3. within __init__ 
-        if self.process_routes:
+        if reward_function:
+            self.all_reward_functions = [reward_function]
+        elif self.process_routes:
             self.all_reward_functions = ["reward_general"]
         else:
             self.all_reward_functions = [
@@ -106,13 +104,8 @@ class RetroGymEnvironment:
         """
         states = self.state[-n:]
         # TODO: delete self.reward_function, only self.all_reward_functions
-        reward_functions = (
-            [self.reward_function]
-            if self.reward_function
-            else self.all_reward_functions
-        )
 
-        for reward_fn in reward_functions:
+        for reward_fn in self.all_reward_functions:
             if reward_fn == "reward_specific":
                 reward = get_specific_rewards(
                     states, self.current_depth, self.reward_mapping
