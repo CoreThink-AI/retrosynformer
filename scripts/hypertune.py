@@ -49,6 +49,7 @@ class _JsonlHandler(logging.Handler):
                 "log": {
                     "level": record.levelname,
                     "logger": record.name,
+                    "file": f"{record.filename}:{record.lineno}",
                     "msg": self.format(record),
                 },
             })
