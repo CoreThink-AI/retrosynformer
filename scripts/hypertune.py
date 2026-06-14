@@ -120,6 +120,48 @@ def _validate_config(config: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Study-directory lock
+# ---------------------------------------------------------------------------
+
+def _acquire_lock(study_name: str) -> None:
+    """Create a study-specific directory and symlink RESULTS_BASE to it.
+
+    ``results/hypertune`` acts as a mutual-exclusion lock: if the path already
+    exists (symlink or real directory) we refuse to start rather than clobber
+    in-progress results.  Remove the symlink manually to clear a stale lock::
+
+        rm results/hypertune
+
+    The actual results live in ``results/hypertune-{study_name}/`` and are
+    untouched when the symlink is removed after the study ends.
+    """
+    study_dir = f"{RESULTS_BASE}-{study_name}"
+    os.makedirs(study_dir, exist_ok=True)
+
+    if os.path.lexists(RESULTS_BASE):
+        if os.path.islink(RESULTS_BASE):
+            target = os.path.realpath(RESULTS_BASE)
+            detail = f"symlink → {target}"
+        else:
+            detail = "real directory"
+        raise RuntimeError(
+            f"'{RESULTS_BASE}' already exists ({detail}).\n"
+            "A hypertune study may already be running on this machine.\n"
+            f"If no study is in progress, remove the lock and retry:\n"
+            f"    rm {RESULTS_BASE}"
+        )
+
+    # Relative symlink so the results/ tree stays self-contained.
+    os.symlink(f"hypertune-{study_name}", RESULTS_BASE)
+
+
+def _release_lock() -> None:
+    """Remove the RESULTS_BASE symlink; the study directory is kept."""
+    if os.path.islink(RESULTS_BASE):
+        os.unlink(RESULTS_BASE)
+
+
+# ---------------------------------------------------------------------------
 # Search-space dispatcher
 # ---------------------------------------------------------------------------
 
@@ -255,58 +297,61 @@ def main():
     )
     args = parser.parse_args()
 
-    os.makedirs(RESULTS_BASE, exist_ok=True)
-    _setup_jsonl_logging()
-    _write({"event": "study_start", "config": {
-        "n_trials": args.n_trials, "n_epochs": args.n_epochs,
-        "dataset": args.dataset, "storage": args.storage,
-        "config_path": args.config_path,
-        "eval_n_batches": args.eval_n_batches,
-    }})
+    _acquire_lock(args.study_name)
+    try:
+        _setup_jsonl_logging()
+        _write({"event": "study_start", "config": {
+            "n_trials": args.n_trials, "n_epochs": args.n_epochs,
+            "dataset": args.dataset, "storage": args.storage,
+            "config_path": args.config_path,
+            "eval_n_batches": args.eval_n_batches,
+        }})
 
-    study = optuna.create_study(
-        study_name=args.study_name,
-        direction="maximize",
-        storage=args.storage,
-        load_if_exists=True,
-    )
+        study = optuna.create_study(
+            study_name=args.study_name,
+            direction="maximize",
+            storage=args.storage,
+            load_if_exists=True,
+        )
 
-    # Only enqueue the baseline on a fresh study — resuming from storage already has it.
-    if len(study.trials) == 0:
-        study.enqueue_trial(BASELINE_TRIAL)
+        # Only enqueue the baseline on a fresh study — resuming from storage already has it.
+        if len(study.trials) == 0:
+            study.enqueue_trial(BASELINE_TRIAL)
 
-    def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-        """Write a completion record to run.jsonl after each trial."""
+        def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+            """Write a completion record to run.jsonl after each trial."""
+            _write({
+                "event": "trial_complete" if trial.state == optuna.trial.TrialState.COMPLETE else "trial_fail",
+                "trial": {"number": trial.number, "state": trial.state.name},
+                "params": dict(trial.params),
+                "results": {
+                    "value": trial.value,
+                    "duration_s": round(trial.duration.total_seconds(), 1) if trial.duration else None,
+                },
+            })
+
+        study.optimize(
+            lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset, args.eval_n_batches),
+            n_trials=args.n_trials,
+            callbacks=[log_trial],
+        )
+
+        best = study.best_trial
         _write({
-            "event": "trial_complete" if trial.state == optuna.trial.TrialState.COMPLETE else "trial_fail",
-            "trial": {"number": trial.number, "state": trial.state.name},
-            "params": dict(trial.params),
-            "results": {
-                "value": trial.value,
-                "duration_s": round(trial.duration.total_seconds(), 1) if trial.duration else None,
+            "event": "study_end",
+            "best": {
+                "trial": best.number,
+                "value": best.value,
+                "params": dict(best.params),
+                "dir": os.path.join(RESULTS_BASE, f"trial_{best.number:03d}"),
             },
         })
-
-    study.optimize(
-        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset, args.eval_n_batches),
-        n_trials=args.n_trials,
-        callbacks=[log_trial],
-    )
-
-    best = study.best_trial
-    _write({
-        "event": "study_end",
-        "best": {
-            "trial": best.number,
-            "value": best.value,
-            "params": dict(best.params),
-            "dir": os.path.join(RESULTS_BASE, f"trial_{best.number:03d}"),
-        },
-    })
-    print("\n=== Best trial ===")
-    print(f"  fraction_targets_solved: {best.value:.4f}")
-    print(f"  params: {best.params}")
-    print(f"  results: {os.path.join(RESULTS_BASE, f'trial_{best.number:03d}')}")
+        print("\n=== Best trial ===")
+        print(f"  fraction_targets_solved: {best.value:.4f}")
+        print(f"  params: {best.params}")
+        print(f"  results: {os.path.join(RESULTS_BASE, f'trial_{best.number:03d}')}")
+    finally:
+        _release_lock()
 
 
 if __name__ == "__main__":
