@@ -12,9 +12,9 @@ dataset:
   synthetic_routes_path: false
   valid_set: n1+n5
 evaluation:
-  batch_size: 512
+  batch_size: 64
   beam_width: 1
-  eval_n_batches: 10
+  eval_n_batches: 2
   eval_routes_frequency: 100
   max_depth: 6
   test_frac: 0.1

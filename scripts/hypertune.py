@@ -21,7 +21,6 @@ import optuna
 
 from retrosynformer.runner import main as train
 
-
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 RESULTS_BASE = "results/hypertune"
 RUN_JSONL = os.path.join(RESULTS_BASE, "run.jsonl")
@@ -68,7 +67,7 @@ def _setup_jsonl_logging() -> None:
 # Optuna objective
 # ---------------------------------------------------------------------------
 
-def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str) -> float:
+def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str, eval_n_batches: int | None = None) -> float:
     n_heads = trial.suggest_categorical("n_heads", [1, 2, 4, 8])
     n_layers = trial.suggest_int("n_layers", 2, 32, log=True)
     head_dim = trial.suggest_categorical("head_dim", [64, 128, 256])
@@ -83,12 +82,10 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         "trial": {"number": trial.number, "dir": trial_dir},
         "params": dict(trial.params),
     })
-    print(f"\n=== Trial {trial.number} params ===")
+    print(f"\n### Trial {trial.number} params")
     for k, v in trial.params.items():
         print(f"  {k}: {v}")
-
-    t0 = time.time()
-    val_loss, val_acc, val_route_acc, fraction_solved = train(
+    model_params = dict(
         config_path=config_path,
         dataset=dataset,
         n_epochs=n_epochs,
@@ -98,10 +95,17 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         lr=lr,
         dropout=dropout,
         results_path=trial_dir,
+        eval_n_batches=eval_n_batches,
     )
+    print("\n#### Model params")
+    for k, v in model_params.items():
+        print(f"    {k}: {v}")
+
+    t0 = time.time()
+    val_loss, val_acc, val_route_acc, fraction_solved = train(**model_params)
 
     value = fraction_solved if fraction_solved is not None else 0.0
-    _write({
+    trial_results = {
         "event": "trial_end",
         "trial": {"number": trial.number, "dir": trial_dir},
         "params": dict(trial.params),
@@ -114,7 +118,11 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
                 "valid_route_accuracy": float(val_route_acc[-1]) if val_route_acc else None,
             },
         },
-    })
+    }
+    _write(trial_results)
+    print("\n#### Results")
+    for k, v in trial_results.items():
+        print(f"    {k}: {v}")
     return value
 
 
@@ -141,6 +149,10 @@ def main():
         help="Dataset preset: small=589, standard=1573, large=2957 templates (default: large)",
     )
     parser.add_argument(
+        "--eval-n-batches", type=int, default=None, dest="eval_n_batches",
+        help="Override evaluation.eval_n_batches from config (reduce for faster CPU runs)",
+    )
+    parser.add_argument(
         "--study-name", default="retrosynformer_hypertune",
         help="Optuna study name",
     )
@@ -156,6 +168,7 @@ def main():
         "n_trials": args.n_trials, "n_epochs": args.n_epochs,
         "dataset": args.dataset, "storage": args.storage,
         "config_path": args.config_path,
+        "eval_n_batches": args.eval_n_batches,
     }})
 
     study = optuna.create_study(
@@ -182,7 +195,7 @@ def main():
         })
 
     study.optimize(
-        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset),
+        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset, args.eval_n_batches),
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )
@@ -197,7 +210,7 @@ def main():
             "dir": os.path.join(RESULTS_BASE, f"trial_{best.number:03d}"),
         },
     })
-    print(f"\n=== Best trial ===")
+    print("\n=== Best trial ===")
     print(f"  fraction_targets_solved: {best.value:.4f}")
     print(f"  params: {best.params}")
     print(f"  results: {os.path.join(RESULTS_BASE, f'trial_{best.number:03d}')}")

@@ -1,4 +1,5 @@
 import argparse
+import logging
 import random
 import time
 
@@ -7,6 +8,8 @@ import pandas as pd
 import torch
 import yaml
 from torch.utils.data import DataLoader
+
+logger = logging.getLogger(__name__)
 
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
 
@@ -208,7 +211,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None, eval_n_batches=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -251,6 +254,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         config["model"]["embd_pdrop"] = dropout
         config["model"]["resid_pdrop"] = dropout
         print(f"dropout override: {dropout} (attn/embd/resid)")
+    if eval_n_batches is not None:
+        config["evaluation"]["eval_n_batches"] = eval_n_batches
+        print(f"eval_n_batches override: {eval_n_batches}")
     # Derive hidden_size from n_heads * head_dim whenever head_dim is present in config.
     if "head_dim" in config["model"]:
         config["model"]["hidden_size"] = config["model"]["n_heads"] * config["model"]["head_dim"]
