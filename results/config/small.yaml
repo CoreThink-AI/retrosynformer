@@ -9,10 +9,10 @@ optuna:
   dropout:
     low: 0.0
     high: 0.3
-  structured_dropout_bottleneck:
-    low: 32
-    high: 512
-    log: true
+#   structured_dropout_bottleneck:
+#     low: 32
+#     high: 512
+#     log: true
 
 context:
   building_blocks: data/standard_building_blocks.csv
@@ -47,7 +47,7 @@ model:
   n_layers: 26
   resid_pdrop: 0.08
   use_structured_dropout: false       # set true to use MoleculeConditionedMaskGenerator
-  structured_dropout_bottleneck: 128  # MLP hidden dim (fp_dim → bottleneck → hidden_size)
+#  structured_dropout_bottleneck: 128  # MLP hidden dim (fp_dim → bottleneck → hidden_size)
 optimizer:
   lr: 0.211
   momentum: 0.98
