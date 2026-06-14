@@ -18,7 +18,8 @@ from .data import RouteDatasetTorch, collate_fn
 from .trainer import RetroTrainer
 from .utils import evaluation, reward_functions, utils
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+from .utils.utils import get_device
+DEVICE = get_device()
 
 
 def read_config(config_path):
@@ -293,7 +294,7 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     torch.manual_seed(seed)
     np.random.seed(seed + 1)
     random.seed(seed + 2)
-    if torch.cuda.is_available():
+    if DEVICE.startswith("cuda"):
         torch.cuda.manual_seed_all(seed + 3)
 
     model = init_model(config, model_path=model_path)

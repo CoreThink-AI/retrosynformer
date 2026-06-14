@@ -17,7 +17,7 @@ class RetroTrainer:
 
         self.train_dataloader, self.valid_dataloader, self.test_dataloader = dataloaders
         self.config = config
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = utils.get_device()
         self.result_df = pd.DataFrame({})
         self.results_eval = []
         self.state_dim = int(

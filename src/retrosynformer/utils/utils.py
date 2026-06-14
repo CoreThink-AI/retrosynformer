@@ -15,6 +15,15 @@ from rxnutils.routes.ted.reactiontree import ReactionTreeWrapper
 logger = logging.getLogger(__name__)
 
 
+def get_device() -> str:
+    """Return the best available device: cuda > mps > cpu."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def flatten(xss):
     """Flatten one level of nesting from a list of lists.
 
