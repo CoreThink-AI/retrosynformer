@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def get_device() -> str:
-    """Return the best available device: cuda > mps > cpu."""
+    """Return the best available device: cuda > mps > cpu.
+
+    >>> get_device() in ("cuda", "mps", "cpu")
+    True
+    """
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
@@ -209,6 +213,19 @@ def write_config(config_path, content):
 
 
 def convert_batches_to_action_ids(actions, action_preds):
+    """Convert batched one-hot action tensors to integer argmax IDs.
+
+    Zero rows (all-zero tensors) are treated as padding and skipped.
+
+    >>> import torch
+    >>> actions = [[torch.tensor([0., 1., 0.]), torch.zeros(3)]]
+    >>> preds   = [[torch.tensor([0.1, 0.8, 0.1]), torch.zeros(3)]]
+    >>> ids, pred_ids, probs = convert_batches_to_action_ids(actions, preds)
+    >>> ids, pred_ids
+    ([1], [1])
+    >>> len(probs[0])
+    3
+    """
     actions_id = []
     actions_id_pred = []
     action_preds_prob = []
@@ -372,6 +389,18 @@ def flatten_list(nested_list):
 
 
 def flatten_and_crop(list_a, list_b):
+    """Zip two nested lists, strip zeros, then crop each pair to the shorter.
+
+    Each element of list_a / list_b is a route (a list).  Zeros are treated as
+    padding and removed before the pair is cropped to the shorter length.
+
+    >>> flatten_and_crop([[1, 0, 2], [3, 4]], [[10, 20, 30], [40, 50, 60]])
+    ([1, 2, 3, 4], [10, 20, 40, 50])
+    >>> flatten_and_crop([[1, 2]], [[10]])
+    ([1], [10])
+    >>> flatten_and_crop([], [])
+    ([], [])
+    """
     flat_and_cropped_list_a, flat_and_cropped_list_b = [], []
 
     for itema, itemb in zip(list_a, list_b):
@@ -389,6 +418,17 @@ def flatten_and_crop(list_a, list_b):
 
 
 def get_index_values(list_a, list_b, idx):
+    """Return all elements at position *idx* from each route pair, flattened.
+
+    Pairs where either side is shorter than idx + 1 are skipped.
+
+    >>> get_index_values([[[1, 2], [3, 4]]], [[[10, 20], [30, 40]]], idx=0)
+    ([1, 2], [10, 20])
+    >>> get_index_values([[[1, 2], [3, 4]]], [[[10, 20], [30, 40]]], idx=1)
+    ([3, 4], [30, 40])
+    >>> get_index_values([[[1]]], [[[10]]], idx=5)
+    ([], [])
+    """
     flat_and_cropped_list_a, flat_and_cropped_list_b = [], []
 
     for itema, itemb in zip(list_a, list_b):
@@ -400,6 +440,14 @@ def get_index_values(list_a, list_b, idx):
 
 
 def check_if_building_block(smiles, building_blocks):
+    """Return True if the InChI key for *smiles* appears in *building_blocks*.
+
+    >>> bb = {"UHOVQNZJYSORNB-UHFFFAOYSA-N"}  # benzene
+    >>> check_if_building_block("c1ccccc1", bb)
+    True
+    >>> check_if_building_block("CC(=O)Oc1ccccc1C(=O)O", bb)
+    False
+    """
     mol = Chem.MolFromSmiles(smiles)
     inchi_key = Chem.inchi.MolToInchiKey(mol)
     if inchi_key in building_blocks:
