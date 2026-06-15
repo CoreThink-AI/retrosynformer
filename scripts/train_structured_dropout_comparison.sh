@@ -6,7 +6,7 @@
 retrosynformer-hypertune \
   -c results/config/small_standard.yaml \
   --study-name compare2_small_standard_dropout \
-  --n-trials 15 \
+  --n-trials 5 \
   --n-epochs 200 \
   --dataset small
 
@@ -15,6 +15,6 @@ retrosynformer-hypertune \
 retrosynformer-hypertune \
   -c results/config/small_structured.yaml \
   --study-name compare2_small_structured_dropout \
-  --n-trials 15 \
+  --n-trials 5 \
   --n-epochs 200 \
   --dataset small
