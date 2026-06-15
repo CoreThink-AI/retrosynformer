@@ -46,14 +46,14 @@ dependencies = [
 [project.optional-dependencies]
 # CPU-only PyTorch:  uv sync --extra cpu
 cpu = [
-    "torch>=2.0.0",
+    "torch>=2.0.0,<2.7.0",
 ]
 
 # AMD ROCm GPU (Radeon / Strix Halo iGPU):
 #   uv sync --extra rocm
 #   uv sync --extra amdgpu  (alias)
 rocm = [
-    "torch>=2.0.0",
+    "torch>=2.5.0,<2.7.0",
     "sympy==1.13.1",
 ]
 amdgpu = [
