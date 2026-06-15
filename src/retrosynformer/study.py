@@ -4,9 +4,14 @@ Public API
 ----------
 to_dfs(db_path)                    -> dict[str, DataFrame]   all raw tables
 to_trials_df(db_path)              -> DataFrame               one row per trial, params decoded
+dfs_to_trials_df(dfs)              -> DataFrame               same, from an already-loaded dict
 concat(study_a_dfs, study_b_dfs)   -> dict[str, DataFrame]   merge two study dicts
+concat_all(pattern, root)          -> dict[str, DataFrame]   merge all study.db files in a glob
 """
+import functools
+import glob as _glob
 import json
+import os
 import sqlite3
 
 import pandas as pd
@@ -80,19 +85,23 @@ def _decode_param(param_value: float, distribution_json: str) -> object:
     return param_value
 
 
-def to_trials_df(db_path: str) -> pd.DataFrame:
+def dfs_to_trials_df(dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Return one row per trial with decoded params, score, and duration.
+
+    Accepts an already-loaded dfs dict (e.g. from :func:`to_dfs` or
+    :func:`concat_all`).  When *dfs* contains more than one study a
+    ``study_name`` column is prepended so rows can be attributed to their
+    source study.
 
     Columns
     -------
-    trial         : int    — trial number (0-based)
+    study_name    : str    — present only when multiple studies are merged
+    trial         : int    — trial number (sequential across merged studies)
     state         : str    — COMPLETE / RUNNING / FAIL / WAITING
     duration_min  : float  — wall-clock minutes (NaN if still running)
     <param_name>  : any    — one column per hyperparameter, decoded
     score         : float  — objective value (fraction_targets_solved), NaN if not yet recorded
     """
-    dfs = to_dfs(db_path)
-
     # --- trials: times → duration -------------------------------------------
     t = dfs["trials"].copy()
     t["datetime_start"] = pd.to_datetime(t["datetime_start"])
@@ -100,7 +109,7 @@ def to_trials_df(db_path: str) -> pd.DataFrame:
     t["duration_min"] = (
         (t["datetime_complete"] - t["datetime_start"]).dt.total_seconds() / 60
     )
-    trials = t[["trial_id", "number", "state", "duration_min"]].rename(
+    trials = t[["trial_id", "study_id", "number", "state", "duration_min"]].rename(
         columns={"number": "trial"}
     )
 
@@ -126,8 +135,29 @@ def to_trials_df(db_path: str) -> pd.DataFrame:
     # --- join ----------------------------------------------------------------
     result = trials.merge(params_wide, on="trial_id", how="left")
     result = result.merge(values, on="trial_id", how="left")
-    result = result.drop(columns=["trial_id"])
+
+    # Add study_name when multiple studies are present.
+    studies = dfs["studies"]
+    if len(studies) > 1:
+        result = result.merge(
+            studies[["study_id", "study_name"]], on="study_id", how="left"
+        )
+        # Move study_name to the front.
+        cols = ["study_name"] + [c for c in result.columns if c not in ("study_name", "study_id", "trial_id")]
+        result = result[cols]
+    else:
+        result = result.drop(columns=["study_id"])
+
+    result = result.drop(columns=["trial_id"], errors="ignore")
     return result.sort_values("trial").reset_index(drop=True)
+
+
+def to_trials_df(db_path: str) -> pd.DataFrame:
+    """Return one row per trial with decoded params, score, and duration.
+
+    Thin wrapper around :func:`dfs_to_trials_df` for the single-file case.
+    """
+    return dfs_to_trials_df(to_dfs(db_path))
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +239,41 @@ def concat(
             result[tbl] = pd.concat(frames, ignore_index=True)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# concat_all
+# ---------------------------------------------------------------------------
+
+def concat_all(
+    pattern: str = "results/**/study.db",
+    root: str = ".",
+) -> dict[str, pd.DataFrame]:
+    """Load and merge every study.db matched by *pattern* under *root*.
+
+    Files are sorted lexicographically before merging so the result is
+    deterministic regardless of filesystem order.
+
+    Parameters
+    ----------
+    pattern:
+        Glob pattern relative to *root* (``**`` is expanded recursively).
+    root:
+        Directory from which *pattern* is resolved (default: current directory).
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Merged dfs dict ready for :func:`dfs_to_trials_df`.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the glob matches no files.
+    """
+    paths = sorted(_glob.glob(os.path.join(root, pattern), recursive=True))
+    if not paths:
+        raise FileNotFoundError(
+            f"No study.db files found matching {pattern!r} under {root!r}"
+        )
+    return functools.reduce(concat, (to_dfs(p) for p in paths))
