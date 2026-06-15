@@ -232,11 +232,6 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         config_path=config_path,
         dataset=dataset,
         n_epochs=n_epochs,
-        n_heads=n_heads,
-        n_layers=n_layers,
-        head_dim=head_dim,
-        lr=lr,
-        dropout=dropout,
         results_path=trial_dir,
     )
     model_params.update(params)
