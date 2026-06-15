@@ -3,6 +3,8 @@ import json
 import logging
 from collections import Counter
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.colors as clr
 import matplotlib.pyplot as plt
 import numpy as np

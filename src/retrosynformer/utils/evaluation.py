@@ -2,6 +2,8 @@ import argparse
 import logging
 import os
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.colors as clr
 import matplotlib.pyplot as plt
 import numpy as np
