@@ -46,6 +46,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 import time
 
 import optuna
@@ -123,8 +124,11 @@ def _validate_config(config: dict) -> None:
 # Study-directory lock
 # ---------------------------------------------------------------------------
 
-def _acquire_lock(study_name: str) -> None:
+def _acquire_lock(study_name: str) -> bool:
     """Create a study-specific directory and symlink RESULTS_BASE to it.
+
+    Returns True if a fresh study was started, False if an existing study is
+    being continued (symlink already in place, study.db found, user confirmed).
 
     ``results/hypertune`` acts as a mutual-exclusion lock: if the path already
     exists (symlink or real directory) we refuse to start rather than clobber
@@ -141,7 +145,23 @@ def _acquire_lock(study_name: str) -> None:
     if os.path.lexists(RESULTS_BASE):
         if os.path.islink(RESULTS_BASE):
             target = os.path.realpath(RESULTS_BASE)
-            detail = f"symlink → {target}"
+            db_path = os.path.join(target, "study.db")
+            if os.path.exists(db_path):
+                print(f"\nExisting study found: {RESULTS_BASE} → {target}")
+                print(f"  study.db: {db_path}")
+                try:
+                    answer = input("Continue existing study? [y/N] ").strip().lower()
+                except EOFError:
+                    answer = "n"
+                if answer in ("y", "yes"):
+                    print("Continuing existing study — run.jsonl will be appended.")
+                    return False
+                print(
+                    "Not continuing. To start a fresh study, remove the lock first:\n"
+                    f"    rm {RESULTS_BASE}"
+                )
+                sys.exit(0)
+            detail = f"symlink → {target} (no study.db)"
         else:
             detail = "real directory"
         raise RuntimeError(
@@ -153,6 +173,7 @@ def _acquire_lock(study_name: str) -> None:
 
     # Relative symlink so the results/ tree stays self-contained.
     os.symlink(f"hypertune-{study_name}", RESULTS_BASE)
+    return True
 
 
 def _release_lock() -> None:
@@ -232,11 +253,6 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         config_path=config_path,
         dataset=dataset,
         n_epochs=n_epochs,
-        n_heads=n_heads,
-        n_layers=n_layers,
-        head_dim=head_dim,
-        lr=lr,
-        dropout=dropout,
         results_path=trial_dir,
     )
     model_params.update(params)
@@ -305,10 +321,10 @@ def main():
     )
     args = parser.parse_args()
 
-    _acquire_lock(args.study_name)
+    is_fresh = _acquire_lock(args.study_name)
     try:
         _setup_jsonl_logging()
-        _write({"event": "study_start", "config": {
+        _write({"event": "study_start" if is_fresh else "study_resume", "config": {
             "n_trials": args.n_trials, "n_epochs": args.n_epochs,
             "dataset": args.dataset, "storage": args.storage,
             "config_path": args.config_path,

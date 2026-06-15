@@ -368,10 +368,12 @@ class RetroTrainer:
             save_folder + "/train_progress.jsonl",
             save_folder + "/train_progress_accuracy.png",
         )
-        utils.plot_evaluation_results(
-            save_folder + "/pred_routes_train_progress.json",
-            save_folder + "/evaluation_target_solved.png",
-        )
+        eval_results_path = save_folder + "/pred_routes_train_progress.json"
+        if os.path.exists(eval_results_path) and os.path.getsize(eval_results_path) > 2:
+            utils.plot_evaluation_results(
+                eval_results_path,
+                save_folder + "/evaluation_target_solved.png",
+            )
 
         return (
             validation_loss,
