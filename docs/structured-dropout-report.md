@@ -44,8 +44,18 @@ fp (1024-bit) → Linear(1024, bottleneck) → ReLU
 | `fp_dim` | 1024 | radius-2 Morgan fingerprint |
 | `hidden_size` | `n_heads × head_dim` | e.g. 256 for (1 head × 256 dim) |
 | `bottleneck` | 32–512 (optuna) | default 128 |
-| Output bias init | −2.2 | sigmoid(−2.2) ≈ 0.10 → ~10% initial drop |
-| Drop cap | 0.9 | never drops >90% of any channel |
+| `rate` | 0.1–5.0 (optuna) | global multiplier on learned drop probs; default 1.0 |
+| Output bias init | −2.2 | sigmoid(−2.2) ≈ 0.10 → ~10% initial drop at rate=1 |
+| Drop cap | 0.9 | never drops >90% of any channel (after rate scaling) |
+
+The MLP output is multiplied by `structured_dropout_rate` before clamping,
+giving a single scalar dial over the learned per-channel probabilities:
+
+| `rate` | Effect |
+|--------|--------|
+| `0.0` | mask is all-ones — structured dropout fully disabled |
+| `1.0` | learned rates unchanged (default) |
+| `>1.0` | amplified dropout; initial drop ≈ rate × 10%, capped at 90% |
 
 **Training mode** — inverted-dropout Bernoulli mask, scaled by 1/(1−p) to
 preserve expected activation magnitude.  
@@ -76,16 +86,31 @@ changes to `RetroTrainer`, `RoutePredictor`, or any other existing code.
 ### 2.3 Config keys
 
 ```yaml
-# results/config/small_sd.yaml
+# results/config/small_nodropout_sd.yaml
 model:
   use_structured_dropout: true          # activates StructuredDropoutDecisionTransformer
   structured_dropout_bottleneck: 128    # MLP hidden dim; also searched by Optuna
+  structured_dropout_rate: 1.0         # global multiplier; also searched by Optuna
+
+# Standard dropout fixed at 0 in model section (attn_pdrop, embd_pdrop, resid_pdrop: 0.0)
+# to isolate the structured-dropout signal.
 
 optuna:
   structured_dropout_bottleneck:
     low: 32
     high: 512
     log: true
+  structured_dropout_rate:
+    low: 0.1
+    high: 5.0
+    log: true                          # log scale: equal budget for 0.1–1 and 1–5
+```
+
+`structured_dropout_rate` can also be set from the CLI:
+
+```bash
+python -m retrosynformer.runner -c results/config/small_nodropout_sd.yaml \
+  --structured-dropout-rate 2.0
 ```
 
 Validation guard: running `hypertune.py` raises `ValueError` if
