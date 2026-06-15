@@ -93,6 +93,8 @@ def main() -> None:
                         help="For accuracy metrics: exclude trials below this threshold. "
                              "For loss metrics: exclude trials above this threshold. "
                              "Default: 0.2 for accuracy metrics, no filter for loss metrics.")
+    parser.add_argument("--study", metavar="STUDY_NAME", action="append", default=None,
+                        help="Only include trials from this study name (repeat for multiple studies)")
     parser.add_argument("--out", default=None,
                         help="Save figure to this path instead of showing interactively")
     parser.add_argument("--root", default=".",
@@ -130,6 +132,13 @@ def main() -> None:
         sys.exit("No completed trials found across all study.db files.")
 
     all_trials = pd.concat(parts, ignore_index=True)
+
+    if args.study:
+        available = sorted(all_trials["study_name"].unique())
+        all_trials = all_trials[all_trials["study_name"].isin(args.study)]
+        if all_trials.empty:
+            sys.exit(f"No trials found for study name(s): {args.study}\nAvailable: {available}")
+        print(f"Filtered to study name(s): {args.study}")
     all_trials["jsonl_path"] = all_trials.apply(
         lambda r: _jsonl_path(r["db_dir"], r["original_trial"]), axis=1
     )
