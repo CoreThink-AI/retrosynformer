@@ -41,13 +41,21 @@ dependencies = [
     "filelock",
     # "sympy>=1.13.3",
     "transformers",
-    "torch==2.12.0+cpu",
 ]
 
 [project.optional-dependencies]
+# CPU-only PyTorch:  uv sync --extra cpu
+cpu = [
+    "torch>=2.12.0",
+]
+
 # AMD ROCm GPU (Radeon / Strix Halo iGPU):
-#   uv sync --extra amdgpu
-#   pip install retrosynformer[amdgpu] --extra-index-url https://download.pytorch.org/whl/rocm6.2
+#   uv sync --extra rocm
+#   uv sync --extra amdgpu  (alias)
+rocm = [
+    "torch>=2.12.0",
+    "sympy==1.13.1",
+]
 amdgpu = [
     "torch>=2.12.0",
     "sympy==1.13.1",
@@ -75,15 +83,17 @@ script-files = [
     "scripts/train_structured_dropout_comparison.sh",
 ]
 
-# uv resolves torch from the ROCm index when the amdgpu extra is active
+# uv resolves torch from the ROCm index when the rocm or amdgpu extra is active,
+# and from the CPU index when the cpu extra is active.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.uv.sources]
 rdchiral = { path = "../rdchiral", editable = true }
 torch = [
+    { index = "pytorch-rocm", extra = "rocm" },
     { index = "pytorch-rocm", extra = "amdgpu" },
-    { index = "pytorch-cpu" },
+    { index = "pytorch-cpu", extra = "cpu" },
 ]
 
 [[tool.uv.index]]
