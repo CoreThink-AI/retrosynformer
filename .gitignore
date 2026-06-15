@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# retrosynformer Optuna trials
+results/hypertune*/
+
 # C extensions
 *.so
 # bash extensions
