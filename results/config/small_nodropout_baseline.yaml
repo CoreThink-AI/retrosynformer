@@ -57,6 +57,6 @@ train:
   batch_size: 512
   loss: crossEntropyLoss
   n_epochs: 200
-  early_stopping_patience: 50
-  lr_scheduler_patience: 20
+  early_stopping_patience: 50  # stop after this many epochs with no valid_loss improvement
+  lr_scheduler_patience: 20    # ReduceLROnPlateau patience before halving lr
   results_path: results/
