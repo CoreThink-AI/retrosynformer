@@ -1,5 +1,5 @@
 # 1 — Baseline (standard dropout)
-python scripts/hypertune.py \
+.venv-rocm/bin/python scripts/hypertune.py \
   -c results/config/small.yaml \
   --study-name small_baseline \
   --n-trials 10 \
@@ -7,7 +7,7 @@ python scripts/hypertune.py \
   --dataset small
 
 # 2 — Structured dropout
-python scripts/hypertune.py \
+.venv-rocm/bin/python scripts/hypertune.py \
   -c results/config/small_sd.yaml \
   --study-name small_sd \
   --n-trials 10 \
