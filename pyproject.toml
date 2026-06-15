@@ -98,10 +98,33 @@ script-files = [
     "scripts/train_structured_dropout_comparison.sh",
 ]
 
-# uv resolves torch from the ROCm index when the rocm or amdgpu extra is active,
-# and from the CPU index when the cpu extra is active.
+# Declare torch extras as mutually exclusive so uv doesn't try to resolve
+# pytorch-cpu and pytorch-rocm indexes simultaneously.
+[tool.uv]
+# reaction-utils==1.9.3 declares rdkit<2024.0.0 but is runtime-compatible
+# with newer rdkit; override so we can use the current release.
+override-dependencies = ["rdkit>=2025.3.1"]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "rocm" },
+    { extra = "amdgpu" },
+    { extra = "cuda" },
+  ],
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # rdkit 2023.9.x emits DeprecationWarnings from its own internal Python shims
+    # (MolStandardize submodules) — not from our code; suppress until rdkit is
+    # upgradeable past the reaction-utils==1.9.3 rdkit<2024.0.0 upper bound.
+    "ignore::DeprecationWarning:rdkit",
+    # rxnutils uses Pydantic v1 update_forward_refs() API with Pydantic v2 installed.
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    # starlette TestClient / httpx compatibility shim — not our code.
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [tool.uv.sources]
 rdchiral = { path = "../rdchiral", editable = true }
