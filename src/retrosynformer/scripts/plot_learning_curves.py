@@ -89,6 +89,10 @@ def main() -> None:
                         help="Metric to rank by and plot on y-axis (default: valid_action_accuracy)")
     parser.add_argument("--also-train", action="store_true",
                         help="Overlay the corresponding train_* metric as a dashed line")
+    parser.add_argument("--xscale", default="linear", choices=["linear", "log", "symlog", "logit"],
+                        help="X-axis scale (default: linear)")
+    parser.add_argument("--yscale", default="log", choices=["linear", "log", "symlog", "logit"],
+                        help="Y-axis scale (default: log)")
     parser.add_argument("--min-score", type=float, default=None,
                         help="For accuracy metrics: exclude trials below this threshold. "
                              "For loss metrics: exclude trials above this threshold. "
@@ -283,7 +287,8 @@ def main() -> None:
     y_label = args.metric.replace("_", " ")
     ax.set_xlabel("Epoch")
     ax.set_ylabel(y_label)
-    ax.set_yscale("log")
+    ax.set_xscale(args.xscale)
+    ax.set_yscale(args.yscale)
     title = f"Learning curves — top {plotted} trials by Optuna score  ({y_label})"
     if train_metric:
         title += f"\nsolid={args.metric}  dashed={train_metric}"
