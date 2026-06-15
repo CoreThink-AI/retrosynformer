@@ -41,7 +41,17 @@ def _load_jsonl(path: str) -> pd.DataFrame:
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty or "epoch" not in df.columns:
+        return df
+    # If training was interrupted and restarted, epoch resets to 0.
+    # Keep only the last contiguous run by finding the last backwards jump.
+    epochs = df["epoch"].to_numpy()
+    last_reset = 0
+    for i in range(1, len(epochs)):
+        if epochs[i] <= epochs[i - 1]:
+            last_reset = i
+    return df.iloc[last_reset:].reset_index(drop=True)
 
 
 def _trials_from_db(db_path: str) -> pd.DataFrame:
