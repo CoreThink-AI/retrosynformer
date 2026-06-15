@@ -1,0 +1,192 @@
+# RetroSynFormer configuration reference
+# All keys and their valid values are documented here.
+# Copy this file and edit the paths under context/dataset before training.
+
+# ---------------------------------------------------------------------------
+# context — file paths for chemistry data
+# ---------------------------------------------------------------------------
+context:
+  # CSV of purchasable building blocks (one SMILES per row, column "smiles")
+  building_blocks: data/standard_building_blocks.csv
+  # Random seed used when splitting data and shuffling routes
+  random_state: 1
+  # Pickle file of SMARTS reaction templates (list of rdchiral template strings)
+  templates_path: data/standard_reaction_templates.pickle
+
+# ---------------------------------------------------------------------------
+# dataset — data loading and splitting
+# ---------------------------------------------------------------------------
+dataset:
+  # Number of reaction templates; must match the templates_path file exactly.
+  # PaRoutes presets:  small=589  standard=1573  large=2957
+  action_dim: 1573
+  # Drop routes that appear more than once (avoids train/valid leakage)
+  drop_duplicates: true
+  # Morgan fingerprint radius-2 bit count; state_dim = fp_dim × n_in_state
+  fp_dim: 1024
+  # Number of frontier molecules concatenated into one state vector
+  n_in_state: 2
+  # JSON file of retrosynthesis routes in PaRoutes format
+  routes_path: data/standard_routes.json
+  # Shuffle route order before splitting
+  shuffle: true
+  # Path to additional synthetic routes JSON to augment training, or false
+  synthetic_routes_path: false
+  # How to split train / valid / test:
+  #   random_split — random split; test_frac controls held-out fraction
+  #   n1+n5        — PaRoutes N1+N5 benchmark targets become the test set
+  valid_set: n1+n5  # random_split | n1+n5
+
+# ---------------------------------------------------------------------------
+# evaluation — route-prediction settings during and after training
+# ---------------------------------------------------------------------------
+evaluation:
+  # Molecules per batch when running route evaluation
+  batch_size: 64
+  # Number of parallel route hypotheses during beam search.
+  # 1 = greedy (fast); larger values explore more but cost more memory/time.
+  beam_width: 1
+  # Limit route evaluation to this many batches (reduces wall time).
+  # null or 0 evaluates all batches.
+  eval_n_batches: 2
+  # Run full route evaluation every N epochs during training (expensive).
+  # Set large (e.g. 100) to skip mid-training and only evaluate at the end.
+  eval_routes_frequency: 100
+  # Maximum retrosynthesis depth (steps) per route
+  max_depth: 6
+  # Fraction of data held out for test when valid_set: random_split
+  test_frac: 0.1
+  # Field used to rank competing routes from beam search:
+  #   trajectory_prob — product of per-step action probabilities (default)
+  #   total_reward    — sum of step-wise rewards
+  sort_on: trajectory_prob  # trajectory_prob | total_reward
+  # Routes with more candidates than this use an approximate TED; rest are exact
+  ted_exhaustive_limit: 64
+
+# ---------------------------------------------------------------------------
+# model — Decision Transformer architecture
+# ---------------------------------------------------------------------------
+model:
+  # Apply tanh to the raw action logits before argmax.
+  # Use false for discrete template selection (the normal case).
+  action_tanh: false
+  # Nonlinearity inside the transformer feed-forward blocks.
+  # Passed directly to HuggingFace DecisionTransformerConfig.
+  activation_function: relu  # relu | gelu | silu | tanh
+  # Dropout applied to attention weights (0.0 = disabled)
+  attn_pdrop: 0.0
+  # Dropout applied to token embeddings (0.0 = disabled)
+  embd_pdrop: 0.0
+  # Dimension per attention head; hidden_size = n_heads × head_dim
+  head_dim: 128
+  # Maximum episode length (retrosynthesis steps per route)
+  max_ep_len: 20
+  # Number of attention heads
+  n_heads: 4
+  # Number of transformer decoder layers
+  n_layers: 4
+  # Dropout applied after each residual connection (0.0 = disabled)
+  resid_pdrop: 0.0
+  # Enable MoleculeConditionedMaskGenerator structured dropout.
+  # Learns which hidden units to drop conditioned on the target molecule.
+  use_structured_dropout: false
+  # (only used when use_structured_dropout: true)
+  # Hidden size of the MLP that maps fp_dim → bottleneck → hidden_size
+  structured_dropout_bottleneck: 128
+  # (only used when use_structured_dropout: true)
+  # Scaling factor controlling mask sparsity; sampled log-uniformly in hypertune.
+  # Higher values increase effective dropout rate.
+  structured_dropout_rate: 1.0
+
+# ---------------------------------------------------------------------------
+# optimizer — SGD settings
+# ---------------------------------------------------------------------------
+optimizer:
+  # Initial learning rate for SGD
+  lr: 0.001
+  # SGD momentum coefficient
+  momentum: 0.98
+
+# ---------------------------------------------------------------------------
+# reward — step-level reward shaping for route episodes
+# ---------------------------------------------------------------------------
+reward:
+  # Reward assigned when a molecule is a purchasable building block (route solved).
+  # Positive values reward solving; 0 makes building blocks neutral.
+  building_block_reward_factor: 0
+  # Multiply the building-block reward by the step depth when nonzero.
+  # 0 = no depth scaling; positive integer N = reward × depth^N (approx).
+  building_block_scale_with_depth: 2
+  # Penalty when no template can be applied (dead end).  Typically negative.
+  dead_end_reward_factor: -2
+  # Multiply the dead-end penalty by step depth when nonzero.
+  dead_end_scale_with_depth: 2
+  # Reward (or penalty) for each intermediate node (neither solved nor dead end).
+  # Negative values encourage shorter routes.
+  intermediate_reward_factor: -2
+  # Multiply the intermediate reward by step depth when nonzero.
+  intermediate_scale_with_depth: 1
+
+# ---------------------------------------------------------------------------
+# train — training loop settings
+# ---------------------------------------------------------------------------
+train:
+  # Routes per mini-batch
+  batch_size: 512
+  # Loss function.  Only crossEntropyLoss is implemented.
+  loss: crossEntropyLoss  # crossEntropyLoss
+  # Maximum number of training epochs
+  n_epochs: 200
+  # Stop training after this many consecutive epochs with no improvement in
+  # valid_loss.  Set to 0 to disable early stopping.
+  early_stopping_patience: 20  # stop after this many epochs with no valid_loss improvement
+  # ReduceLROnPlateau patience: halve the learning rate after this many epochs
+  # with no valid_loss improvement (must be < early_stopping_patience to take effect).
+  lr_scheduler_patience: 10    # ReduceLROnPlateau patience before halving lr
+  # Directory for model checkpoints, progress logs, and evaluation plots
+  results_path: results/
+
+# ---------------------------------------------------------------------------
+# optuna — hyperparameter search (only needed for retrosynformer-hypertune)
+# ---------------------------------------------------------------------------
+optuna:
+  # Metric maximised by Optuna across trials:
+  #   valid_route_accuracy  — fraction of validation routes where every step matches
+  #   valid_action_accuracy — per-step template prediction accuracy on validation set
+  #   fraction_solved       — fraction of targets solved during route evaluation
+  objective_metric: valid_route_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
+
+  # Search dimensions — each key must match a keyword argument of runner.main().
+  # Three forms are supported:
+  #   list                    → suggest_categorical
+  #   {low, high [, log]}     → suggest_int (both int) or suggest_float
+  #   {choices: [...]}        → suggest_categorical (explicit form)
+
+  # Categorical examples:
+  n_heads: [1, 2, 4, 8]
+  n_layers: [2, 3, 4, 6, 8]
+  head_dim: [64, 128, 256]
+
+  # Float range (log-scale):
+  lr:
+    low: 1.0e-4
+    high: 0.3
+    log: true
+
+  # Float range (linear, with step):
+  dropout:
+    low: 0.0
+    high: 0.3
+    step: 0.01
+
+  # Integer range (log-scale):
+  structured_dropout_bottleneck:
+    low: 32
+    high: 512
+    log: true
+
+  # Float range (log-scale):
+  structured_dropout_rate:
+    low: 0.1
+    high: 5.0
+    log: true
