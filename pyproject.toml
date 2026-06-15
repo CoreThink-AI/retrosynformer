@@ -79,15 +79,15 @@ dev = [
 ]
 
 [project.scripts]
-retrosynformer-train             = "retrosynformer.scripts.train:main"
-retrosynformer-hypertune         = "retrosynformer.scripts.hypertune:main"
-retrosynformer-show-study        = "retrosynformer.scripts.show_study:main"
-retrosynformer-show-all-studies  = "retrosynformer.scripts.show_all_studies:main"
-retrosynformer-monitor-jsonl     = "retrosynformer.scripts.monitor_jsonl:main"
-retrosynformer-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
-retrosynformer-plot-learning-curves = "retrosynformer.scripts.plot_learning_curves:main"
-retrosynformer-sync-results         = "retrosynformer.scripts.sync_results:main"
-retrosynformer-serve                = "retrosynformer.scripts.serve:main"
+rs-train             = "retrosynformer.scripts.train:main"
+rs-hypertune         = "retrosynformer.scripts.hypertune:main"
+rs-show-study        = "retrosynformer.scripts.show_study:main"
+rs-show-all-studies  = "retrosynformer.scripts.show_all_studies:main"
+rs-monitor-jsonl     = "retrosynformer.scripts.monitor_jsonl:main"
+rs-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
+rs-plot-learning-curves = "retrosynformer.scripts.plot_learning_curves:main"
+rs-sync-results         = "retrosynformer.scripts.sync_results:main"
+rs-serve                = "retrosynformer.scripts.serve:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
