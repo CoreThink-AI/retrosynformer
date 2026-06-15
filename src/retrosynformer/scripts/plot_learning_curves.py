@@ -139,10 +139,20 @@ def main() -> None:
 
     if args.study:
         available = sorted(all_trials["study_name"].unique())
-        all_trials = all_trials[all_trials["study_name"].isin(args.study)]
+        # Match by substring against both the Optuna study_name and the results
+        # directory basename, so users can pass either form or a partial prefix.
+        # e.g. "compare_small_standard" matches "compare_small_standard_dropout_baseline"
+        #      "hypertune-compare_small_standard" matches the directory name
+        def _matches(row: "pd.Series") -> bool:
+            targets = [row["study_name"], os.path.basename(row["db_dir"])]
+            return any(s in t for s in args.study for t in targets)
+
+        mask = all_trials.apply(_matches, axis=1)
+        all_trials = all_trials[mask]
         if all_trials.empty:
-            sys.exit(f"No trials found for study name(s): {args.study}\nAvailable: {available}")
-        print(f"Filtered to study name(s): {args.study}")
+            sys.exit(f"No trials found matching study name(s): {args.study}\nAvailable: {available}")
+        matched = sorted(all_trials["study_name"].unique())
+        print(f"Matched study name(s): {matched}")
     all_trials["jsonl_path"] = all_trials.apply(
         lambda r: _jsonl_path(r["db_dir"], r["original_trial"]), axis=1
     )
