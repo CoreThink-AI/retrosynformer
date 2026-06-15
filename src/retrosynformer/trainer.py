@@ -203,7 +203,7 @@ class RetroTrainer:
             actions_id_batch,
         )
 
-    def train(self, verbose=True, start_epoch=0):
+    def train(self, verbose=True, start_epoch=0, eval_routes_at_end=False):
         time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
@@ -224,6 +224,9 @@ class RetroTrainer:
             print("Directory created successfully.")
 
         lowest_valid_loss = 1000
+        patience = self.config["train"].get("early_stopping_patience", 0)
+        epochs_no_improve = 0
+        fraction_targets_solved = None
 
         training_loss, validation_loss = [], []
         (
@@ -344,11 +347,34 @@ class RetroTrainer:
                 print(f'saving model with {lowest_valid_loss - valid_loss} lower loss: {model_path}')
                 lowest_valid_loss = valid_loss
                 torch.save(self.model.state_dict(), model_path)
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
+
+            if patience > 0 and epochs_no_improve >= patience:
+                print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
+                break
+
+        # Run final route evaluation when explicitly requested (hypertune) or
+        # when early stopping skipped the last scheduled eval epoch.
+        if eval_routes_at_end or fraction_targets_solved is None:
+            print("Running final route evaluation …")
+            eval_start_time = time.time()
+            route_predictor.set_model(self.model)
+            pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
+            self.results_eval.append({"epoch": epoch, "result": pred_routes})
+            with open(eval_path, "w") as results:
+                json.dump(self.results_eval, results)
+            solved_routes = [r["route_solved"] for r in pred_routes]
+            fraction_targets_solved = sum(solved_routes) / len(solved_routes) if solved_routes else 0.0
+            print(f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
+                  f"({sum(solved_routes)}/{len(solved_routes)}) "
+                  f"in {(time.time() - eval_start_time) / 60:.1f} min")
 
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(
@@ -359,10 +385,12 @@ class RetroTrainer:
             save_folder + "/train_progress.jsonl",
             save_folder + "/train_progress_accuracy.png",
         )
-        utils.plot_evaluation_results(
-            save_folder + "/pred_routes_train_progress.json",
-            save_folder + "/evaluation_target_solved.png",
-        )
+        eval_results_path = save_folder + "/pred_routes_train_progress.json"
+        if os.path.exists(eval_results_path) and os.path.getsize(eval_results_path) > 2:
+            utils.plot_evaluation_results(
+                eval_results_path,
+                save_folder + "/evaluation_target_solved.png",
+            )
 
         return (
             validation_loss,

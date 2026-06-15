@@ -1,19 +1,19 @@
 optuna:
   objective_metric: valid_route_accuracy  # valid_action_accuracy | valid_route_accuracy | fraction_solved
-  n_heads: [1, 2, 3, 4]
-  n_layers: [2, 3, 4, 5]
+  n_heads: [1, 2, 3]
+  n_layers: [2, 3, 4]
   head_dim: [64, 128, 256]
   lr:
-    low: 1.0e-4
-    high: .43
+    low: 5.0e-5
+    high: .3
     log: true
   dropout:
-    low: 0.03
-    high: 0.45
+    low: 0.0
+    high: 0.3
 #   structured_dropout_bottleneck:
-#     low: 32
-#     high: 512
-#     log: true
+#     low: 8
+#     high: 256
+#     log: false
 
 context:
   building_blocks: data/standard_building_blocks.csv
@@ -62,6 +62,6 @@ reward:
 train:
   batch_size: 512
   loss: crossEntropyLoss
-  n_epochs: 1
-  early_stopping_patience: 6
+  n_epochs: 200
+  early_stopping_patience: 20
   results_path: results/

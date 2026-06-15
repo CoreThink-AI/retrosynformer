@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "retrosynformer"
-version = "0.1.3"
+version = "0.1.7"
 description = "RetroSynFormer"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -37,32 +41,74 @@ dependencies = [
     "filelock",
     # "sympy>=1.13.3",
     "transformers",
-    "torch==2.12.0+cpu",
 ]
 
 [project.optional-dependencies]
+# CPU-only PyTorch:  uv sync --extra cpu
+cpu = [
+    "torch>=2.0.0",
+]
+
 # AMD ROCm GPU (Radeon / Strix Halo iGPU):
-#   uv sync --extra amdgpu
-#   pip install retrosynformer[amdgpu] --extra-index-url https://download.pytorch.org/whl/rocm6.2
-amdgpu = [
-    "torch>=2.12.0",
+#   uv sync --extra rocm
+#   uv sync --extra amdgpu  (alias)
+rocm = [
+    "torch>=2.0.0",
     "sympy==1.13.1",
+]
+amdgpu = [
+    "torch>=2.0.0",
+    "sympy==1.13.1",
+]
+
+# Inference REST API:  uv sync --extra serve
+serve = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+]
+
+# NVIDIA CUDA GPU:  uv sync --extra cuda
+cuda = [
+    "torch>=2.0.0",
 ]
 
 # Development / testing:  uv sync --extra dev
 dev = [
     "pytest>=8",
+    "httpx>=0.27",   # required by FastAPI TestClient
 ]
 
-# uv resolves torch from the ROCm index when the amdgpu extra is active
+[project.scripts]
+rs-train             = "retrosynformer.scripts.train:main"
+rs-hypertune         = "retrosynformer.scripts.hypertune:main"
+rs-show-study        = "retrosynformer.scripts.show_study:main"
+rs-show-all-studies  = "retrosynformer.scripts.show_all_studies:main"
+rs-monitor-jsonl     = "retrosynformer.scripts.monitor_jsonl:main"
+rs-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
+rs-plot-learning-curves = "retrosynformer.scripts.plot_learning_curves:main"
+rs-sync-results         = "retrosynformer.scripts.sync_results:main"
+rs-serve                = "retrosynformer.scripts.serve:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+script-files = [
+    "scripts/monitor_train_progress.sh",
+    "scripts/train_structured_dropout_comparison.sh",
+]
+
+# uv resolves torch from the ROCm index when the rocm or amdgpu extra is active,
+# and from the CPU index when the cpu extra is active.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.uv.sources]
 rdchiral = { path = "../rdchiral", editable = true }
 torch = [
+    { index = "pytorch-rocm", extra = "rocm" },
     { index = "pytorch-rocm", extra = "amdgpu" },
-    { index = "pytorch-cpu" },
+    { index = "pytorch-cpu", extra = "cpu" },
 ]
 
 [[tool.uv.index]]
@@ -73,4 +119,9 @@ explicit = true
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true

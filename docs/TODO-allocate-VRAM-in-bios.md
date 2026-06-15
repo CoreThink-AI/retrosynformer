@@ -1,4 +1,4 @@
-# TODO: Allocate VRAM in BIOS for taco server AMD iGPU
+# TODO: Set up VRAM in BIOS (UEFI) for AMD GPU Framework Desktop server running llama.cpp and pytorch-rocm
 
 ## Context
 

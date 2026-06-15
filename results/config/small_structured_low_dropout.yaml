@@ -1,19 +1,19 @@
 optuna:
   objective_metric: valid_route_accuracy  # valid_action_accuracy | valid_route_accuracy | fraction_solved
-  n_heads: [1, 2, 3, 4]
-  n_layers: [2, 3, 4, 5]
-  head_dim: [64, 128, 256]
+  n_heads: [2, 3]
+  n_layers: [2, 3, 4]
+  head_dim: [64, 128, 192, 256]
   lr:
-    low: 1.0e-4
-    high: .43
+    low: 7.0e-5
+    high: .24
     log: true
   dropout:
-    low: 0.03
-    high: 0.45
-#   structured_dropout_bottleneck:
-#     low: 32
-#     high: 512
-#     log: true
+    low: 0.0
+    high: 0.06
+  structured_dropout_bottleneck:
+    low: 37
+    high: 1021
+    log: false
 
 context:
   building_blocks: data/standard_building_blocks.csv
@@ -47,8 +47,8 @@ model:
   n_heads: 4
   n_layers: 26
   resid_pdrop: 0.08
-  use_structured_dropout: false       # set true to use MoleculeConditionedMaskGenerator
-#  structured_dropout_bottleneck: 128  # MLP hidden dim (fp_dim → bottleneck → hidden_size)
+  use_structured_dropout: true       # set true to use MoleculeConditionedMaskGenerator
+  structured_dropout_bottleneck: 128  # MLP hidden dim (fp_dim → bottleneck → hidden_size)
 optimizer:
   lr: 0.211
   momentum: 0.98
@@ -62,6 +62,6 @@ reward:
 train:
   batch_size: 512
   loss: crossEntropyLoss
-  n_epochs: 1
-  early_stopping_patience: 6
+  n_epochs: 200
+  early_stopping_patience: 20
   results_path: results/

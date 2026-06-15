@@ -3,10 +3,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# retrosynformer Optuna trials
+results/hypertune*/
+!*.yaml
+!*.yml
+!*.jsonl
+!*.jsonlines
+!study.db
+
 # C extensions
 *.so
 # bash extensions
-*.sh
 
 # BigData
 *_routes.json
