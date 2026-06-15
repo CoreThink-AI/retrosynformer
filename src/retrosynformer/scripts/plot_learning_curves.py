@@ -182,7 +182,7 @@ def main() -> None:
             print("WARNING: --also-train has no effect for train_* metrics.")
             train_metric = None
 
-    sns.set_theme(style="darkgrid", palette="tab10")
+    sns.set_theme(style="darkgrid", palette="tab10", font_scale=1.6)
     fig, ax = plt.subplots(figsize=(13, 6))
     palette = sns.color_palette("tab10", n_colors=max(len(top), 10))
     plotted = 0
@@ -210,11 +210,11 @@ def main() -> None:
         label = f"#{rank} t{int(row['original_trial'])} {study_short} (score={row['score']:.4f})"
 
         ax.plot(progress["epoch"], progress[args.metric],
-                label=label, color=color, linewidth=2.5)
+                label=label, color=color, linewidth=5.0, alpha=0.5)
 
         if train_metric and train_metric in progress.columns:
             ax.plot(progress["epoch"], progress[train_metric],
-                    color=color, linewidth=1.4, linestyle="--", alpha=0.6)
+                    color=color, linewidth=2.8, linestyle="--", alpha=0.5)
 
         plotted += 1
 
@@ -222,14 +222,14 @@ def main() -> None:
         sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
 
     y_label = args.metric.replace("_", " ")
-    ax.set_xlabel("Epoch", fontsize=12)
-    ax.set_ylabel(y_label, fontsize=12)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel(y_label)
     ax.set_yscale("log")
     title = f"Learning curves — top {plotted} trials by Optuna score  ({y_label})"
     if train_metric:
         title += f"\nsolid={args.metric}  dashed={train_metric}"
     ax.set_title(title)
-    ax.legend(fontsize=7, loc="upper right", framealpha=0.8)
+    ax.legend(fontsize=9, loc="upper right", framealpha=0.8)
     plt.tight_layout()
 
     if args.out:
