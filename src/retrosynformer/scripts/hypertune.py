@@ -102,14 +102,23 @@ def _setup_jsonl_logging() -> None:
 # Config validation
 # ---------------------------------------------------------------------------
 
+OBJECTIVE_METRICS = {
+    "valid_route_accuracy": ("val_route_acc", "max"),
+    "valid_action_accuracy": ("val_acc",      "max"),
+    "fraction_solved":       ("fraction_solved", "value"),
+}
+
+
 def _validate_config(config: dict) -> None:
     """Raise ValueError for known config inconsistencies before any trial starts.
 
     Catches the case where the optuna search space includes
     ``structured_dropout_bottleneck`` but ``model.use_structured_dropout`` is
     False — the parameter would be sampled every trial yet never used.
+    Also validates ``optuna.objective_metric`` when present.
     """
-    optuna_keys = set(config.get("optuna", {}))
+    optuna_cfg = config.get("optuna", {})
+    optuna_keys = set(optuna_cfg)
     use_sd = config.get("model", {}).get("use_structured_dropout", False)
     if not use_sd and "structured_dropout_bottleneck" in optuna_keys:
         raise ValueError(
@@ -117,6 +126,12 @@ def _validate_config(config: dict) -> None:
             "search space but 'model.use_structured_dropout' is false. "
             "Either set use_structured_dropout: true or remove "
             "structured_dropout_bottleneck from the optuna section."
+        )
+    metric = optuna_cfg.get("objective_metric")
+    if metric is not None and metric not in OBJECTIVE_METRICS:
+        raise ValueError(
+            f"Unknown optuna.objective_metric: {metric!r}. "
+            f"Valid choices: {sorted(OBJECTIVE_METRICS)}"
         )
 
 
@@ -232,11 +247,17 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
 # Optuna objective
 # ---------------------------------------------------------------------------
 
+_RESERVED_OPTUNA_KEYS = {"objective_metric"}
+
+
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str, eval_n_batches: int | None = None) -> float:
     config = read_config(config_path)
     _validate_config(config)
     optuna_config = config.get("optuna", {})
-    params = {name: _suggest(trial, name, spec) for name, spec in optuna_config.items()}
+    # Reserved keys configure the study itself and must not be passed to _suggest.
+    objective_metric = optuna_config.get("objective_metric", "valid_route_accuracy")
+    params = {name: _suggest(trial, name, spec) for name, spec in optuna_config.items()
+              if name not in _RESERVED_OPTUNA_KEYS}
 
     trial_dir = os.path.join(RESULTS_BASE, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
@@ -264,10 +285,17 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     t0 = time.time()
     val_loss, val_acc, val_route_acc, fraction_solved = train(**model_params)
 
-    # Use max valid_action_accuracy as the Optuna objective.  fraction_solved
-    # (route eval) can be None when early stopping fires — using val_acc avoids
-    # a spurious 0.0 score that would mislead the sampler.
-    value = max(val_acc) if val_acc else 0.0
+    # Compute the Optuna objective from whichever metric is configured.
+    # val_route_acc avoids a spurious 0.0 when early stopping fires before
+    # route eval; fraction_solved falls back to 0.0 when eval didn't run.
+    if objective_metric == "valid_action_accuracy":
+        value = max(val_acc) if val_acc else 0.0
+    elif objective_metric == "fraction_solved":
+        value = fraction_solved if fraction_solved is not None else 0.0
+    else:  # default: valid_route_accuracy
+        value = max(val_route_acc) if val_route_acc else 0.0
+    print(f"\nObjective ({objective_metric}): {value:.4f}")
+
     trial_results = {
         "event": "trial_end",
         "trial": {"number": trial.number, "dir": trial_dir},
