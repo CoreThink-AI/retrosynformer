@@ -53,12 +53,12 @@ cpu = [
 #   uv sync --extra rocm
 #   uv sync --extra amdgpu  (alias)
 rocm = [
-    "torch>=2.5.0,<2.7.0",
-    "sympy==1.13.1",
+    "torch>=2.7.0",
+    "pytorch-triton-rocm",
 ]
 amdgpu = [
-    "torch>=2.0.0",
-    "sympy==1.13.1",
+    "torch>=2.7.0",
+    "pytorch-triton-rocm",
 ]
 
 # Inference REST API:  uv sync --extra serve
@@ -133,10 +133,14 @@ torch = [
     { index = "pytorch-rocm", extra = "amdgpu" },
     { index = "pytorch-cpu", extra = "cpu" },
 ]
+pytorch-triton-rocm = [
+    { index = "pytorch-rocm", extra = "rocm" },
+    { index = "pytorch-rocm", extra = "amdgpu" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm6.2"
+url = "https://download.pytorch.org/whl/rocm6.4"
 explicit = true
 
 [[tool.uv.index]]
