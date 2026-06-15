@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pth
+*.db
+*.jsonl
+.git/
+.github/
+tests/
+docs/
+results/
+create_routes_dataset.ipynb
+predict.py
+process_routes.py
+test_aspirin.py
