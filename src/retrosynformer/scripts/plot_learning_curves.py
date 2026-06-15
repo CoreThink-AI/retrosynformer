@@ -307,7 +307,7 @@ def main() -> None:
     if train_metric:
         title += f"\nsolid={args.metric}  dashed={train_metric}"
     ax.set_title(title)
-    ax.legend(fontsize=9, loc="upper right", framealpha=0.8)
+    ax.legend(fontsize=9, loc="best", framealpha=0.8)
     plt.tight_layout()
 
     if args.out:
