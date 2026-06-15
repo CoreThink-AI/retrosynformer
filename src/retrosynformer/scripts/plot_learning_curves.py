@@ -179,18 +179,21 @@ def main() -> None:
     # Default threshold of 0.2 only for valid_action_accuracy; other metrics have no default filter.
     min_score = args.min_score if args.min_score is not None else (0.2 if rank_metric == "valid_action_accuracy" else None)
 
-    def _rank_value(jsonl_path: str) -> float:
+    def _jsonl_stats(jsonl_path: str) -> "pd.Series":
+        nan = pd.Series({"rank_val": float("nan"), "n_epochs": 0})
         if not os.path.exists(jsonl_path):
-            return float("nan")
+            return nan
         try:
             df = _load_jsonl(jsonl_path)
-            if rank_metric in df.columns and not df.empty:
-                return float(df[rank_metric].min() if rank_lower_is_better else df[rank_metric].max())
+            if df.empty:
+                return nan
+            rank_val = float(df[rank_metric].min() if rank_lower_is_better else df[rank_metric].max()) \
+                if rank_metric in df.columns else float("nan")
+            return pd.Series({"rank_val": rank_val, "n_epochs": len(df)})
         except Exception:
-            pass
-        return float("nan")
+            return nan
 
-    all_trials["rank_val"] = all_trials["jsonl_path"].map(_rank_value)
+    all_trials[["rank_val", "n_epochs"]] = all_trials["jsonl_path"].apply(_jsonl_stats)
     all_trials = all_trials.sort_values("rank_val", ascending=rank_lower_is_better).reset_index(drop=True)
 
     if min_score is not None:
@@ -205,8 +208,8 @@ def main() -> None:
     top = all_trials.head(args.top)
 
     # Param columns present across the top trials (exclude bookkeeping columns).
-    _non_param = {"trial", "state", "duration_min", "score", "rank_val", "study_name",
-                  "db_path", "db_dir", "original_trial", "jsonl_path"}
+    _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
+                  "study_name", "db_path", "db_dir", "original_trial", "jsonl_path"}
     PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
                    "structured_dropout_bottleneck"]
     present_params = [c for c in PARAM_ORDER if c in top.columns]
@@ -228,18 +231,19 @@ def main() -> None:
     metric_hdr = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
     col_w = max(len(metric_hdr), 9)
     direction = "↑" if not rank_lower_is_better else "↓"
-    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'trial':>5}  {'study':<40}"
+    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'ep':>4}  {'trial':>5}  {'study':<40}"
     param_hdr = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
     print(f"Top {len(top)} completed trials by {rank_metric}:")
     print(f"{fixed_hdr}  {param_hdr}")
-    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'-----':>5}  {'-'*40}  " +
+    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'----':>4}  {'-----':>5}  {'-'*40}  " +
           "  ".join("-" * max(len(c), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
         study_short = os.path.basename(row["db_dir"])[:40]
         optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
+        n_ep = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
         fixed_part = (f"  #{rank:>2}  {row['rank_val']:>{col_w}.4f}  "
-                      f"{optuna_score}  "
+                      f"{optuna_score}  {n_ep:>4}  "
                       f"{int(row['original_trial']):>5}  {study_short:<40}")
         param_part = "  ".join(
             f"{_fmt(c, row[c]):<{max(len(c),6)}}" for c in param_cols
