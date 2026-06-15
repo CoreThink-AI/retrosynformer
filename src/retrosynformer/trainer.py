@@ -226,6 +226,7 @@ class RetroTrainer:
         lowest_valid_loss = 1000
         patience = self.config["train"].get("early_stopping_patience", 0)
         epochs_no_improve = 0
+        fraction_targets_solved = None
 
         training_loss, validation_loss = [], []
         (
@@ -358,6 +359,23 @@ class RetroTrainer:
             if patience > 0 and epochs_no_improve >= patience:
                 print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
                 break
+
+        # Early stopping may have exited the loop before a scheduled route-eval
+        # epoch, leaving fraction_targets_solved as None.  Run it now so the
+        # hypertune objective always receives a real score.
+        if fraction_targets_solved is None:
+            print("Running final route evaluation after early stopping …")
+            eval_start_time = time.time()
+            route_predictor.set_model(self.model)
+            pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
+            self.results_eval.append({"epoch": epoch, "result": pred_routes})
+            with open(eval_path, "w") as results:
+                json.dump(self.results_eval, results)
+            solved_routes = [r["route_solved"] for r in pred_routes]
+            fraction_targets_solved = sum(solved_routes) / len(solved_routes) if solved_routes else 0.0
+            print(f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
+                  f"({sum(solved_routes)}/{len(solved_routes)}) "
+                  f"in {(time.time() - eval_start_time) / 60:.1f} min")
 
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(
