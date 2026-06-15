@@ -30,8 +30,9 @@ class RetroTrainer:
         self.optimizer = torch.optim.SGD(
             self.model.parameters(), lr=lr, momentum=momentum
         )
+        lr_scheduler_patience = self.config["train"].get("lr_scheduler_patience", 10)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, "min"
+            self.optimizer, "min", patience=lr_scheduler_patience
         )
         self.loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
