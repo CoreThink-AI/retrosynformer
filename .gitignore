@@ -5,6 +5,11 @@ __pycache__/
 
 # retrosynformer Optuna trials
 results/hypertune*/
+!*.yaml
+!*.yml
+!*.jsonl
+!*.jsonlines
+!study.db
 
 # C extensions
 *.so

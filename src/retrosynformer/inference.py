@@ -320,6 +320,83 @@ class RoutePredictor:
 
         return new_beams, route_done_beams, route_solved_beams
 
+    def predict_all_routes(self, target: str, beam_width: int, target_reward: float = 0.5) -> list:
+        """Run beam search to full completion and return all terminal beams.
+
+        Unlike ``predict_route``, which stops the moment any beam is solved,
+        this method continues expanding non-terminal beams until none remain.
+        Both solved beams (all leaves are building blocks) and dead-end beams
+        (at least one branch hit a dead-end) are collected and returned sorted
+        by ``trajectory_prob`` descending.
+
+        Returns an empty list when the target SMILES cannot be parsed by
+        ``expand_beam`` (e.g. all templates fail on the first step).
+
+        >>> # Instantiation requires data files; use predict_route tests for that.
+        >>> # This docstring exists to document the return contract.
+        >>> # Returns: list[Beam] — all terminal beams, sorted by trajectory_prob desc.
+        True
+        """
+        self.model.eval()
+        self.env = RetroGymEnvironment(
+            self.building_blocks,
+            self.templates_df,
+            self.reward_mapping,
+            self.max_depth,
+            process_routes=False,
+        )
+        self.env.set_target_compound(target, reward_function="reward_specific")
+
+        states = [[target]]
+        n_templates = len(self.env.available_templates)
+        actions = torch.zeros((1, 1, n_templates), device=self.device, dtype=torch.float32)
+        rtgs_tensor = torch.tensor([[[target_reward]]], device=self.device, dtype=torch.float32)
+        rewards = torch.zeros((1, 1, 1), device=self.device, dtype=torch.float32)
+        attention_mask = torch.ones((1, 1), device=self.device, dtype=torch.float32)
+        timesteps = torch.zeros((1, 1), device=self.device, dtype=torch.long)
+
+        initial_beam = self.Beam(
+            env=self.env,
+            states=states,
+            actions=actions,
+            rtgs_tensor=rtgs_tensor,
+            rewards=rewards,
+            total_reward=0.0,
+            timesteps=timesteps,
+            attention_mask=attention_mask,
+            reaction_list=[],
+            predicted_actions=[],
+            route_solved=self.env.route_solved,
+            route_done=self.env.route_done,
+            trajectory_prob=1.0,
+        )
+
+        # Target is itself a building block — nothing to expand.
+        if initial_beam.route_done:
+            return [initial_beam]
+
+        current_beams = [initial_beam]
+        terminal_beams: list = []
+
+        with torch.no_grad():
+            while current_beams:
+                next_beams: list = []
+                for beam_i in current_beams:
+                    new_beams, route_done_flags, _ = self.expand_beam(beam_i, beam_width)
+                    if not new_beams:
+                        # No children produced — treat the parent as a dead-end terminal.
+                        terminal_beams.append(beam_i)
+                    else:
+                        for b, done in zip(new_beams, route_done_flags):
+                            (terminal_beams if done else next_beams).append(b)
+
+                # Prune active beams to beam_width by trajectory_prob before next round.
+                next_beams.sort(key=lambda b: b.trajectory_prob, reverse=True)
+                current_beams = next_beams[:beam_width]
+
+        terminal_beams.sort(key=lambda b: b.trajectory_prob, reverse=True)
+        return terminal_beams
+
     def eval_predicted_routes(self, dataloader):
 
         routes = []
