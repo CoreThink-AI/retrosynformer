@@ -74,6 +74,7 @@ retrosynformer-show-all-studies  = "retrosynformer.scripts.show_all_studies:main
 retrosynformer-monitor-jsonl     = "retrosynformer.scripts.monitor_jsonl:main"
 retrosynformer-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
 retrosynformer-plot-learning-curves = "retrosynformer.scripts.plot_learning_curves:main"
+retrosynformer-sync-results         = "retrosynformer.scripts.sync_results:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
