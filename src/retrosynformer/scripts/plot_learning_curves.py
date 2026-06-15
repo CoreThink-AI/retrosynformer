@@ -1,0 +1,210 @@
+#!/usr/bin/env python
+"""Plot learning curves from train_progress.jsonl for the top-N Optuna trials.
+
+Loads all study.db files matching a glob, ranks completed trials by Optuna
+score (fraction_targets_solved), then overlays the per-epoch metric from each
+trial's train_progress.jsonl.
+
+Usage
+-----
+    retrosynformer-plot-learning-curves
+    retrosynformer-plot-learning-curves --top 5 --metric valid_action_accuracy
+    retrosynformer-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
+"""
+import argparse
+import glob
+import json
+import os
+import sys
+from typing import Optional
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+from retrosynformer.study import dfs_to_trials_df, to_dfs
+
+METRICS = [
+    "valid_loss",
+    "valid_action_accuracy",
+    "valid_route_accuracy",
+    "train_loss",
+    "train_action_accuracy",
+    "train_route_accuracy",
+]
+
+
+def _load_jsonl(path: str) -> pd.DataFrame:
+    rows = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return pd.DataFrame(rows)
+
+
+def _trials_from_db(db_path: str) -> pd.DataFrame:
+    """Return completed trials from one db with db_path, db_dir, and study_name added."""
+    dfs = to_dfs(db_path)
+    df = dfs_to_trials_df(dfs)
+    df = df[df["state"] == "COMPLETE"].copy()
+    df["db_path"] = db_path
+    df["db_dir"] = os.path.dirname(db_path)
+    # 'trial' column == original trial number from the db (0-based per study),
+    # which maps directly to trial_NNN directories on disk.
+    df["original_trial"] = df["trial"]
+    # Always carry study_name; for single-study dbs it isn't added by dfs_to_trials_df.
+    if "study_name" not in df.columns:
+        df["study_name"] = dfs["studies"]["study_name"].iloc[0]
+    return df
+
+
+def _jsonl_path(db_dir: str, trial_number: int) -> str:
+    return os.path.join(db_dir, f"trial_{int(trial_number):03d}", "train_progress.jsonl")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "pattern",
+        nargs="?",
+        default="results/**/study.db",
+        help="Glob for study.db files (default: results/**/study.db)",
+    )
+    parser.add_argument("--top", type=int, default=10,
+                        help="Number of top trials to plot (default: 10)")
+    parser.add_argument("--metric", default="valid_loss", choices=METRICS,
+                        help="Y-axis metric (default: valid_loss)")
+    parser.add_argument("--also-train", action="store_true",
+                        help="Overlay the corresponding train_* metric as a dashed line")
+    parser.add_argument("--out", default=None,
+                        help="Save figure to this path instead of showing interactively")
+    parser.add_argument("--root", default=".",
+                        help="Root directory for glob resolution (default: .)")
+    args = parser.parse_args()
+
+    paths = sorted(glob.glob(os.path.join(args.root, args.pattern), recursive=True))
+    if not paths:
+        sys.exit(f"No study.db files found matching {args.pattern!r} under {args.root!r}")
+
+    # Deduplicate by realpath so a nested copy (rsync artifact) isn't double-counted.
+    seen: set[str] = set()
+    unique_paths: list[str] = []
+    for p in paths:
+        rp = os.path.realpath(p)
+        if rp not in seen:
+            seen.add(rp)
+            unique_paths.append(p)
+    paths = unique_paths
+
+    print(f"Found {len(paths)} study.db file(s) (after dedup):")
+    for p in paths:
+        print(f"  {p}")
+    print()
+
+    parts: list[pd.DataFrame] = []
+    for db_path in paths:
+        try:
+            df = _trials_from_db(db_path)
+            parts.append(df)
+        except Exception as exc:
+            print(f"  WARNING: could not load {db_path}: {exc}")
+
+    if not parts:
+        sys.exit("No completed trials found across all study.db files.")
+
+    all_trials = pd.concat(parts, ignore_index=True)
+    all_trials["jsonl_path"] = all_trials.apply(
+        lambda r: _jsonl_path(r["db_dir"], r["original_trial"]), axis=1
+    )
+    # Dedup: same (study_name, trial_number) means the same trial even when the
+    # same study.db was rsynced into a nested directory.  Keep the row whose
+    # jsonl file exists (or the first one if neither / both do).
+    all_trials["_jsonl_exists"] = all_trials["jsonl_path"].map(os.path.exists)
+    all_trials = (
+        all_trials.sort_values(["score", "_jsonl_exists"], ascending=[False, False])
+        # Pass 1: drop rsync-duplicate dbs that copied the same study under a nested dir.
+        .drop_duplicates(["study_name", "original_trial"])
+        # Pass 2: within a multi-study db several studies share the same trial_NNN dir;
+        # keep only the highest-scoring row per unique jsonl file.
+        .drop_duplicates("jsonl_path")
+        .drop(columns=["_jsonl_exists"])
+        .reset_index(drop=True)
+    )
+
+    top = all_trials.head(args.top)
+    print(f"Top {len(top)} completed trials by score:")
+    for rank, (_, row) in enumerate(top.iterrows(), start=1):
+        print(f"  #{rank:2d}  score={row['score']:.4f}  "
+              f"trial={int(row['original_trial'])}  "
+              f"study={os.path.basename(row['db_dir'])}")
+    print()
+
+    # Derive the matching train_* metric for --also-train.
+    train_metric: Optional[str] = None
+    if args.also_train:
+        train_metric = args.metric.replace("valid_", "train_")
+        if train_metric == args.metric:
+            print("WARNING: --also-train has no effect for train_* metrics.")
+            train_metric = None
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+    cmap = plt.colormaps.get_cmap("tab10")
+    plotted = 0
+
+    for rank, (_, row) in enumerate(top.iterrows(), start=1):
+        jsonl = row["jsonl_path"]
+        if not os.path.exists(jsonl):
+            print(f"  SKIP #{rank}: {jsonl} not found")
+            continue
+
+        try:
+            progress = _load_jsonl(jsonl)
+        except Exception as exc:
+            print(f"  SKIP #{rank}: could not read {jsonl}: {exc}")
+            continue
+
+        if args.metric not in progress.columns:
+            print(f"  SKIP #{rank}: column '{args.metric}' missing in {jsonl}")
+            continue
+
+        color = cmap(plotted % 10)
+        study_short = os.path.basename(row["db_dir"])
+        # Truncate long study names for readability.
+        if len(study_short) > 28:
+            study_short = study_short[:25] + "..."
+        label = f"#{rank} t{int(row['original_trial'])} {study_short} (score={row['score']:.4f})"
+
+        ax.plot(progress["epoch"], progress[args.metric],
+                label=label, color=color, linewidth=1.8)
+
+        if train_metric and train_metric in progress.columns:
+            ax.plot(progress["epoch"], progress[train_metric],
+                    color=color, linewidth=1.0, linestyle="--", alpha=0.6)
+
+        plotted += 1
+
+    if plotted == 0:
+        sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
+
+    y_label = args.metric.replace("_", " ")
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel(y_label, fontsize=12)
+    title = f"Learning curves — top {plotted} trials by Optuna score  ({y_label})"
+    if train_metric:
+        title += f"\nsolid={args.metric}  dashed={train_metric}"
+    ax.set_title(title)
+    ax.legend(fontsize=7, loc="upper right", framealpha=0.8)
+    ax.grid(True, alpha=0.25)
+    plt.tight_layout()
+
+    if args.out:
+        plt.savefig(args.out, dpi=150)
+        print(f"Saved to {args.out}")
+    else:
+        plt.show()
+
+
+if __name__ == "__main__":
+    main()
