@@ -8,8 +8,15 @@ Subsequent trials explore the search space defined in config["optuna"].
 Usage:
     python scripts/hypertune.py -c results/config/small.yaml [--n-trials 20]
 
-Structured logs are written to results/hypertune/run.jsonl — one JSON object
-per line covering trial start/end, per-trial accuracy, warnings, and errors.
+Results are written to results/hypertune-{study_name}/:
+  study.db        Optuna storage (SQLite)
+  run.jsonl       Structured log — one JSON object per line
+  trial_NNN/      Per-trial model checkpoints and progress files
+
+Multiple studies run simultaneously without conflict because each writes to
+its own results/hypertune-{study_name}/ directory.  To add parallel workers
+to the *same* study, pass an identical --study-name and --storage to each
+process; Optuna coordinates via the shared SQLite file.
 
 Config-driven search space (results/config/*.yaml under the "optuna" key):
 
@@ -46,7 +53,6 @@ import argparse
 import json
 import logging
 import os
-import sys
 import time
 
 import optuna
@@ -55,8 +61,6 @@ from retrosynformer.runner import main as train
 from retrosynformer.runner import read_config
 
 CONFIG_PATH_DEFAULT = "results/config.yaml"
-RESULTS_BASE = "results/hypertune"
-RUN_JSONL = os.path.join(RESULTS_BASE, "run.jsonl")
 
 # Fixed first trial — matches early taco-branch architecture for comparison.
 # Every value here must be a valid choice in the corresponding optuna config list.
@@ -67,15 +71,19 @@ BASELINE_TRIAL = {"n_heads": 1, "n_layers": 3, "head_dim": 256, "lr": 0.211, "dr
 # Structured JSONL logging
 # ---------------------------------------------------------------------------
 
-def _write(record: dict) -> None:
+def _write(record: dict, run_jsonl: str) -> None:
     """Append one JSON record to run.jsonl (thread-safe at OS level)."""
     record.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S"))
-    with open(RUN_JSONL, "a") as f:
+    with open(run_jsonl, "a") as f:
         f.write(json.dumps(record) + "\n")
 
 
 class _JsonlHandler(logging.Handler):
     """Redirect Python log records to run.jsonl."""
+    def __init__(self, run_jsonl: str):
+        super().__init__()
+        self.run_jsonl = run_jsonl
+
     def emit(self, record: logging.LogRecord) -> None:
         try:
             _write({
@@ -86,14 +94,14 @@ class _JsonlHandler(logging.Handler):
                     "file": f"{record.filename}:{record.lineno}",
                     "msg": self.format(record),
                 },
-            })
+            }, self.run_jsonl)
         except Exception:
             self.handleError(record)
 
 
-def _setup_jsonl_logging() -> None:
+def _setup_jsonl_logging(run_jsonl: str) -> None:
     """Attach the JSONL handler to the root logger (WARNING and above)."""
-    handler = _JsonlHandler()
+    handler = _JsonlHandler(run_jsonl)
     handler.setLevel(logging.WARNING)
     logging.getLogger().addHandler(handler)
 
@@ -133,68 +141,6 @@ def _validate_config(config: dict) -> None:
             f"Unknown optuna.objective_metric: {metric!r}. "
             f"Valid choices: {sorted(OBJECTIVE_METRICS)}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Study-directory lock
-# ---------------------------------------------------------------------------
-
-def _acquire_lock(study_name: str) -> bool:
-    """Create a study-specific directory and symlink RESULTS_BASE to it.
-
-    Returns True if a fresh study was started, False if an existing study is
-    being continued (symlink already in place, study.db found, user confirmed).
-
-    ``results/hypertune`` acts as a mutual-exclusion lock: if the path already
-    exists (symlink or real directory) we refuse to start rather than clobber
-    in-progress results.  Remove the symlink manually to clear a stale lock::
-
-        rm results/hypertune
-
-    The actual results live in ``results/hypertune-{study_name}/`` and are
-    untouched when the symlink is removed after the study ends.
-    """
-    study_dir = f"{RESULTS_BASE}-{study_name}"
-    os.makedirs(study_dir, exist_ok=True)
-
-    if os.path.lexists(RESULTS_BASE):
-        if os.path.islink(RESULTS_BASE):
-            target = os.path.realpath(RESULTS_BASE)
-            db_path = os.path.join(target, "study.db")
-            if os.path.exists(db_path):
-                print(f"\nExisting study found: {RESULTS_BASE} → {target}")
-                print(f"  study.db: {db_path}")
-                try:
-                    answer = input("Continue existing study? [y/N] ").strip().lower()
-                except EOFError:
-                    answer = "n"
-                if answer in ("y", "yes"):
-                    print("Continuing existing study — run.jsonl will be appended.")
-                    return False
-                print(
-                    "Not continuing. To start a fresh study, remove the lock first:\n"
-                    f"    rm {RESULTS_BASE}"
-                )
-                sys.exit(0)
-            detail = f"symlink → {target} (no study.db)"
-        else:
-            detail = "real directory"
-        raise RuntimeError(
-            f"'{RESULTS_BASE}' already exists ({detail}).\n"
-            "A hypertune study may already be running on this machine.\n"
-            f"If no study is in progress, remove the lock and retry:\n"
-            f"    rm {RESULTS_BASE}"
-        )
-
-    # Relative symlink so the results/ tree stays self-contained.
-    os.symlink(f"hypertune-{study_name}", RESULTS_BASE)
-    return True
-
-
-def _release_lock() -> None:
-    """Remove the RESULTS_BASE symlink; the study directory is kept."""
-    if os.path.islink(RESULTS_BASE):
-        os.unlink(RESULTS_BASE)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +196,8 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
 _RESERVED_OPTUNA_KEYS = {"objective_metric"}
 
 
-def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str, eval_n_batches: int | None = None) -> float:
+def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str,
+              results_base: str, run_jsonl: str, eval_n_batches: int | None = None) -> float:
     config = read_config(config_path)
     _validate_config(config)
     optuna_config = config.get("optuna", {})
@@ -259,14 +206,14 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     params = {name: _suggest(trial, name, spec) for name, spec in optuna_config.items()
               if name not in _RESERVED_OPTUNA_KEYS}
 
-    trial_dir = os.path.join(RESULTS_BASE, f"trial_{trial.number:03d}")
+    trial_dir = os.path.join(results_base, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
 
     _write({
         "event": "trial_start",
         "trial": {"number": trial.number, "dir": trial_dir},
         "params": dict(trial.params),
-    })
+    }, run_jsonl)
     print(f"\n### Trial {trial.number} params")
     for k, v in trial.params.items():
         print(f"  {k}: {v}")
@@ -311,7 +258,7 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
             },
         },
     }
-    _write(trial_results)
+    _write(trial_results, run_jsonl)
     print("\n#### Results")
     for k, v in trial_results.items():
         print(f"    {k}: {v}")
@@ -346,69 +293,73 @@ def main():
     )
     parser.add_argument(
         "--study-name", default="retrosynformer_hypertune",
-        help="Optuna study name",
+        help="Optuna study name (also determines output directory: results/hypertune-{name}/)",
     )
     parser.add_argument(
-        "--storage", default=f"sqlite:///{RESULTS_BASE}/study.db",
-        help="Optuna storage URL (default: sqlite in results/hypertune/study.db)",
+        "--storage", default=None,
+        help="Optuna storage URL (default: sqlite:///results/hypertune-{study_name}/study.db)",
     )
     args = parser.parse_args()
 
-    is_fresh = _acquire_lock(args.study_name)
-    try:
-        _setup_jsonl_logging()
-        _write({"event": "study_start" if is_fresh else "study_resume", "config": {
-            "n_trials": args.n_trials, "n_epochs": args.n_epochs,
-            "dataset": args.dataset, "storage": args.storage,
-            "config_path": args.config_path,
-            "eval_n_batches": args.eval_n_batches,
-        }})
+    results_base = f"results/hypertune-{args.study_name}"
+    run_jsonl = os.path.join(results_base, "run.jsonl")
+    storage = args.storage or f"sqlite:///{results_base}/study.db"
 
-        study = optuna.create_study(
-            study_name=args.study_name,
-            direction="maximize",
-            storage=args.storage,
-            load_if_exists=True,
-        )
+    os.makedirs(results_base, exist_ok=True)
+    is_fresh = not os.path.exists(os.path.join(results_base, "study.db"))
 
-        # Only enqueue the baseline on a fresh study — resuming from storage already has it.
-        if len(study.trials) == 0:
-            study.enqueue_trial(BASELINE_TRIAL)
+    _setup_jsonl_logging(run_jsonl)
+    _write({"event": "study_start" if is_fresh else "study_resume", "config": {
+        "n_trials": args.n_trials, "n_epochs": args.n_epochs,
+        "dataset": args.dataset, "storage": storage,
+        "config_path": args.config_path,
+        "eval_n_batches": args.eval_n_batches,
+    }}, run_jsonl)
 
-        def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-            """Write a completion record to run.jsonl after each trial."""
-            _write({
-                "event": "trial_complete" if trial.state == optuna.trial.TrialState.COMPLETE else "trial_fail",
-                "trial": {"number": trial.number, "state": trial.state.name},
-                "params": dict(trial.params),
-                "results": {
-                    "value": trial.value,
-                    "duration_s": round(trial.duration.total_seconds(), 1) if trial.duration else None,
-                },
-            })
+    study = optuna.create_study(
+        study_name=args.study_name,
+        direction="maximize",
+        storage=storage,
+        load_if_exists=True,
+    )
 
-        study.optimize(
-            lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset, args.eval_n_batches),
-            n_trials=args.n_trials,
-            callbacks=[log_trial],
-        )
+    # Only enqueue the baseline on a fresh study — resuming from storage already has it.
+    if len(study.trials) == 0:
+        study.enqueue_trial(BASELINE_TRIAL)
 
-        best = study.best_trial
+    def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        """Write a completion record to run.jsonl after each trial."""
         _write({
-            "event": "study_end",
-            "best": {
-                "trial": best.number,
-                "value": best.value,
-                "params": dict(best.params),
-                "dir": os.path.join(RESULTS_BASE, f"trial_{best.number:03d}"),
+            "event": "trial_complete" if trial.state == optuna.trial.TrialState.COMPLETE else "trial_fail",
+            "trial": {"number": trial.number, "state": trial.state.name},
+            "params": dict(trial.params),
+            "results": {
+                "value": trial.value,
+                "duration_s": round(trial.duration.total_seconds(), 1) if trial.duration else None,
             },
-        })
-        print("\n=== Best trial ===")
-        print(f"  fraction_targets_solved: {best.value:.4f}")
-        print(f"  params: {best.params}")
-        print(f"  results: {os.path.join(RESULTS_BASE, f'trial_{best.number:03d}')}")
-    finally:
-        _release_lock()
+        }, run_jsonl)
+
+    study.optimize(
+        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset,
+                                results_base, run_jsonl, args.eval_n_batches),
+        n_trials=args.n_trials,
+        callbacks=[log_trial],
+    )
+
+    best = study.best_trial
+    _write({
+        "event": "study_end",
+        "best": {
+            "trial": best.number,
+            "value": best.value,
+            "params": dict(best.params),
+            "dir": os.path.join(results_base, f"trial_{best.number:03d}"),
+        },
+    }, run_jsonl)
+    print("\n=== Best trial ===")
+    print(f"  fraction_targets_solved: {best.value:.4f}")
+    print(f"  params: {best.params}")
+    print(f"  results: {os.path.join(results_base, f'trial_{best.number:03d}')}")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,10 @@
-"""Unit tests for scripts/hypertune.py helper functions."""
+"""Unit tests for retrosynformer.scripts.hypertune helper functions."""
 
-import os
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-# scripts/ is not a package; add it to the path for import.
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-import hypertune as ht
+from retrosynformer.scripts import hypertune as ht
 
 
 # ---------------------------------------------------------------------------
@@ -124,80 +119,3 @@ def test_validate_config_error_message_mentions_remedy():
     }
     with pytest.raises(ValueError, match="use_structured_dropout"):
         ht._validate_config(cfg)
-
-
-# ---------------------------------------------------------------------------
-# _acquire_lock / _release_lock
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def lock_base(tmp_path, monkeypatch):
-    """Redirect RESULTS_BASE to a temp directory for each test."""
-    base = str(tmp_path / "hypertune")
-    monkeypatch.setattr(ht, "RESULTS_BASE", base)
-    return base
-
-
-def test_acquire_creates_study_dir(lock_base):
-    ht._acquire_lock("run1")
-    study_dir = lock_base + "-run1"
-    assert os.path.isdir(study_dir)
-
-
-def test_acquire_creates_relative_symlink(lock_base):
-    ht._acquire_lock("run1")
-    assert os.path.islink(lock_base)
-    assert os.readlink(lock_base) == "hypertune-run1"
-
-
-def test_acquire_symlink_resolves_to_study_dir(lock_base):
-    ht._acquire_lock("run1")
-    assert os.path.realpath(lock_base) == os.path.realpath(lock_base + "-run1")
-
-
-def test_acquire_raises_if_symlink_exists(lock_base):
-    ht._acquire_lock("run1")
-    with pytest.raises(RuntimeError, match="already exists"):
-        ht._acquire_lock("run2")
-
-
-def test_acquire_raises_if_real_dir_exists(lock_base, tmp_path):
-    os.makedirs(lock_base)
-    with pytest.raises(RuntimeError, match="already exists"):
-        ht._acquire_lock("run1")
-
-
-def test_acquire_error_message_includes_rm_hint(lock_base):
-    ht._acquire_lock("run1")
-    with pytest.raises(RuntimeError, match=r"rm "):
-        ht._acquire_lock("run2")
-
-
-def test_release_removes_symlink(lock_base):
-    ht._acquire_lock("run1")
-    ht._release_lock()
-    assert not os.path.lexists(lock_base)
-
-
-def test_release_preserves_study_dir(lock_base):
-    ht._acquire_lock("run1")
-    ht._release_lock()
-    assert os.path.isdir(lock_base + "-run1")
-
-
-def test_release_is_idempotent(lock_base):
-    ht._acquire_lock("run1")
-    ht._release_lock()
-    ht._release_lock()  # second call must not raise
-
-
-def test_full_lock_lifecycle(lock_base):
-    ht._acquire_lock("study_a")
-    assert os.path.islink(lock_base)
-    ht._release_lock()
-    assert not os.path.lexists(lock_base)
-    # can acquire again after release
-    ht._acquire_lock("study_b")
-    assert os.path.islink(lock_base)
-    assert os.readlink(lock_base) == "hypertune-study_b"
-    ht._release_lock()
