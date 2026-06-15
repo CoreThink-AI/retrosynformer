@@ -4,7 +4,7 @@ optuna:
   head_dim: [64, 128, 256]
   lr:
     low: 1.0e-4
-    high: 1.0
+    high: .43
     log: true
   dropout:
     low: 0.03

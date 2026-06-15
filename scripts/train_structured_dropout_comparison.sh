@@ -13,8 +13,8 @@ retrosynformer-hypertune \
 # 2 — Structured dropout
 # .venv-rocm/bin/python scripts/hypertune.py \
 retrosynformer-hypertune \
-  -c results/config/compare_small_structured_dropout.yaml \
-  --study-name small_sd \
+  -c results/config/small_sd.yaml \
+  --study-name compare_small_structured_dropout \
   --n-trials 10 \
   --n-epochs 200 \
   --dataset small
