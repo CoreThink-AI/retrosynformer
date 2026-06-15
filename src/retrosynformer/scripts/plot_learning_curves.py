@@ -89,6 +89,8 @@ def main() -> None:
                         help="Y-axis metric (default: valid_loss)")
     parser.add_argument("--also-train", action="store_true",
                         help="Overlay the corresponding train_* metric as a dashed line")
+    parser.add_argument("--min-score", type=float, default=0.2,
+                        help="Exclude trials with score below this threshold (default: 0.2)")
     parser.add_argument("--out", default=None,
                         help="Save figure to this path instead of showing interactively")
     parser.add_argument("--root", default=".",
@@ -144,6 +146,9 @@ def main() -> None:
         .reset_index(drop=True)
     )
 
+    all_trials = all_trials[all_trials["score"] >= args.min_score]
+    if all_trials.empty:
+        sys.exit(f"No completed trials with score >= {args.min_score}.")
     top = all_trials.head(args.top)
 
     # Param columns present across the top trials (exclude bookkeeping columns).
