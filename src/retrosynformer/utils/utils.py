@@ -1,5 +1,6 @@
 import logging
-
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend safe for headless/SSH servers
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
