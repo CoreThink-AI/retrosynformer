@@ -228,16 +228,24 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     print(f"\n### Trial {trial.number} params")
     for k, v in trial.params.items():
         print(f"  {k}: {v}")
-
-    t0 = time.time()
-    val_loss, val_acc, val_route_acc, fraction_solved = train(
+    model_params = dict(
         config_path=config_path,
         dataset=dataset,
         n_epochs=n_epochs,
+        n_heads=n_heads,
+        n_layers=n_layers,
+        head_dim=head_dim,
+        lr=lr,
+        dropout=dropout,
         results_path=trial_dir,
-        eval_n_batches=eval_n_batches,
-        **params,
     )
+    model_params.update(params)
+    print("\n#### Model params")
+    for k, v in model_params.items():
+        print(f"    {k}: {v}")
+
+    t0 = time.time()
+    val_loss, val_acc, val_route_acc, fraction_solved = train(**model_params)
 
     value = fraction_solved if fraction_solved is not None else 0.0
     trial_results = {
