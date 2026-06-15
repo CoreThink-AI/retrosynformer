@@ -55,10 +55,10 @@ def _load_jsonl(path: str) -> pd.DataFrame:
 
 
 def _trials_from_db(db_path: str) -> pd.DataFrame:
-    """Return completed trials from one db with db_path, db_dir, and study_name added."""
+    """Return COMPLETE and RUNNING trials from one db with db_path, db_dir, study_name added."""
     dfs = to_dfs(db_path)
     df = dfs_to_trials_df(dfs)
-    df = df[df["state"] == "COMPLETE"].copy()
+    df = df[df["state"].isin({"COMPLETE", "RUNNING"})].copy()
     df["db_path"] = db_path
     df["db_dir"] = os.path.dirname(db_path)
     # 'trial' column == original trial number from the db (0-based per study),
