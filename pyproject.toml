@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "retrosynformer"
 version = "0.1.4"
@@ -52,6 +56,23 @@ amdgpu = [
 # Development / testing:  uv sync --extra dev
 dev = [
     "pytest>=8",
+]
+
+[project.scripts]
+retrosynformer-train             = "retrosynformer.scripts.train:main"
+retrosynformer-hypertune         = "retrosynformer.scripts.hypertune:main"
+retrosynformer-show-study        = "retrosynformer.scripts.show_study:main"
+retrosynformer-show-all-studies  = "retrosynformer.scripts.show_all_studies:main"
+retrosynformer-monitor-jsonl     = "retrosynformer.scripts.monitor_jsonl:main"
+retrosynformer-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+script-files = [
+    "scripts/monitor_train_progress.sh",
+    "scripts/train_structured_dropout_comparison.sh",
 ]
 
 # uv resolves torch from the ROCm index when the amdgpu extra is active
