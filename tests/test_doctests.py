@@ -15,6 +15,7 @@ DOCTEST_MODULES = [
     "retrosynformer.data",
     "retrosynformer.environment",
     "retrosynformer.structured_dropout",
+    "retrosynformer.monitor",
     # scripts/ modules (imported via sys.path, not as packages)
 ]
 
