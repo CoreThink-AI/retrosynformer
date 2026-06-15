@@ -263,7 +263,10 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     t0 = time.time()
     val_loss, val_acc, val_route_acc, fraction_solved = train(**model_params)
 
-    value = fraction_solved if fraction_solved is not None else 0.0
+    # Use max valid_action_accuracy as the Optuna objective.  fraction_solved
+    # (route eval) can be None when early stopping fires — using val_acc avoids
+    # a spurious 0.0 score that would mislead the sampler.
+    value = max(val_acc) if val_acc else 0.0
     trial_results = {
         "event": "trial_end",
         "trial": {"number": trial.number, "dir": trial_dir},
@@ -271,7 +274,8 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         "results": {
             "duration_s": round(time.time() - t0, 1),
             "accuracy": {
-                "fraction_targets_solved": value,
+                "optuna_score": value,
+                "fraction_targets_solved": fraction_solved,
                 "valid_loss": float(val_loss[-1]) if val_loss else None,
                 "valid_action_accuracy": float(val_acc[-1]) if val_acc else None,
                 "valid_route_accuracy": float(val_route_acc[-1]) if val_route_acc else None,
