@@ -254,6 +254,7 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         dataset=dataset,
         n_epochs=n_epochs,
         results_path=trial_dir,
+        eval_routes_at_end=True,
     )
     model_params.update(params)
     print("\n#### Model params")

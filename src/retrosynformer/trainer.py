@@ -203,7 +203,7 @@ class RetroTrainer:
             actions_id_batch,
         )
 
-    def train(self, verbose=True, start_epoch=0):
+    def train(self, verbose=True, start_epoch=0, eval_routes_at_end=False):
         time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
@@ -360,11 +360,10 @@ class RetroTrainer:
                 print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
                 break
 
-        # Early stopping may have exited the loop before a scheduled route-eval
-        # epoch, leaving fraction_targets_solved as None.  Run it now so the
-        # hypertune objective always receives a real score.
-        if fraction_targets_solved is None:
-            print("Running final route evaluation after early stopping …")
+        # Run final route evaluation when explicitly requested (hypertune) or
+        # when early stopping skipped the last scheduled eval epoch.
+        if eval_routes_at_end or fraction_targets_solved is None:
+            print("Running final route evaluation …")
             eval_start_time = time.time()
             route_predictor.set_model(self.model)
             pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
