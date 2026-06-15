@@ -54,24 +54,58 @@ def _load_jsonl(path: str) -> pd.DataFrame:
     return df.iloc[last_reset:].reset_index(drop=True)
 
 
+def _find_trial_base(db_dir: str, study_name: str) -> str:
+    """Return the directory that contains trial_NNN/ subdirectories.
+
+    For the normal per-study case (one study.db per hypertune run) the trial
+    dirs live directly under db_dir, so that's returned unchanged.
+
+    For the shared-storage case (``--storage`` pointing two parallel runs at
+    the same SQLite file) the trial dirs live under
+    ``results/hypertune-{study_name}/`` which is a sibling of db_dir.  We
+    probe candidate locations in priority order and fall back to db_dir.
+    """
+    db_dir_abs = os.path.abspath(db_dir)
+    candidates = [
+        # Sibling hypertune-{study_name}/ dir (shared-storage case).
+        os.path.join(os.path.dirname(db_dir_abs), f"hypertune-{study_name}"),
+        # results/hypertune-{study_name}/ relative to cwd.
+        os.path.join("results", f"hypertune-{study_name}"),
+        # db_dir itself (per-study db; trial dirs live alongside study.db).
+        db_dir_abs,
+    ]
+    for c in candidates:
+        if os.path.isdir(c) and any(
+            e.startswith("trial_") and os.path.isdir(os.path.join(c, e))
+            for e in os.listdir(c)
+        ):
+            return c
+    return db_dir
+
+
 def _trials_from_db(db_path: str) -> pd.DataFrame:
     """Return COMPLETE and RUNNING trials from one db with db_path, db_dir, study_name added."""
     dfs = to_dfs(db_path)
     df = dfs_to_trials_df(dfs)
     df = df[df["state"].isin({"COMPLETE", "RUNNING"})].copy()
+    db_dir = os.path.dirname(os.path.abspath(db_path))
     df["db_path"] = db_path
-    df["db_dir"] = os.path.dirname(db_path)
+    df["db_dir"] = db_dir
     # 'trial' column == original trial number from the db (0-based per study),
     # which maps directly to trial_NNN directories on disk.
     df["original_trial"] = df["trial"]
     # Always carry study_name; for single-study dbs it isn't added by dfs_to_trials_df.
     if "study_name" not in df.columns:
         df["study_name"] = dfs["studies"]["study_name"].iloc[0]
+    # Resolve per-study trial directory; may differ from db_dir for shared dbs.
+    df["trial_base_dir"] = df["study_name"].map(
+        lambda sn: _find_trial_base(db_dir, sn)
+    )
     return df
 
 
-def _jsonl_path(db_dir: str, trial_number: int) -> str:
-    return os.path.join(db_dir, f"trial_{int(trial_number):03d}", "train_progress.jsonl")
+def _jsonl_path(trial_base_dir: str, trial_number: int) -> str:
+    return os.path.join(trial_base_dir, f"trial_{int(trial_number):03d}", "train_progress.jsonl")
 
 
 def main() -> None:
@@ -154,7 +188,7 @@ def main() -> None:
         matched = sorted(all_trials["study_name"].unique())
         print(f"Matched study name(s): {matched}")
     all_trials["jsonl_path"] = all_trials.apply(
-        lambda r: _jsonl_path(r["db_dir"], r["original_trial"]), axis=1
+        lambda r: _jsonl_path(r["trial_base_dir"], r["original_trial"]), axis=1
     )
     # Dedup: same (study_name, trial_number) means the same trial even when the
     # same study.db was rsynced into a nested directory.  Keep the row whose
@@ -209,7 +243,7 @@ def main() -> None:
 
     # Param columns present across the top trials (exclude bookkeeping columns).
     _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
-                  "study_name", "db_path", "db_dir", "original_trial", "jsonl_path"}
+                  "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial", "jsonl_path"}
     PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
                    "structured_dropout_bottleneck"]
     present_params = [c for c in PARAM_ORDER if c in top.columns]
@@ -239,7 +273,7 @@ def main() -> None:
           "  ".join("-" * max(len(c), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
-        study_short = os.path.basename(row["db_dir"])[:40]
+        study_short = str(row["study_name"])[:40]
         optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
         n_ep = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
         fixed_part = (f"  #{rank:>2}  {row['rank_val']:>{col_w}.4f}  "
@@ -281,7 +315,7 @@ def main() -> None:
             continue
 
         color = palette[plotted % len(palette)]
-        study_short = os.path.basename(row["db_dir"])
+        study_short = str(row["study_name"])
         if len(study_short) > 28:
             study_short = study_short[:25] + "..."
         label = f"#{rank} t{int(row['original_trial'])} {study_short} ({metric_hdr}={row['rank_val']:.4f})"

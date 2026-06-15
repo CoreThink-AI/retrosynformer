@@ -400,12 +400,16 @@ class RoutePredictor:
     def eval_predicted_routes(self, dataloader):
 
         routes = []
+        n_batches = self.config["evaluation"]["eval_n_batches"]
+        batch_size = self.config["evaluation"]["batch_size"]
+        n_total = (n_batches or 0) * batch_size
+        eval_t0 = time.time()
         self.model.eval()
         with torch.no_grad():
             for batch_no, data in enumerate(
                 dataloader
             ):
-                if batch_no == self.config["evaluation"]["eval_n_batches"]:
+                if batch_no == n_batches:
                     break
 
                 (
@@ -420,6 +424,10 @@ class RoutePredictor:
                     target_routes,
                 ) = data
 
+                batch_t0 = time.time()
+                print(f"  Route eval batch {batch_no + 1}/{n_batches or '?'}"
+                      f" ({len(states)} compounds) …", flush=True)
+                n_solved_batch = 0
                 for j in range(len(states)):
 
                     target_compound = target_routes[j][0]["smiles"]
@@ -480,5 +488,16 @@ class RoutePredictor:
                         route["route_solved"] = False
                         route["valid_route"] = False
 
+                    if route.get("route_solved"):
+                        n_solved_batch += 1
                     routes.append(route)
+
+                elapsed = time.time() - batch_t0
+                frac = n_solved_batch / len(states) if states else 0.0
+                print(f"    solved {n_solved_batch}/{len(states)} ({frac:.1%})"
+                      f"  {elapsed:.1f}s  ({elapsed / len(states):.2f}s/mol)",
+                      flush=True)
+        n_solved = sum(r.get("route_solved", False) for r in routes)
+        print(f"  Route eval done: {n_solved}/{len(routes)} solved"
+              f"  total {time.time() - eval_t0:.1f}s", flush=True)
         return routes
