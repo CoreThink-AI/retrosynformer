@@ -85,12 +85,14 @@ def main() -> None:
     )
     parser.add_argument("--top", type=int, default=10,
                         help="Number of top trials to plot (default: 10)")
-    parser.add_argument("--metric", default="valid_loss", choices=METRICS,
-                        help="Y-axis metric (default: valid_loss)")
+    parser.add_argument("--metric", default="valid_action_accuracy", choices=METRICS,
+                        help="Metric to rank by and plot on y-axis (default: valid_action_accuracy)")
     parser.add_argument("--also-train", action="store_true",
                         help="Overlay the corresponding train_* metric as a dashed line")
-    parser.add_argument("--min-score", type=float, default=0.2,
-                        help="Exclude trials with max valid_action_accuracy below this threshold (default: 0.2)")
+    parser.add_argument("--min-score", type=float, default=None,
+                        help="For accuracy metrics: exclude trials below this threshold. "
+                             "For loss metrics: exclude trials above this threshold. "
+                             "Default: 0.2 for accuracy metrics, no filter for loss metrics.")
     parser.add_argument("--out", default=None,
                         help="Save figure to this path instead of showing interactively")
     parser.add_argument("--root", default=".",
@@ -146,29 +148,41 @@ def main() -> None:
         .reset_index(drop=True)
     )
 
-    # Rank by max valid_action_accuracy from the last contiguous training run —
-    # this is available for every trial regardless of whether route eval ran.
-    def _max_valid_acc(jsonl_path: str) -> float:
+    # Rank by the selected --metric from the last contiguous training run.
+    # Loss metrics: lower is better (min, sort ascending).
+    # Accuracy metrics: higher is better (max, sort descending).
+    rank_metric = args.metric
+    rank_lower_is_better = "loss" in rank_metric
+    # Default threshold of 0.2 only for valid_action_accuracy; other metrics have no default filter.
+    min_score = args.min_score if args.min_score is not None else (0.2 if rank_metric == "valid_action_accuracy" else None)
+
+    def _rank_value(jsonl_path: str) -> float:
         if not os.path.exists(jsonl_path):
             return float("nan")
         try:
             df = _load_jsonl(jsonl_path)
-            if "valid_action_accuracy" in df.columns and not df.empty:
-                return float(df["valid_action_accuracy"].max())
+            if rank_metric in df.columns and not df.empty:
+                return float(df[rank_metric].min() if rank_lower_is_better else df[rank_metric].max())
         except Exception:
             pass
         return float("nan")
 
-    all_trials["valid_acc"] = all_trials["jsonl_path"].map(_max_valid_acc)
-    all_trials = all_trials.sort_values("valid_acc", ascending=False).reset_index(drop=True)
+    all_trials["rank_val"] = all_trials["jsonl_path"].map(_rank_value)
+    all_trials = all_trials.sort_values("rank_val", ascending=rank_lower_is_better).reset_index(drop=True)
 
-    all_trials = all_trials[all_trials["valid_acc"] >= args.min_score]
-    if all_trials.empty:
-        sys.exit(f"No completed trials with valid_acc >= {args.min_score}.")
+    if min_score is not None:
+        if rank_lower_is_better:
+            all_trials = all_trials[all_trials["rank_val"] <= min_score]
+            filter_desc = f"{rank_metric} <= {min_score}"
+        else:
+            all_trials = all_trials[all_trials["rank_val"] >= min_score]
+            filter_desc = f"{rank_metric} >= {min_score}"
+        if all_trials.empty:
+            sys.exit(f"No completed trials with {filter_desc}.")
     top = all_trials.head(args.top)
 
     # Param columns present across the top trials (exclude bookkeeping columns).
-    _non_param = {"trial", "state", "duration_min", "score", "valid_acc", "study_name",
+    _non_param = {"trial", "state", "duration_min", "score", "rank_val", "study_name",
                   "db_path", "db_dir", "original_trial", "jsonl_path"}
     PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
                    "structured_dropout_bottleneck"]
@@ -187,18 +201,21 @@ def main() -> None:
             return f"{val:.3f}"
         return str(val)
 
-    # Header
-    fixed_hdr  = f"  {'#':>3}  {'valid_acc':>9}  {'optuna':>6}  {'trial':>5}  {'study':<28}"
-    param_hdr  = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
-    print(f"Top {len(top)} completed trials by valid_action_accuracy:")
+    # Shorten the metric name to fit the table column header.
+    metric_hdr = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+    col_w = max(len(metric_hdr), 9)
+    direction = "↑" if not rank_lower_is_better else "↓"
+    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'trial':>5}  {'study':<28}"
+    param_hdr = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
+    print(f"Top {len(top)} completed trials by {rank_metric}:")
     print(f"{fixed_hdr}  {param_hdr}")
-    print(f"  {'---':>3}  {'-'*9}  {'------':>6}  {'-----':>5}  {'-'*28}  " +
+    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'-----':>5}  {'-'*28}  " +
           "  ".join("-" * max(len(c), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
         study_short = os.path.basename(row["db_dir"])[:28]
         optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
-        fixed_part = (f"  #{rank:>2}  {row['valid_acc']:>9.4f}  "
+        fixed_part = (f"  #{rank:>2}  {row['rank_val']:>{col_w}.4f}  "
                       f"{optuna_score}  "
                       f"{int(row['original_trial']):>5}  {study_short:<28}")
         param_part = "  ".join(
@@ -240,7 +257,7 @@ def main() -> None:
         study_short = os.path.basename(row["db_dir"])
         if len(study_short) > 28:
             study_short = study_short[:25] + "..."
-        label = f"#{rank} t{int(row['original_trial'])} {study_short} (valid_acc={row['valid_acc']:.4f})"
+        label = f"#{rank} t{int(row['original_trial'])} {study_short} ({metric_hdr}={row['rank_val']:.4f})"
 
         ax.plot(progress["epoch"], progress[args.metric],
                 label=label, color=color, linewidth=5.0, alpha=0.5)
