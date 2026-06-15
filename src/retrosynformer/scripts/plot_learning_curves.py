@@ -135,11 +135,43 @@ def main() -> None:
     )
 
     top = all_trials.head(args.top)
+
+    # Param columns present across the top trials (exclude bookkeeping columns).
+    _non_param = {"trial", "state", "duration_min", "score", "study_name",
+                  "db_path", "db_dir", "original_trial", "jsonl_path"}
+    PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
+                   "structured_dropout_bottleneck"]
+    present_params = [c for c in PARAM_ORDER if c in top.columns]
+    extra_params = [c for c in top.columns if c not in _non_param and c not in present_params]
+    param_cols = present_params + extra_params
+
+    def _fmt(col: str, val) -> str:
+        if pd.isna(val):
+            return "-"
+        if col == "lr":
+            return f"{val:.2e}"
+        if isinstance(val, float) and val == int(val):
+            return str(int(val))
+        if isinstance(val, float):
+            return f"{val:.3f}"
+        return str(val)
+
+    # Header
+    fixed_hdr  = f"  {'#':>3}  {'score':>6}  {'trial':>5}  {'study':<28}"
+    param_hdr  = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
     print(f"Top {len(top)} completed trials by score:")
+    print(f"{fixed_hdr}  {param_hdr}")
+    print(f"  {'---':>3}  {'------':>6}  {'-----':>5}  {'-'*28}  " +
+          "  ".join("-" * max(len(c), 6) for c in param_cols))
+
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
-        print(f"  #{rank:2d}  score={row['score']:.4f}  "
-              f"trial={int(row['original_trial'])}  "
-              f"study={os.path.basename(row['db_dir'])}")
+        study_short = os.path.basename(row["db_dir"])[:28]
+        fixed_part = (f"  #{rank:>2}  {row['score']:>6.4f}  "
+                      f"{int(row['original_trial']):>5}  {study_short:<28}")
+        param_part = "  ".join(
+            f"{_fmt(c, row[c]):<{max(len(c),6)}}" for c in param_cols
+        )
+        print(f"{fixed_part}  {param_part}")
     print()
 
     # Derive the matching train_* metric for --also-train.
