@@ -218,19 +218,19 @@ def main() -> None:
     metric_hdr = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
     col_w = max(len(metric_hdr), 9)
     direction = "↑" if not rank_lower_is_better else "↓"
-    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'trial':>5}  {'study':<28}"
+    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'trial':>5}  {'study':<40}"
     param_hdr = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
     print(f"Top {len(top)} completed trials by {rank_metric}:")
     print(f"{fixed_hdr}  {param_hdr}")
-    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'-----':>5}  {'-'*28}  " +
+    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'-----':>5}  {'-'*40}  " +
           "  ".join("-" * max(len(c), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
-        study_short = os.path.basename(row["db_dir"])[:28]
+        study_short = os.path.basename(row["db_dir"])[:40]
         optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
         fixed_part = (f"  #{rank:>2}  {row['rank_val']:>{col_w}.4f}  "
                       f"{optuna_score}  "
-                      f"{int(row['original_trial']):>5}  {study_short:<28}")
+                      f"{int(row['original_trial']):>5}  {study_short:<40}")
         param_part = "  ".join(
             f"{_fmt(c, row[c]):<{max(len(c),6)}}" for c in param_cols
         )
