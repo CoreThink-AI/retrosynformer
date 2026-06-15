@@ -224,6 +224,8 @@ class RetroTrainer:
             print("Directory created successfully.")
 
         lowest_valid_loss = 1000
+        patience = self.config["train"].get("early_stopping_patience", 0)
+        epochs_no_improve = 0
 
         training_loss, validation_loss = [], []
         (
@@ -344,11 +346,18 @@ class RetroTrainer:
                 print(f'saving model with {lowest_valid_loss - valid_loss} lower loss: {model_path}')
                 lowest_valid_loss = valid_loss
                 torch.save(self.model.state_dict(), model_path)
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
+
+            if patience > 0 and epochs_no_improve >= patience:
+                print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
+                break
 
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(

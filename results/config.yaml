@@ -56,4 +56,5 @@ train:
   batch_size: 512
   loss: crossEntropyLoss
   n_epochs: 1
+  early_stopping_patience: 20
   results_path: results/
