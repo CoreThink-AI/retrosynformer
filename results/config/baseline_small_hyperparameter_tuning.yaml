@@ -1,0 +1,125 @@
+# Hyperparameter tuning config for the small dataset.
+#
+# Paper: Granqvist et al., RetroSynFormer, Digital Discovery 2026, 5, 348-362
+#        DOI: 10.1039/d5dd00153f  (see docs/d5dd00153f-RetroSynFormer.md)
+#
+# The paper used Optuna to search over model architecture and optimizer
+# hyperparameters (Section 3.3, Table S1 in SI).  This config reproduces
+# that search on the small dataset, which is the fastest dataset to iterate
+# on.  Once promising ranges are found on small, extend to standard/large.
+#
+# Search space notes from the paper:
+#   - n_heads, n_layers, head_dim searched categorically
+#   - lr searched log-uniformly
+#   - dropout explored but fixed at 0 for the final models (Table S1)
+#   - reward function explored separately (Table 5); not tuned here
+#   - action space size explored separately (Section 4.6, Table 6)
+#
+# Usage:
+#   retrosynformer-hypertune -c results/config/baseline_small_hyperparameter_tuning.yaml \
+#       --study-name small-hypertune --n-trials 30 --n-epochs 80
+#
+# Results land in:  results/hypertune-small-hypertune/
+#   study.db         Optuna SQLite storage
+#   run.jsonl        structured trial log
+#   trial_NNN/       per-trial checkpoints and train_progress.jsonl
+
+# ---------------------------------------------------------------------------
+# Optuna search space (retrosynformer-hypertune reads this section)
+# ---------------------------------------------------------------------------
+optuna:
+  # Metric to maximize across trials.
+  # valid_route_accuracy is the most meaningful single metric; it corresponds
+  # to top-1 accuracy (Section 3.6) — fraction of routes where every step matches.
+  objective_metric: valid_route_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
+
+  # --- Architecture ---
+  # Paper explored [1,2,4,8] heads; [2..32] layers; [64,128,256] head_dim.
+  # Narrowed here based on the Optuna winner (n_heads=4, n_layers=26, head_dim=256)
+  # to explore the neighbourhood efficiently on the small dataset.
+  n_heads: [1, 2, 4]
+  n_layers: [4, 8, 12, 18, 26]
+  head_dim: [64, 128, 256]
+
+  # --- Optimizer ---
+  # Paper found lr≈0.211 via log-uniform search (Table S1).
+  lr:
+    low: 5.0e-4
+    high: 0.5
+    log: true
+
+  # Standard dropout was held at 0 in the final paper models to isolate
+  # the architecture contribution.  Uncomment to re-explore:
+  # dropout:
+  #   low: 0.0
+  #   high: 0.3
+  #   step: 0.05
+
+# ---------------------------------------------------------------------------
+# Fixed context and data settings
+# ---------------------------------------------------------------------------
+context:
+  building_blocks: data/standard_building_blocks.csv
+  random_state: 1
+  templates_path: data/standard_reaction_templates.pickle
+
+dataset:
+  # Small dataset: fastest to iterate; 588 templates (paper Table 1)
+  action_dim: 588           # small=588, standard=1572, large=2986
+  drop_duplicates: true
+  fp_dim: 1024              # 1024-bit Morgan radius-2 fingerprints (Section 3.3.2)
+  n_in_state: 2             # state_dim = fp_dim × n_in_state = 2048
+  routes_path: data/standard_routes.json
+  shuffle: true
+  synthetic_routes_path: false
+  valid_set: n1+n5          # PaRoutes benchmark targets as held-out test
+
+evaluation:
+  batch_size: 64
+  # Use greedy (beam_width=1) during the hypertune search — much faster,
+  # and route-accuracy correlation with beam_width=50 is high enough for
+  # comparing trials.  Re-evaluate the winner with beam_width=50 afterward.
+  beam_width: 1             # 1=greedy (fast hypertune); 50=paper-quality (final eval)
+  eval_n_batches: 2         # limit per-epoch route eval batches for speed
+  eval_routes_frequency: 100  # only run expensive route eval at trial end
+  max_depth: 6
+  test_frac: 0.1
+  sort_on: trajectory_prob
+  ted_exhaustive_limit: 64
+
+model:
+  # These are the defaults for each trial; the optuna section above overrides
+  # n_heads, n_layers, head_dim, and lr for each trial.
+  action_tanh: false
+  activation_function: relu  # GPT-2 default (Section 3.3)
+  attn_pdrop: 0.0
+  embd_pdrop: 0.0
+  head_dim: 256              # starting point; overridden by optuna search
+  max_ep_len: 20
+  n_heads: 4                 # starting point; overridden by optuna search
+  n_layers: 26               # starting point; overridden by optuna search
+  resid_pdrop: 0.0
+  use_structured_dropout: false
+
+optimizer:
+  lr: 0.211                  # starting point; overridden by optuna search
+  momentum: 0.98             # not searched; paper used 0.98 throughout
+
+reward:
+  # Default reward function — best overall success rate (paper Table 5)
+  building_block_reward_factor: 0
+  building_block_scale_with_depth: 2
+  dead_end_reward_factor: -2
+  dead_end_scale_with_depth: 2
+  intermediate_reward_factor: -2
+  intermediate_scale_with_depth: 1
+
+train:
+  batch_size: 512
+  loss: crossEntropyLoss
+  # Shorter epoch budget per trial speeds up the search; extend to 200
+  # for the winning configuration's final training run.
+  n_epochs: 80
+  early_stopping_patience: 30  # stop after this many epochs with no valid_loss improvement
+  lr_scheduler_patience: 10    # ReduceLROnPlateau patience before halving lr
+  results_path: results/

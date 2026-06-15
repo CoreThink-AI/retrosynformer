@@ -1,0 +1,9 @@
+Reward function,Success rate N1,Success rate N5,Top-1 accuracy N1,Top-1 accuracy N5
+Default,0.924,0.899,0.106,0.058
+Increasing building block reward,0.916,0.889,0.099,0.054
+Decreasing building block reward,0.916,0.891,0.107,0.060
+Remove scaling building block reward,0.912,0.890,0.110,0.064
+Flipping sign intermediate score,0.914,0.890,0.106,0.054
+Remove scaling intermediate,0.920,0.898,0.105,0.060
+Flipping sign dead end score,0.921,0.899,0.107,0.058
+Remove scaling dead end,0.915,0.898,0.103,0.059

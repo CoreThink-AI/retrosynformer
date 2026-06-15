@@ -1,0 +1,83 @@
+# Baseline config matching the paper's small-dataset experiment.
+#
+# Paper: Granqvist et al., RetroSynFormer, Digital Discovery 2026, 5, 348-362
+#        DOI: 10.1039/d5dd00153f  (see docs/d5dd00153f-RetroSynFormer.md)
+#
+# Target result (Table 6, small dataset, beam_width=50):
+#   N1 success rate: 0.950   N5 success rate: 0.833
+#   N1 top-1 accuracy: 0.182  N5 TED: 5.428
+#
+# Architecture: GPT-2 Decision Transformer (Section 3.3).
+# Hyperparameters were found via Optuna search (paper Table S1).
+# The values below reproduce the small-dataset model as closely as possible
+# given the published description; n_heads/n_layers/head_dim/lr are taken
+# from the Optuna-tuned standard-dataset model (the SI table is not publicly
+# available, but these values produced the results in this codebase).
+#
+# Usage:
+#   python -m retrosynformer.runner -c results/config/baseline_small.yaml
+#   retrosynformer-train -c results/config/baseline_small.yaml
+
+context:
+  building_blocks: data/standard_building_blocks.csv
+  random_state: 1
+  templates_path: data/standard_reaction_templates.pickle
+
+dataset:
+  # Small dataset: 588 templates, 53 626 unique targets (paper Table 1)
+  action_dim: 588           # small=588, standard=1572, large=2986
+  drop_duplicates: true
+  fp_dim: 1024              # 1024-bit Morgan radius-2 fingerprints (Section 3.3.2)
+  n_in_state: 2             # two molecules concatenated → state_dim = 2048 (Section 3.3.2)
+  routes_path: data/standard_routes.json
+  shuffle: true
+  synthetic_routes_path: false
+  # N1+N5 PaRoutes benchmark targets are the held-out test set (Section 3.2)
+  valid_set: n1+n5          # random_split | n1+n5
+
+evaluation:
+  batch_size: 64
+  # beam_width=50 is what the paper calls "RetroSynFormer50" (Section 4)
+  # Use beam_width=1 (greedy) for fast sanity checks; 50 for paper-quality results
+  beam_width: 50            # 1=greedy, 50=paper default (Fig. 7 shows peak ~width 10 for top-1)
+  eval_n_batches: 2
+  eval_routes_frequency: 100
+  max_depth: 6              # maximum retrosynthesis depth (Section 3.7)
+  test_frac: 0.1
+  sort_on: trajectory_prob  # trajectory_prob | total_reward
+  ted_exhaustive_limit: 64
+
+model:
+  action_tanh: false        # discrete one-hot template selection; no tanh needed
+  activation_function: relu # Section 3.3; GPT-2 default
+  attn_pdrop: 0.0           # paper explored dropout as a hyperparameter; default = 0
+  embd_pdrop: 0.0
+  head_dim: 256             # from Optuna study (Table S1)
+  max_ep_len: 20
+  n_heads: 4                # from Optuna study
+  n_layers: 26              # from Optuna study
+  resid_pdrop: 0.0
+  use_structured_dropout: false  # baseline: no structured dropout
+
+optimizer:
+  lr: 0.211                 # from Optuna study (Table S1)
+  momentum: 0.98
+
+reward:
+  # Default reward function — best overall success rate (paper Table 5)
+  # reward = factor * (scale_with_depth^depth)  when scale_with_depth > 0
+  #        = factor                              otherwise
+  building_block_reward_factor: 0     # building blocks are the goal; neutral reward
+  building_block_scale_with_depth: 2  # scale by depth to incentivize shorter routes
+  dead_end_reward_factor: -2          # penalize dead ends
+  dead_end_scale_with_depth: 2        # harsher penalty at greater depth
+  intermediate_reward_factor: -2      # penalize intermediates to favor shorter routes
+  intermediate_scale_with_depth: 1    # mild depth scaling for intermediates
+
+train:
+  batch_size: 512
+  loss: crossEntropyLoss
+  n_epochs: 200
+  early_stopping_patience: 50  # stop after this many epochs with no valid_loss improvement
+  lr_scheduler_patience: 20    # ReduceLROnPlateau patience before halving lr
+  results_path: results/

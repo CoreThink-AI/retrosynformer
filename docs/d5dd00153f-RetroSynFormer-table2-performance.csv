@@ -1,0 +1,6 @@
+Metric,Direction,RetroSynFormer50_N1,RetroSynFormer50_N5,AiZynthFinder_N1,AiZynthFinder_N5
+Success rate (%),higher_better,0.924,0.899,0.939,0.924
+Top-1 accuracy,higher_better,0.106,0.058,0.143,0.071
+Mean time per route (s),lower_better,68.1,81.9,5.45,5.8
+Mean TED,lower_better,5.58,7.08,5.40,7.12
+Mean # reactions per route,lower_better,2.34,2.55,2.52,2.92
