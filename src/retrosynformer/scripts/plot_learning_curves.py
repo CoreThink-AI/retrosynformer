@@ -90,7 +90,7 @@ def main() -> None:
     parser.add_argument("--also-train", action="store_true",
                         help="Overlay the corresponding train_* metric as a dashed line")
     parser.add_argument("--min-score", type=float, default=0.2,
-                        help="Exclude trials with score below this threshold (default: 0.2)")
+                        help="Exclude trials with max valid_action_accuracy below this threshold (default: 0.2)")
     parser.add_argument("--out", default=None,
                         help="Save figure to this path instead of showing interactively")
     parser.add_argument("--root", default=".",
@@ -146,13 +146,29 @@ def main() -> None:
         .reset_index(drop=True)
     )
 
-    all_trials = all_trials[all_trials["score"] >= args.min_score]
+    # Rank by max valid_action_accuracy from the last contiguous training run —
+    # this is available for every trial regardless of whether route eval ran.
+    def _max_valid_acc(jsonl_path: str) -> float:
+        if not os.path.exists(jsonl_path):
+            return float("nan")
+        try:
+            df = _load_jsonl(jsonl_path)
+            if "valid_action_accuracy" in df.columns and not df.empty:
+                return float(df["valid_action_accuracy"].max())
+        except Exception:
+            pass
+        return float("nan")
+
+    all_trials["valid_acc"] = all_trials["jsonl_path"].map(_max_valid_acc)
+    all_trials = all_trials.sort_values("valid_acc", ascending=False).reset_index(drop=True)
+
+    all_trials = all_trials[all_trials["valid_acc"] >= args.min_score]
     if all_trials.empty:
-        sys.exit(f"No completed trials with score >= {args.min_score}.")
+        sys.exit(f"No completed trials with valid_acc >= {args.min_score}.")
     top = all_trials.head(args.top)
 
     # Param columns present across the top trials (exclude bookkeeping columns).
-    _non_param = {"trial", "state", "duration_min", "score", "study_name",
+    _non_param = {"trial", "state", "duration_min", "score", "valid_acc", "study_name",
                   "db_path", "db_dir", "original_trial", "jsonl_path"}
     PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
                    "structured_dropout_bottleneck"]
@@ -172,16 +188,18 @@ def main() -> None:
         return str(val)
 
     # Header
-    fixed_hdr  = f"  {'#':>3}  {'score':>6}  {'trial':>5}  {'study':<28}"
+    fixed_hdr  = f"  {'#':>3}  {'valid_acc':>9}  {'optuna':>6}  {'trial':>5}  {'study':<28}"
     param_hdr  = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
-    print(f"Top {len(top)} completed trials by score:")
+    print(f"Top {len(top)} completed trials by valid_action_accuracy:")
     print(f"{fixed_hdr}  {param_hdr}")
-    print(f"  {'---':>3}  {'------':>6}  {'-----':>5}  {'-'*28}  " +
+    print(f"  {'---':>3}  {'-'*9}  {'------':>6}  {'-----':>5}  {'-'*28}  " +
           "  ".join("-" * max(len(c), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
         study_short = os.path.basename(row["db_dir"])[:28]
-        fixed_part = (f"  #{rank:>2}  {row['score']:>6.4f}  "
+        optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
+        fixed_part = (f"  #{rank:>2}  {row['valid_acc']:>9.4f}  "
+                      f"{optuna_score}  "
                       f"{int(row['original_trial']):>5}  {study_short:<28}")
         param_part = "  ".join(
             f"{_fmt(c, row[c]):<{max(len(c),6)}}" for c in param_cols
@@ -222,7 +240,7 @@ def main() -> None:
         study_short = os.path.basename(row["db_dir"])
         if len(study_short) > 28:
             study_short = study_short[:25] + "..."
-        label = f"#{rank} t{int(row['original_trial'])} {study_short} (score={row['score']:.4f})"
+        label = f"#{rank} t{int(row['original_trial'])} {study_short} (valid_acc={row['valid_acc']:.4f})"
 
         ax.plot(progress["epoch"], progress[args.metric],
                 label=label, color=color, linewidth=5.0, alpha=0.5)
