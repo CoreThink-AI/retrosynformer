@@ -197,7 +197,8 @@ _RESERVED_OPTUNA_KEYS = {"objective_metric"}
 
 
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str,
-              results_base: str, run_jsonl: str, eval_n_batches: int | None = None) -> float:
+              results_base: str, run_jsonl: str, eval_n_batches: int | None = None,
+              study_name: str | None = None) -> float:
     config = read_config(config_path)
     _validate_config(config)
     optuna_config = config.get("optuna", {})
@@ -223,6 +224,8 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         n_epochs=n_epochs,
         results_path=trial_dir,
         eval_routes_at_end=True,
+        trial_number=trial.number,
+        study_name=study_name,
     )
     model_params.update(params)
     print("\n#### Model params")
@@ -341,7 +344,7 @@ def main():
 
     study.optimize(
         lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset,
-                                results_base, run_jsonl, args.eval_n_batches),
+                                results_base, run_jsonl, args.eval_n_batches, args.study_name),
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )

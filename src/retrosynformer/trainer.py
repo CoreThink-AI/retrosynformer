@@ -134,11 +134,9 @@ class RetroTrainer:
                 for a_pred, a_target in zip(actions_id_batch, actions_id_pred_batch)
             ]
         ) / len(actions_id_batch)
-        print("train route accuracy: ", route_accuracy)
         action_accuracy = accuracy_score(
             flat_actions_id_batch, flat_actions_id_pred_batch
         )
-        print("train action accuracy: ", action_accuracy)
 
         return total_loss / len(self.train_dataloader), action_accuracy, route_accuracy
 
@@ -189,11 +187,9 @@ class RetroTrainer:
                     for a_pred, a_target in zip(actions_id_batch, actions_id_pred_batch)
                 ]
             ) / len(actions_id_batch)
-            print("valid route accuracy: ", route_accuracy)
             action_accuracy = accuracy_score(
                 flat_actions_id_batch, flat_actions_id_pred_batch
             )
-            print("valid action accuracy: ", action_accuracy)
 
         return (
             total_loss / len(dataloader),
@@ -203,7 +199,8 @@ class RetroTrainer:
             actions_id_batch,
         )
 
-    def train(self, verbose=True, start_epoch=0, eval_routes_at_end=False):
+    def train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
+              trial_number=None, study_name=None):
         time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
@@ -259,11 +256,19 @@ class RetroTrainer:
                 self.results_eval = json.load(f)
 
         print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
+        if verbose:
+            _hdr_prefix = []
+            if trial_number is not None:
+                _hdr_prefix.append("trial")
+            if study_name is not None:
+                _hdr_prefix.append("study")
+            print("\t".join(_hdr_prefix + ["epoch", "t_loss", "t_acc", "t_racc",
+                                           "v_loss", "v_acc", "v_racc", "s/ep", "note"]),
+                  flush=True)
+
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
 
-            if verbose:
-                print("epoch: ", epoch)
             train_loss, train_action_accuracy, train_route_accuracy = (
                 self.train_one_epoch()
             )
@@ -279,36 +284,36 @@ class RetroTrainer:
 
             seconds_this_epoch = time.time() - epoch_start
 
+            # Save model before printing so the note column reflects this epoch's outcome.
+            if valid_loss < lowest_valid_loss:
+                model_path = save_folder + "/model.pth"
+                lowest_valid_loss = valid_loss
+                torch.save(self.model.state_dict(), model_path)
+                epochs_no_improve = 0
+                note = "*"
+            else:
+                epochs_no_improve += 1
+                note = ""
+
             eval_routes_frequency = self.config["evaluation"]["eval_routes_frequency"]
             if (
-                # epoch == 0 or
                 (epoch % eval_routes_frequency == 0 and epoch > 0)
                 or epoch == n_epochs - 1
             ):
-                # import cProfile
-                # profiler = cProfile.Profile()
-                # profiler.enable()
                 eval_start_time = time.time()
-                print("Evaluation for epoch ", epoch, " has started!")
+                print(f"Epoch {epoch}: running route evaluation …", flush=True)
                 route_predictor.set_model(self.model)
                 pred_routes = route_predictor.eval_predicted_routes(
                     self.valid_dataloader
                 )
                 self.results_eval.append({"epoch": epoch, "result": pred_routes})
-                print("Evaluation took: ", (time.time() - eval_start_time) / 60, "min")
-                print(
-                    f"This is an average of {(time.time() - eval_start_time) / len(pred_routes)} seconds per target."
-                )
-                print(f"Evaluating {len(pred_routes)} routes.")
-                # profiler.dump_stats(os.path.join(save_folder, 'emmas_predict_3.cprofile'))
-
                 solved_routes = [r["route_solved"] for r in pred_routes]
                 fraction_targets_solved = sum(solved_routes) / len(solved_routes)
-                print("fraction solved targets: ", fraction_targets_solved)
-
                 valid_routes = [r["valid_route"] for r in pred_routes]
                 fraction_valid_routes = sum(valid_routes) / len(valid_routes)
-                print("fraction valid_routes: ", fraction_valid_routes)
+                print(f"  solved={fraction_targets_solved:.5f}  valid={fraction_valid_routes:.5f}"
+                      f"  ({len(pred_routes)} routes, {(time.time()-eval_start_time)/60:.1f} min)",
+                      flush=True)
             else:
                 fraction_targets_solved = None
 
@@ -327,29 +332,22 @@ class RetroTrainer:
             )
 
             if verbose:
-                print("Train loss: ", train_loss, "Valid loss: ", valid_loss)
-                print(
-                    "Train accuracy: ",
-                    train_action_accuracy,
-                    "Valid accuracy: ",
-                    valid_action_accuracy,
-                )
-                print(
-                    "Train route accuracy: ",
-                    train_route_accuracy,
-                    "Valid route accuracy: ",
-                    valid_route_accuracy,
-                )
-                print(f"Epoch time: {seconds_this_epoch:.1f}s")
-
-            if valid_loss < lowest_valid_loss:
-                model_path = save_folder + "/model.pth"
-                print(f'saving model with {lowest_valid_loss - valid_loss} lower loss: {model_path}')
-                lowest_valid_loss = valid_loss
-                torch.save(self.model.state_dict(), model_path)
-                epochs_no_improve = 0
-            else:
-                epochs_no_improve += 1
+                _row_prefix = []
+                if trial_number is not None:
+                    _row_prefix.append(str(trial_number))
+                if study_name is not None:
+                    _row_prefix.append(str(study_name))
+                print("\t".join(_row_prefix + [
+                    str(epoch),
+                    f"{train_loss:.5f}",
+                    f"{train_action_accuracy:.5f}",
+                    f"{train_route_accuracy:.5f}",
+                    f"{valid_loss:.5f}",
+                    f"{valid_action_accuracy:.5f}",
+                    f"{valid_route_accuracy:.5f}",
+                    f"{seconds_this_epoch:.1f}",
+                    note,
+                ]), flush=True)
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")

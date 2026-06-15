@@ -221,7 +221,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, eval_routes_at_end=False):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, eval_routes_at_end=False, trial_number=None, study_name=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -324,7 +324,8 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         validation_accuracy,
         validation_route_accuracy,
         fraction_targets_solved,
-    ) = trainer.train(start_epoch=derived_start_epoch, eval_routes_at_end=eval_routes_at_end)
+    ) = trainer.train(start_epoch=derived_start_epoch, eval_routes_at_end=eval_routes_at_end,
+                       trial_number=trial_number, study_name=study_name)
     print("Training is completed.")
     end_time = time.time()
     print("Training took: ", (end_time - begin_train_time) / (60 * 60), " hours.")
