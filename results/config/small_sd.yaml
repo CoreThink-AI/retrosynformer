@@ -1,14 +1,14 @@
 optuna:
-  n_heads: [1, 2, 4, 8]
-  n_layers: [2, 3, 4, 6, 8, 12, 16, 24, 32]
+  n_heads: [1, 2, 3, 4]
+  n_layers: [2, 3, 4, 5]
   head_dim: [64, 128, 256]
   lr:
     low: 1.0e-4
     high: 1.0
     log: true
   dropout:
-    low: 0.0
-    high: 0.3
+    low: 0.03
+    high: 0.45
   structured_dropout_bottleneck:
     low: 32
     high: 512
@@ -62,5 +62,5 @@ train:
   batch_size: 512
   loss: crossEntropyLoss
   n_epochs: 1
-  early_stopping_patience: 4
+  early_stopping_patience: 6
   results_path: results/
