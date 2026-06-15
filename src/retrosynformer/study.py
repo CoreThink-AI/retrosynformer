@@ -2,13 +2,55 @@
 
 Public API
 ----------
-to_dfs(db_path)       -> dict[str, DataFrame]   all raw tables
-to_trials_df(db_path) -> DataFrame               one row per trial, params decoded
+to_dfs(db_path)                    -> dict[str, DataFrame]   all raw tables
+to_trials_df(db_path)              -> DataFrame               one row per trial, params decoded
+concat(study_a_dfs, study_b_dfs)   -> dict[str, DataFrame]   merge two study dicts
 """
 import json
 import sqlite3
 
 import pandas as pd
+
+# ---------------------------------------------------------------------------
+# FK / PK topology constants (derived from PRAGMA foreign_key_list)
+# ---------------------------------------------------------------------------
+
+# Tables that carry study_id (as PK in 'studies', FK elsewhere).
+_STUDY_ID_TABLES = (
+    "studies",
+    "study_directions",
+    "study_user_attributes",
+    "study_system_attributes",
+    "trials",
+)
+
+# Tables that carry trial_id (as PK in 'trials', FK elsewhere).
+_TRIAL_ID_TABLES = (
+    "trials",
+    "trial_params",
+    "trial_values",
+    "trial_user_attributes",
+    "trial_system_attributes",
+    "trial_intermediate_values",
+    "trial_heartbeats",
+)
+
+# Each of these tables has its own auto-increment PK that is neither
+# study_id nor trial_id and must not collide across the two studies.
+_OWN_PKS: dict[str, str] = {
+    "study_directions":           "study_direction_id",
+    "study_user_attributes":      "study_user_attribute_id",
+    "study_system_attributes":    "study_system_attribute_id",
+    "trial_params":               "param_id",
+    "trial_values":               "trial_value_id",
+    "trial_user_attributes":      "trial_user_attribute_id",
+    "trial_system_attributes":    "trial_system_attribute_id",
+    "trial_intermediate_values":  "trial_intermediate_value_id",
+    "trial_heartbeats":           "trial_heartbeat_id",
+}
+
+# These tables are schema/migration metadata — keep A's copy unchanged.
+_SINGLETON_TABLES = {"version_info", "alembic_version"}
 
 
 def to_dfs(db_path: str) -> dict[str, pd.DataFrame]:
@@ -86,3 +128,84 @@ def to_trials_df(db_path: str) -> pd.DataFrame:
     result = result.merge(values, on="trial_id", how="left")
     result = result.drop(columns=["trial_id"])
     return result.sort_values("trial").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# concat
+# ---------------------------------------------------------------------------
+
+def _col_max(dfs: dict[str, pd.DataFrame], table: str, col: str, default: int = 0) -> int:
+    """Return max value of *col* in *table*, or *default* if table/col is absent or empty."""
+    df = dfs.get(table)
+    if df is None or df.empty or col not in df.columns:
+        return default
+    v = df[col].max()
+    return default if pd.isna(v) else int(v)
+
+
+def concat(
+    study_a_dfs: dict[str, pd.DataFrame],
+    study_b_dfs: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Concatenate study_b rows into study_a, reindexing PKs and FKs to avoid collisions.
+
+    All auto-increment integer keys in study_b are shifted upward by the
+    corresponding maximum value found in study_a, so the combined dict has no
+    duplicate key values across any table.  ``trials.number`` (the human-visible
+    trial index) is also offset so it remains monotonically increasing across
+    both studies.  Singleton metadata tables (``version_info``, ``alembic_version``)
+    are taken from study_a unchanged.
+
+    Parameters
+    ----------
+    study_a_dfs, study_b_dfs:
+        Dicts returned by :func:`to_dfs`.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        A new dict with the same table names; each DataFrame is a fresh copy
+        with a clean 0-based RangeIndex.
+    """
+    # Offsets derived from A's maximum key values.
+    study_id_offset     = _col_max(study_a_dfs, "studies", "study_id")
+    trial_id_offset     = _col_max(study_a_dfs, "trials",  "trial_id")
+    # trial.number is 0-based; default -1 so offset = 0 when A has no trials.
+    trial_number_offset = _col_max(study_a_dfs, "trials",  "number", default=-1) + 1
+
+    # Deep-copy B so the caller's dicts are not mutated.
+    b = {k: df.copy() for k, df in study_b_dfs.items()}
+
+    # Shift study_id everywhere it appears.
+    if study_id_offset:
+        for tbl in _STUDY_ID_TABLES:
+            if tbl in b and "study_id" in b[tbl].columns:
+                b[tbl]["study_id"] += study_id_offset
+
+    # Shift trial_id everywhere it appears.
+    if trial_id_offset:
+        for tbl in _TRIAL_ID_TABLES:
+            if tbl in b and "trial_id" in b[tbl].columns:
+                b[tbl]["trial_id"] += trial_id_offset
+
+    # Shift trial number so it stays sequential across the merged result.
+    if trial_number_offset and "trials" in b and "number" in b["trials"].columns:
+        b["trials"]["number"] += trial_number_offset
+
+    # Shift each table's own PK (none of these are study_id or trial_id).
+    for tbl, pk in _OWN_PKS.items():
+        if tbl in b and pk in b[tbl].columns:
+            offset = _col_max(study_a_dfs, tbl, pk)
+            if offset:
+                b[tbl][pk] += offset
+
+    # Merge tables; singletons keep A's version.
+    result: dict[str, pd.DataFrame] = {}
+    for tbl in set(study_a_dfs) | set(b):
+        if tbl in _SINGLETON_TABLES:
+            result[tbl] = (study_a_dfs.get(tbl) if tbl in study_a_dfs else b[tbl]).copy()
+        else:
+            frames = [df for df in (study_a_dfs.get(tbl), b.get(tbl)) if df is not None]
+            result[tbl] = pd.concat(frames, ignore_index=True)
+
+    return result
