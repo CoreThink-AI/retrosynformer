@@ -204,8 +204,9 @@ def init_model(config, model_path=None):
         from .structured_dropout import StructuredDropoutDecisionTransformer
         fp_dim = config["dataset"]["fp_dim"]
         bottleneck = config["model"].get("structured_dropout_bottleneck", 128)
-        model = StructuredDropoutDecisionTransformer(dt_config, fp_dim, bottleneck)
-        print(f"Using StructuredDropoutDecisionTransformer (fp_dim={fp_dim}, bottleneck={bottleneck})")
+        rate = config["model"].get("structured_dropout_rate", 1.0)
+        model = StructuredDropoutDecisionTransformer(dt_config, fp_dim, bottleneck, rate=rate)
+        print(f"Using StructuredDropoutDecisionTransformer (fp_dim={fp_dim}, bottleneck={bottleneck}, rate={rate})")
     else:
         model = DecisionTransformerModel(dt_config)
     if model_path:
@@ -220,7 +221,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, eval_routes_at_end=False):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, eval_routes_at_end=False):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -269,6 +270,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if structured_dropout_bottleneck is not None:
         config["model"]["structured_dropout_bottleneck"] = int(structured_dropout_bottleneck)
         print(f"structured_dropout_bottleneck override: {structured_dropout_bottleneck}")
+    if structured_dropout_rate is not None:
+        config["model"]["structured_dropout_rate"] = float(structured_dropout_rate)
+        print(f"structured_dropout_rate override: {structured_dropout_rate}")
     # Derive hidden_size from n_heads * head_dim whenever head_dim is present in config.
     if "head_dim" in config["model"]:
         config["model"]["hidden_size"] = config["model"]["n_heads"] * config["model"]["head_dim"]
@@ -428,6 +432,13 @@ if __name__ == "__main__":
         help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
     )
     parser.add_argument(
+        "--structured-dropout-rate",
+        type=float,
+        default=None,
+        dest="structured_dropout_rate",
+        help="Global multiplier on learned structured-dropout probabilities (0=off, 1=default, >1=amplify)",
+    )
+    parser.add_argument(
         "--momentum",
         type=float,
         default=None,
@@ -450,4 +461,5 @@ if __name__ == "__main__":
         lr=args.lr,
         dropout=args.dropout,
         momentum=args.momentum,
+        structured_dropout_rate=args.structured_dropout_rate,
     )

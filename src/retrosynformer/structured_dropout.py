@@ -18,7 +18,8 @@ transformer layer.  No other code in the model is touched.
 Usage
 -----
 Enabled by setting ``model.use_structured_dropout: true`` in config.yaml.
-Optional knob: ``model.structured_dropout_bottleneck`` (default 128).
+Optional knobs: ``model.structured_dropout_bottleneck`` (default 128),
+``model.structured_dropout_rate`` (default 1.0; 0.0 = off, >1.0 = amplify).
 """
 
 import torch
@@ -75,11 +76,17 @@ class MoleculeConditionedMaskGenerator(nn.Module):
         """
         return self.net(fingerprint)
 
-    def get_mask(self, fingerprint: torch.Tensor) -> torch.Tensor:
+    def get_mask(self, fingerprint: torch.Tensor, rate: float = 1.0) -> torch.Tensor:
         """Compute the scale mask to apply to hidden states.
 
         Returns a tensor of shape (batch, 1, hidden_size) ready to broadcast
         over (batch, n_tokens, hidden_size).
+
+        Args:
+            fingerprint: (batch, fp_dim)
+            rate: global multiplier on the learned drop probabilities.
+                  0.0 = no dropout; 1.0 = learned rates unchanged (default);
+                  >1.0 = amplified dropout.  Clamped so drop_prob ≤ 0.9.
 
         Training: inverted-dropout Bernoulli mask (stochastic).
         Eval:     deterministic expected-value mask ``(1 - p)``.
@@ -95,8 +102,11 @@ class MoleculeConditionedMaskGenerator(nn.Module):
         >>> mask2 = gen.get_mask(torch.ones(1, 8))
         >>> bool((mask != mask2).any())
         True
+        >>> mask_off = gen.get_mask(torch.zeros(1, 8), rate=0.0)
+        >>> bool((mask_off == 1.0).all())
+        True
         """
-        drop_prob = self(fingerprint).clamp(0.0, 0.9)  # never drop > 90%
+        drop_prob = (self(fingerprint) * rate).clamp(0.0, 0.9)
         keep_prob = 1.0 - drop_prob                    # (batch, hidden_size)
         if self.training:
             mask = torch.bernoulli(keep_prob) / keep_prob.clamp(min=1e-6)
@@ -116,6 +126,9 @@ class StructuredDropoutDecisionTransformer(nn.Module):
         config:     `DecisionTransformerConfig` (same as for the base model).
         fp_dim:     Fingerprint dimension (config["dataset"]["fp_dim"]).
         bottleneck: Hidden size of the mask-generator MLP (default 128).
+        rate:       Global multiplier on learned drop probabilities (default 1.0).
+                    0.0 disables structured dropout entirely; >1.0 amplifies it.
+                    Searched by Optuna via ``optuna.structured_dropout_rate``.
     """
 
     def __init__(
@@ -123,12 +136,14 @@ class StructuredDropoutDecisionTransformer(nn.Module):
         config: DecisionTransformerConfig,
         fp_dim: int,
         bottleneck: int = 128,
+        rate: float = 1.0,
     ):
         super().__init__()
         self.dt = DecisionTransformerModel(config)
         self.mask_gen = MoleculeConditionedMaskGenerator(
             fp_dim, config.hidden_size, bottleneck
         )
+        self.structured_dropout_rate = rate
         self._mask: torch.Tensor | None = None
 
     # ------------------------------------------------------------------
@@ -168,7 +183,7 @@ class StructuredDropoutDecisionTransformer(nn.Module):
         molecule_fp = states[:, 0, :fp_dim].to(states.dtype)
 
         # Compute mask and stash it so the hook can read it.
-        self._mask = self.mask_gen.get_mask(molecule_fp)  # (batch, 1, hidden_size)
+        self._mask = self.mask_gen.get_mask(molecule_fp, rate=self.structured_dropout_rate)
 
         handle = self.dt.embed_ln.register_forward_hook(self._hook)
         try:
@@ -201,8 +216,9 @@ class StructuredDropoutDecisionTransformer(nn.Module):
         config: DecisionTransformerConfig,
         fp_dim: int,
         bottleneck: int = 128,
+        rate: float = 1.0,
         map_location=None,
     ) -> "StructuredDropoutDecisionTransformer":
-        model = cls(config, fp_dim, bottleneck)
+        model = cls(config, fp_dim, bottleneck, rate=rate)
         model.load_state_dict(torch.load(path, map_location=map_location))
         return model
