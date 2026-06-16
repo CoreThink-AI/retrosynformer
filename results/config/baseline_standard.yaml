@@ -25,7 +25,7 @@ context:
 
 dataset:
   # Small dataset: 588 templates, 53,626 unique targets (paper Table 1)
-  action_dim: 588           # small=588, standard=1572, large=2986
+  action_dim: 1572           # small=588, standard=1572, large=2986
   drop_duplicates: true
   fp_dim: 1024              # 1024-bit Morgan radius-2 fingerprints (Section 3.3.2)
   n_in_state: 2             # two molecules concatenated → state_dim = 2048 (Section 3.3.2)
