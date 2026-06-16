@@ -20,12 +20,12 @@ Scripts are now installable as first-class CLI commands via `pip install` / `uv 
 
   | Command | Entry point |
   |---------|-------------|
-  | `retrosynformer-train` | `retrosynformer.scripts.train:main` |
-  | `retrosynformer-hypertune` | `retrosynformer.scripts.hypertune:main` |
-  | `retrosynformer-show-study` | `retrosynformer.scripts.show_study:main` |
-  | `retrosynformer-show-all-studies` | `retrosynformer.scripts.show_all_studies:main` |
-  | `retrosynformer-monitor-jsonl` | `retrosynformer.scripts.monitor_jsonl:main` |
-  | `retrosynformer-monitor-progress` | `retrosynformer.scripts.monitor_progress:main` |
+  | `rs-train` | `retrosynformer.scripts.train:main` |
+  | `rs-hypertune` | `retrosynformer.scripts.hypertune:main` |
+  | `rs-show-study` | `retrosynformer.scripts.show_study:main` |
+  | `rs-show-all-studies` | `retrosynformer.scripts.show_all_studies:main` |
+  | `rs-monitor-jsonl` | `retrosynformer.scripts.monitor_jsonl:main` |
+  | `rs-monitor-progress` | `retrosynformer.scripts.monitor_progress:main` |
 
 - **`[tool.setuptools.script-files]`** — two shell scripts installed as executables:
   - `monitor_train_progress.sh`
@@ -61,11 +61,11 @@ if __name__ == "__main__":
 ### Shell scripts
 
 - `monitor_train_progress.sh` and `train_structured_dropout_comparison.sh` — added `#!/usr/bin/env bash` shebang and `chmod +x`.
-- `train_structured_dropout_comparison.sh` — updated to call `retrosynformer-hypertune` instead of `python scripts/hypertune.py`, so it works after `pip install`.
+- `train_structured_dropout_comparison.sh` — updated to call `rs-hypertune` instead of `python scripts/hypertune.py`, so it works after `pip install`.
 
 ### Deleted
 
-- `scripts/hypertune_verbose.py` — removed as cruft; `retrosynformer-hypertune` (`scripts/hypertune.py`) is the canonical implementation.
+- `scripts/hypertune_verbose.py` — removed as cruft; `rs-hypertune` (`scripts/hypertune.py`) is the canonical implementation.
 
 ---
 

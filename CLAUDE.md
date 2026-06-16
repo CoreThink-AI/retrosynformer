@@ -85,7 +85,7 @@ Computes fraction of targets solved, valid routes, and TED distance to ground-tr
 | Version | Summary |
 |---------|---------|
 | **0.1.6** | `[cpu]` and `[rocm]` torch extras added; torch removed from base deps; fixed `KeyError: 'epoch'` crash when early stopping fires before first route-eval epoch; tightened hypertune search space (`n_heads/n_layers`) and raised `early_stopping_patience` to 6 |
-| **0.1.5** | Scripts installable as CLI commands (`retrosynformer-train`, `retrosynformer-hypertune`, etc.) via `[project.scripts]`; logic moved to `src/retrosynformer/scripts/`; `scripts/*.py` are now thin shims |
+| **0.1.5** | Scripts installable as CLI commands (`rs-train`, `rs-hypertune`, etc.) via `[project.scripts]`; logic moved to `src/retrosynformer/scripts/`; `scripts/*.py` are now thin shims |
 | **0.1.4** | Structured dropout (`MoleculeConditionedMaskGenerator`); Optuna study tooling (`study.py`, `show_study.py`, `show_all_studies.py`); early-stopping patience; `RemoteTrialMonitor`; AMD ROCm `[amdgpu]` extra; 700+ lines of tests |
 
 See [`CHANGELOG.md`](../CHANGELOG.md) and [`docs/`](docs/) for full release notes.

@@ -25,7 +25,7 @@
 #   trial_NNN/       per-trial checkpoints and train_progress.jsonl
 
 # ---------------------------------------------------------------------------
-# Optuna search space (retrosynformer-hypertune reads this section)
+# Optuna search space (rs-hypertune reads this section)
 # ---------------------------------------------------------------------------
 optuna:
   # Metric to maximize across trials.

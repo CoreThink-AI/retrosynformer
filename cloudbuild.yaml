@@ -3,7 +3,7 @@
 # Set up in Cloud Console → Cloud Build → Triggers:
 #   Source: github.com/corethink-ai/retrosynformer, branch: ^main$
 #   Config: cloudbuild.yaml (this file)
-#   Substitutions: _REGION=us-central1
+#   Substitutions: _REGION=us-central1, _GCS_BUCKET=biochem-db-by-hobs, _MODEL_TRIAL=trial_000
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -31,6 +31,7 @@ steps:
       - retrosynformer-inference
       - --image=$_IMAGE
       - --region=$_REGION
+      - --execution-environment=gen2
       - --gpu=1
       - --gpu-type=nvidia-l4
       - --cpu=8
@@ -39,7 +40,7 @@ steps:
       - --min-instances=1
       - --max-instances=4
       - --timeout=120
-      - --set-env-vars=MODEL_CONFIG_PATH=/app/model/config.yaml,MODEL_WEIGHTS_PATH=/app/model/model.pth,BUILDING_BLOCKS_PATH=/app/data/standard_building_blocks.csv,TEMPLATES_PATH=/app/data/standard_reaction_templates.pickle
+      - --set-env-vars=MODEL_WEIGHTS_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_MODEL_TRIAL/model.pth,MODEL_CONFIG_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_MODEL_TRIAL/config.yaml,BUILDING_BLOCKS_GCS=gs://$_GCS_BUCKET/retrosynformer/data/small_building_blocks.csv,TEMPLATES_GCS=gs://$_GCS_BUCKET/retrosynformer/data/small_reaction_templates.pickle,MODEL_WEIGHTS_PATH=/tmp/model/model.pth,MODEL_CONFIG_PATH=/tmp/model/config.yaml,BUILDING_BLOCKS_PATH=/tmp/data/small_building_blocks.csv,TEMPLATES_PATH=/tmp/data/small_reaction_templates.pickle
       - --set-secrets=API_KEY=retrosynformer-api-key:latest
       - --no-allow-unauthenticated
     waitFor:
@@ -48,6 +49,8 @@ steps:
 substitutions:
   _IMAGE: gcr.io/$PROJECT_ID/retrosynformer-inference:$SHORT_SHA
   _REGION: us-central1
+  _GCS_BUCKET: biochem-db-by-hobs
+  _MODEL_TRIAL: trial_000
 
 options:
   machineType: E2_HIGHCPU_8

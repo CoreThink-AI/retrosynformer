@@ -261,10 +261,9 @@ class RetroTrainer:
             _hdr_prefix = []
             if trial_number is not None:
                 _hdr_prefix.append("trial")
-            if study_name is not None:
-                _hdr_prefix.append("study")
+            _hdr_suffix = ["study"] if study_name is not None else []
             print("\t".join(_hdr_prefix + ["epoch", "t_loss", "t_acc", "t_racc",
-                                           "v_loss", "v_acc", "v_racc", "s/ep", "note"]),
+                                           "v_loss", "v_acc", "v_racc", "s/ep", "note"] + _hdr_suffix),
                   flush=True)
 
         for epoch in range(start_epoch, n_epochs):

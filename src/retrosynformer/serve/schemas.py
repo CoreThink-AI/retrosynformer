@@ -1,6 +1,6 @@
 """Pydantic v2 request/response schemas for the RetroSynFormer inference API."""
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -89,6 +89,82 @@ class PredictResponse(BaseModel):
     n_solved: int
     routes: list[Route]
     elapsed_s: float
+
+
+# ---------------------------------------------------------------------------
+# Synthesis-routes-generator compatible schemas (POST /retrosynthesis)
+# ---------------------------------------------------------------------------
+
+class RetrosynthesisRequest(BaseModel):
+    """Input for ``POST /retrosynthesis`` — matches the synthesis-routes-generator API.
+
+    ``molecule_name`` is accepted for API compatibility but is not used by
+    RetroSynFormer (the model operates on SMILES, not names).
+
+    >>> r = RetrosynthesisRequest(smiles="CC(=O)O")
+    >>> r.max_steps
+    6
+    >>> r.max_routes
+    5
+    """
+
+    smiles: str = Field(..., description="Target molecule SMILES", examples=["CC(=O)Oc1ccccc1C(=O)O"])
+    max_steps: int = Field(default=6, ge=1, le=20, description="Max retrosynthesis depth")
+    max_routes: int = Field(default=5, ge=1, le=50, description="Max routes to return")
+    molecule_name: Optional[str] = Field(
+        default=None,
+        description="Common or IUPAC name (accepted for API compatibility; not used by this model)",
+    )
+
+
+class RouteStepResponse(BaseModel):
+    """One reaction step within a route — mirrors the synthesis-routes-generator field set."""
+
+    step: int
+    target: str
+    reaction_id: str
+    reactants: list[str]
+    reagents: list[str]
+    co_products: list[str] = []
+    yield_pct: Optional[float]
+    confidence: float
+    source: str
+    dataset_name: str
+    doi: str
+
+
+class LeafMoleculeResponse(BaseModel):
+    smiles: str
+    purchasable: bool
+
+
+class RouteResponse(BaseModel):
+    """A single retrosynthesis route in synthesis-routes-generator format.
+
+    ``model`` is set to ``"model1"`` so the webapp can distinguish RetroSynFormer
+    routes from the synthesis-routes-generator's own routes (``"model2"``).
+    """
+
+    model: str = "model1"
+    steps: list[RouteStepResponse]
+    score: float
+    depth: int
+    leaf_molecules: list[LeafMoleculeResponse]
+    all_leaves_purchasable: bool
+
+
+class RetrosynthesisResponse(BaseModel):
+    """Response from ``POST /retrosynthesis`` — mirrors the synthesis-routes-generator contract.
+
+    RetroSynFormer routes are placed in ``ai_routes`` (the model predicts
+    disconnections; it does not query literature databases).
+    ``literature_routes`` is always empty.
+    """
+
+    target_smiles: str
+    canonical_smiles: str
+    literature_routes: list[RouteResponse] = []
+    ai_routes: list[RouteResponse]
 
 
 class HealthResponse(BaseModel):

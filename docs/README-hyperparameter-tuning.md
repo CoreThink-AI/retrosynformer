@@ -78,7 +78,7 @@ python -m retrosynformer.runner -c results/config.yaml
 The paper's small-dataset model achieves **95.0% success rate** on the N1 benchmark (Table 6).
 
 ```bash
-retrosynformer-train -c results/config/baseline_small.yaml
+rs-train -c results/config/baseline_small.yaml
 ```
 
 Or equivalently:
@@ -122,7 +122,7 @@ Aim for `success_rate ≈ 0.95` on N1 and `≈ 0.83` on N5 (paper Table 6).
 The paper used Optuna to tune architecture and optimizer hyperparameters (Section 3.3).  The provided config reproduces this search on the fastest (small) dataset.
 
 ```bash
-retrosynformer-hypertune \
+rs-hypertune \
     -c results/config/baseline_small_hyperparameter_tuning.yaml \
     --study-name small-hypertune \
     --n-trials 30 \
@@ -156,22 +156,22 @@ trial_001/
 rs-plot-learning-curves results/hypertune-small-hypertune/study.db
 
 # Show Optuna study summary
-retrosynformer-show-study results/hypertune-small-hypertune/study.db
+rs-show-study results/hypertune-small-hypertune/study.db
 
 # Show all studies
-retrosynformer-show-all-studies results/hypertune-*/study.db
+rs-show-all-studies results/hypertune-*/study.db
 ```
 
 **Run two parallel workers** on the same study (uses SQLite coordination):
 
 ```bash
-retrosynformer-hypertune \
+rs-hypertune \
     -c results/config/baseline_small_hyperparameter_tuning.yaml \
     --study-name small-hypertune \
     --storage sqlite:///results/hypertune-small-hypertune/study.db \
     --n-trials 30 --n-epochs 80 &
 
-retrosynformer-hypertune \
+rs-hypertune \
     -c results/config/baseline_small_hyperparameter_tuning.yaml \
     --study-name small-hypertune \
     --storage sqlite:///results/hypertune-small-hypertune/study.db \
@@ -188,10 +188,10 @@ Once the search completes, retrain the best configuration with full training bud
 
 ```bash
 # Find the best trial
-retrosynformer-show-study results/hypertune-small-hypertune/study.db
+rs-show-study results/hypertune-small-hypertune/study.db
 
 # Suppose the best trial was trial_007 with n_heads=4, n_layers=18, head_dim=256, lr=0.15:
-retrosynformer-train \
+rs-train \
     -c results/config/baseline_small.yaml \
     --n-heads 4 --n-layers 18 --head-dim 256 --lr 0.15 \
     --n-epochs 200 \
@@ -221,7 +221,7 @@ dataset:
 
 Then train:
 ```bash
-retrosynformer-train -c results/config/baseline_standard.yaml
+rs-train -c results/config/baseline_standard.yaml
 ```
 
 **Expected results** (paper Table 6, standard dataset, beam_width=50):
@@ -234,7 +234,7 @@ retrosynformer-train -c results/config/baseline_standard.yaml
 Run a fresh Optuna search at this scale if you want to find better hyperparameters for the standard dataset specifically:
 
 ```bash
-retrosynformer-hypertune \
+rs-hypertune \
     -c results/config/baseline_standard.yaml \
     --study-name standard-hypertune \
     --n-trials 20 --n-epochs 80

@@ -320,7 +320,13 @@ class RoutePredictor:
 
         return new_beams, route_done_beams, route_solved_beams
 
-    def predict_all_routes(self, target: str, beam_width: int, target_reward: float = 0.5) -> list:
+    def predict_all_routes(
+        self,
+        target: str,
+        beam_width: int,
+        target_reward: float = 0.5,
+        max_depth: int | None = None,
+    ) -> list:
         """Run beam search to full completion and return all terminal beams.
 
         Unlike ``predict_route``, which stops the moment any beam is solved,
@@ -332,17 +338,21 @@ class RoutePredictor:
         Returns an empty list when the target SMILES cannot be parsed by
         ``expand_beam`` (e.g. all templates fail on the first step).
 
+        ``max_depth`` overrides the value from config when provided, allowing
+        per-request depth control without reloading the model.
+
         >>> # Instantiation requires data files; use predict_route tests for that.
         >>> # This docstring exists to document the return contract.
         >>> # Returns: list[Beam] — all terminal beams, sorted by trajectory_prob desc.
         True
         """
+        effective_max_depth = max_depth if max_depth is not None else self.max_depth
         self.model.eval()
         self.env = RetroGymEnvironment(
             self.building_blocks,
             self.templates_df,
             self.reward_mapping,
-            self.max_depth,
+            effective_max_depth,
             process_routes=False,
         )
         self.env.set_target_compound(target, reward_function="reward_specific")

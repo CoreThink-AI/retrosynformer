@@ -9,7 +9,14 @@ from fastapi.security.api_key import APIKeyHeader
 from rdkit import Chem
 
 from .predictor import ModelPredictor
-from .schemas import HealthResponse, PredictRequest, PredictResponse
+from .schemas import (
+    HealthResponse,
+    PredictRequest,
+    PredictResponse,
+    RetrosynthesisRequest,
+    RetrosynthesisResponse,
+    RouteResponse,
+)
 
 # Module-level state populated during lifespan startup.
 _state: dict = {}
@@ -84,8 +91,46 @@ async def predict(req: PredictRequest) -> PredictResponse:
     return PredictResponse(smiles=req.smiles, **result)
 
 
+@app.post("/retrosynthesis", response_model=RetrosynthesisResponse, dependencies=[Security(_verify_key)])
+async def retrosynthesis(req: RetrosynthesisRequest) -> RetrosynthesisResponse:
+    """Retrosynthesis endpoint with the same request/response contract as synthesis-routes-generator.
+
+    Routes are placed in ``ai_routes``; ``literature_routes`` is always empty
+    (RetroSynFormer predicts disconnections from a trained model, not a literature DB).
+    The ``model`` field in each route is ``"model1"`` so the webapp can distinguish
+    these from synthesis-routes-generator routes (``"model2"``).
+    """
+    predictor: ModelPredictor | None = _state.get("predictor")
+    if predictor is None:
+        raise HTTPException(status_code=503, detail="Model not loaded yet")
+
+    mol = Chem.MolFromSmiles(req.smiles)
+    if mol is None:
+        raise HTTPException(status_code=422, detail=f"Invalid SMILES: {req.smiles!r}")
+    canon = Chem.MolToSmiles(mol)
+
+    loop = asyncio.get_event_loop()
+    sem: asyncio.Semaphore = _state["sem"]
+    async with sem:
+        route_dicts = await loop.run_in_executor(
+            None,
+            predictor.predict_retrosynthesis_sync,
+            req.smiles,
+            req.max_routes,
+            req.max_steps,
+        )
+
+    ai_routes = [RouteResponse(**d) for d in route_dicts]
+    return RetrosynthesisResponse(
+        target_smiles=req.smiles,
+        canonical_smiles=canon,
+        literature_routes=[],
+        ai_routes=ai_routes,
+    )
+
+
 def run() -> None:
-    """Entry point used by the ``retrosynformer-serve`` CLI command."""
+    """Entry point used by the ``rs-serve`` CLI command."""
     import uvicorn
 
     port = int(os.environ.get("PORT", 8080))

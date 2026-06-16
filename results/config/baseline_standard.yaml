@@ -16,7 +16,7 @@
 #
 # Usage:
 #   python -m retrosynformer.runner -c results/config/baseline_small.yaml
-#   retrosynformer-train -c results/config/baseline_small.yaml
+#   rs-train -c results/config/baseline_small.yaml
 
 context:
   building_blocks: data/standard_building_blocks.csv

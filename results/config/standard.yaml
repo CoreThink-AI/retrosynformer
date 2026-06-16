@@ -60,6 +60,7 @@ reward:
 train:
   batch_size: 512
   loss: crossEntropyLoss
-  n_epochs: 1
-  early_stopping_patience: 4
-  results_path: results/standard-paper-repo/
+  n_epochs: 200
+  early_stopping_patience: 25
+  lr_scheduler_patience: 15
+  results_path: results/standard-paper-repro/

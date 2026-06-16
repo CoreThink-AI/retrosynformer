@@ -3,9 +3,9 @@
 
 Usage
 -----
-    retrosynformer-show-all-studies
-    retrosynformer-show-all-studies "results/**/study.db"
-    retrosynformer-show-all-studies "results/hypertune-*/study.db" --sort score
+    rs-show-all-studies
+    rs-show-all-studies "results/**/study.db"
+    rs-show-all-studies "results/hypertune-*/study.db" --sort score
 """
 import argparse
 import glob
