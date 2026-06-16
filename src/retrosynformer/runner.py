@@ -299,6 +299,7 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         config["dataset"]["dataset_name"] = dataset
 
     results_path = config["train"]["results_path"].rstrip("/")
+    os.makedirs(results_path, exist_ok=True)
     effective_config_path = results_path + "/model.config.yaml"
     with open(effective_config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
