@@ -1,0 +1,80 @@
+# Optuna hyperparameter search config for the standard dataset.
+#
+# Background: rs-train with lr=0.211 (paper value) went unstable on the
+# standard dataset — valid_loss spiked at epoch 2 and valid_action_accuracy
+# froze at 0.030. The best small-dataset model used lr~0.002 (found by Optuna).
+# This config searches a LR range anchored around that finding.
+#
+# Usage:
+#   rs-hypertune -c results/config/hypertune_standard.yaml \
+#       --n-trials 20 --n-epochs 100 --dataset standard \
+#       --study-name standard_lr_search
+
+optuna:
+  objective_metric: valid_route_accuracy
+  n_heads: [1, 2, 4]
+  n_layers: [2, 3, 4, 6, 8, 12, 16, 24, 32]
+  head_dim: [64, 128, 256]
+  lr:
+    low: 5.0e-5
+    high: 5.0e-3
+    log: true
+  dropout:
+    low: 0.0
+    high: 0.3
+
+context:
+  building_blocks: data/standard_building_blocks.csv
+  random_state: 1
+  templates_path: data/standard_reaction_templates.pickle
+
+dataset:
+  action_dim: 1573
+  drop_duplicates: true
+  fp_dim: 1024
+  n_in_state: 2
+  routes_path: data/standard_routes.json
+  shuffle: true
+  synthetic_routes_path: false
+  valid_set: n1+n5
+
+evaluation:
+  batch_size: 64
+  beam_width: 1
+  eval_n_batches: 10
+  eval_routes_frequency: 50
+  max_depth: 6
+  test_frac: 0.1
+  sort_on: trajectory_prob
+  ted_exhaustive_limit: 64
+
+model:
+  action_tanh: false
+  activation_function: relu
+  attn_pdrop: 0.02
+  embd_pdrop: 0.2
+  head_dim: 256
+  max_ep_len: 20
+  n_heads: 4
+  n_layers: 3
+  resid_pdrop: 0.08
+
+optimizer:
+  lr: 0.002
+  momentum: 0.98
+
+reward:
+  building_block_reward_factor: 0
+  building_block_scale_with_depth: 2
+  dead_end_reward_factor: -2
+  dead_end_scale_with_depth: 2
+  intermediate_reward_factor: -2
+  intermediate_scale_with_depth: 1
+
+train:
+  batch_size: 512
+  loss: crossEntropyLoss
+  n_epochs: 100
+  early_stopping_patience: 15
+  lr_scheduler_patience: 10
+  results_path: results/hypertune-standard-lr-search/
