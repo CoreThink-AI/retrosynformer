@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Hyperparameter search for RetroSynFormer using Optuna.
 
-The first trial is fixed (n_heads=1, n_layers=3, head_dim=256, large dataset,
-200 epochs) to establish a baseline comparable to early taco-branch runs.
+The first trial is fixed (n_heads=4, n_layers=3, head_dim=256, lr=0.0005) based
+on the best standard-dataset finding from trial_001 of the baseline-standard
+study (taco, 2026-06-16).
 Subsequent trials explore the search space defined in config["optuna"].
 
 Usage:
@@ -62,9 +63,10 @@ from retrosynformer.runner import read_config
 
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 
-# Fixed first trial — matches early taco-branch architecture for comparison.
+# Fixed first trial — n_heads=4/lr=0.0005 from best standard-dataset finding
+# (trial_001 of baseline-standard-lr211-100epochs study, taco 2026-06-16).
 # Every value here must be a valid choice in the corresponding optuna config list.
-BASELINE_TRIAL = {"n_heads": 1, "n_layers": 3, "head_dim": 256, "lr": 0.211, "dropout": 0.1}
+BASELINE_TRIAL = {"n_heads": 4, "n_layers": 3, "head_dim": 256, "lr": 0.0005, "dropout": 0.1}
 
 
 # ---------------------------------------------------------------------------
