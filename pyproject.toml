@@ -92,11 +92,6 @@ rs-serve                = "retrosynformer.scripts.serve:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools]
-script-files = [
-    "scripts/monitor_train_progress.sh",
-    "scripts/train_structured_dropout_comparison.sh",
-]
 
 # Declare torch extras as mutually exclusive so uv doesn't try to resolve
 # pytorch-cpu and pytorch-rocm indexes simultaneously.
