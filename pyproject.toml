@@ -88,6 +88,7 @@ rs-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
 rs-plot-learning-curves = "retrosynformer.scripts.plot_learning_curves:main"
 rs-sync-results         = "retrosynformer.scripts.sync_results:main"
 rs-serve                = "retrosynformer.scripts.serve:main"
+rs-status               = "retrosynformer.scripts.status:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
