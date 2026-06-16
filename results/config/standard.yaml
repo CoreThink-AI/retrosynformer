@@ -1,3 +1,22 @@
+# Baseline config matching the paper's small-dataset experiment.
+#
+# Paper: Granqvist et al., RetroSynFormer, Digital Discovery 2026, 5, 348-362
+#        DOI: 10.1039/d5dd00153f  (see docs/d5dd00153f-RetroSynFormer.md)
+#
+# Target result (Table 6, small dataset, beam_width=50):
+#   N1 success rate: 0.950   N5 success rate: 0.833
+#   N1 top-1 accuracy: 0.182  N5 TED: 5.428
+#
+# Architecture: GPT-2 Decision Transformer (Section 3.3).
+# Hyperparameters were found via Optuna search (paper Table S1).
+# The values below reproduce the small-dataset model as closely as possible
+# given the published description; n_heads/n_layers/head_dim/lr are taken
+# from the Optuna-tuned standard-dataset model (the SI table is not publicly
+# available, but these values produced the results in this codebase).
+#
+# Usage:
+#   python -m retrosynformer.runner -c results/config/baseline_small.yaml
+#   rs-train -c results/config/baseline_small.yaml
 optuna:
   objective_metric: valid_route_accuracy  # valid_action_accuracy | valid_route_accuracy | fraction_solved
   n_heads: [1, 2, 4, 8]
@@ -19,17 +38,20 @@ context:
   building_blocks: data/standard_building_blocks.csv
   random_state: 1
   templates_path: data/standard_reaction_templates.pickle
+
 dataset:
   action_dim: 1573  # large=2957, medium=1573, small=589
   drop_duplicates: true
-  fp_dim: 1024
-  n_in_state: 2
+  fp_dim: 1024              # 1024-bit Morgan radius-2 fingerprints (Section 3.3.2)
+  n_in_state: 2             # two molecules concatenated → state_dim = 2048 (Section 3.3.2)
   routes_path: data/standard_routes.json
   shuffle: true
   synthetic_routes_path: false
-  valid_set: n1+n5
+  # N1+N5 PaRoutes benchmark targets are the held-out test set (Section 3.2)
+  valid_set: n1+n5          # random_split | n1+n5
+
 evaluation:
-  batch_size: 512
+  batch_size: 64
   beam_width: 1
   eval_n_batches: 10
   eval_routes_frequency: 100
