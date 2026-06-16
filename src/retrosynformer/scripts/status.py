@@ -50,8 +50,16 @@ def _best_fraction_solved(path: Path) -> float | None:
         records = json.loads(path.read_text())
     except (json.JSONDecodeError, ValueError):
         return None
-    values = [r["fraction_solved"] for r in records if r.get("fraction_solved") is not None]
-    return max(values) if values else None
+    # Each record: {"epoch": N, "result": [{"route_solved": bool, ...}, ...]}
+    best = None
+    for rec in records:
+        results = rec.get("result", [])
+        if not results:
+            continue
+        frac = sum(1 for r in results if r.get("route_solved")) / len(results)
+        if best is None or frac > best:
+            best = frac
+    return best
 
 
 def _load_config(path: Path) -> dict:
@@ -132,7 +140,9 @@ def print_table(rows: list[dict], top: int | None = None) -> None:
 
     for col in ("valid_loss", "act_acc", "route_acc"):
         df[col] = df[col].apply(lambda v: f"{v:.4f}" if v is not None else "—")
-    df["frac_solved"] = df["frac_solved"].apply(lambda v: f"{v:.4f}" if v is not None else "—")
+    df["frac_solved"] = df["frac_solved"].apply(
+        lambda v: f"{v:.4f}" if (v is not None and v == v) else "—"  # v==v guards NaN
+    )
 
     df.columns = ["Study", "Trial", "Epoch", "Loss", "ActAcc",
                   "RouteAcc", "FracSolved", "ETA", "H", "L", "Dim", "LR"]
