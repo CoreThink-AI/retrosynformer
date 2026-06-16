@@ -493,7 +493,7 @@ class RoutePredictor:
                     routes.append(route)
 
                 elapsed = time.time() - batch_t0
-                frac = n_solved_batch / len(states) if len(states) and any(states) else 0.0
+                frac = n_solved_batch / len(states) if len(states) and states.any() else 0.0
                 print(f"    solved {n_solved_batch}/{len(states)} ({frac:.1%})"
                       f"  {elapsed:.1f}s  ({elapsed / len(states):.2f}s/mol)",
                       flush=True)
