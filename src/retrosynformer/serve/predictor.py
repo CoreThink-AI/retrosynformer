@@ -1,5 +1,6 @@
 """ModelPredictor: loads the model once at startup and exposes predict_sync for thread-pool use."""
 
+import hashlib
 import threading
 import time
 
@@ -54,6 +55,68 @@ def _beam_to_route_dict(beam) -> dict:
         "reactions": steps,
         "leaf_smiles": list(beam.env.leafs),
         "dead_ends": list(beam.env.dead_ends),
+    }
+
+
+def _beam_to_rsgen_route(beam) -> dict:
+    """Convert a terminal Beam to a dict matching RouteResponse (synthesis-routes-generator format).
+
+    Each entry in ``reaction_list`` is ``"A.B>>C"`` where C is the molecule being
+    disconnected (the target of that step) and A, B are the reactants.
+
+    >>> from types import SimpleNamespace
+    >>> env = SimpleNamespace(leafs=["CC", "OC"], dead_ends=[])
+    >>> beam = SimpleNamespace(
+    ...     route_solved=True,
+    ...     trajectory_prob=0.75,
+    ...     reaction_list=["CC.OC>>CCO"],
+    ...     predicted_actions=[5],
+    ...     env=env,
+    ... )
+    >>> d = _beam_to_rsgen_route(beam)
+    >>> d["model"]
+    'model1'
+    >>> d["steps"][0]["target"]
+    'CCO'
+    >>> d["steps"][0]["reactants"]
+    ['CC', 'OC']
+    >>> d["all_leaves_purchasable"]
+    True
+    """
+    steps = []
+    for i, rxn in enumerate(beam.reaction_list):
+        sep = rxn.find(">>")
+        if sep >= 0:
+            reactants = rxn[:sep].split(".")
+            target = rxn[sep + 2:]
+        else:
+            reactants = []
+            target = rxn
+        steps.append({
+            "step": i + 1,
+            "target": target,
+            "reaction_id": hashlib.md5(rxn.encode()).hexdigest()[:16],
+            "reactants": reactants,
+            "reagents": [],
+            "co_products": [],
+            "yield_pct": None,
+            "confidence": round(float(beam.trajectory_prob), 4),
+            "source": "retrosynformer",
+            "dataset_name": "PaRoutes",
+            "doi": "10.26434/chemrxiv-2025-kd6gb",
+        })
+
+    leaf_mols = (
+        [{"smiles": s, "purchasable": True} for s in beam.env.leafs]
+        + [{"smiles": s, "purchasable": False} for s in beam.env.dead_ends]
+    )
+    return {
+        "model": "model1",
+        "steps": steps,
+        "score": round(float(beam.trajectory_prob), 4),
+        "depth": len(beam.reaction_list),
+        "leaf_molecules": leaf_mols,
+        "all_leaves_purchasable": beam.route_solved and len(beam.env.dead_ends) == 0,
     }
 
 
@@ -131,3 +194,26 @@ class ModelPredictor:
             "routes": routes,
             "elapsed_s": round(elapsed, 3),
         }
+
+    def predict_retrosynthesis_sync(
+        self,
+        smiles: str,
+        max_routes: int,
+        max_steps: int,
+    ) -> list[dict]:
+        """Run beam search and return routes in synthesis-routes-generator RouteResponse format.
+
+        ``max_routes`` is used as the beam width so the search explores at least that
+        many parallel hypotheses.  ``max_steps`` overrides the config's ``max_depth``
+        for this request only (thread-safe: passed into predict_all_routes, not mutated
+        on self).
+
+        Returns a list of route dicts (to be placed in ``ai_routes``).
+        """
+        with self._lock:
+            beams = self._predictor.predict_all_routes(
+                smiles,
+                beam_width=max_routes,
+                max_depth=max_steps,
+            )
+        return [_beam_to_rsgen_route(b) for b in beams[:max_routes]]
