@@ -65,7 +65,8 @@ def _load_config(path: Path) -> dict:
 
 
 def _parse_trial(trial_dir: Path) -> dict | None:
-    last = _last_jsonl(trial_dir / "train_progress.jsonl")
+    jsonl_path = trial_dir / "train_progress.jsonl"
+    last = _last_jsonl(jsonl_path)
     if last is None:
         return None
     cfg = _load_config(trial_dir / "model.config.yaml")
@@ -81,19 +82,21 @@ def _parse_trial(trial_dir: Path) -> dict | None:
     else:
         eta = "?"
     frac = _best_fraction_solved(trial_dir / "pred_routes_train_progress.json")
+    lr = o.get("lr")
     return {
-        "study":      trial_dir.parent.name.removeprefix("hypertune-"),
-        "trial":      trial_dir.name,
-        "epoch":      f"{epoch}/{n_epochs}",
-        "valid_loss": last.get("valid_loss"),
-        "act_acc":    last.get("valid_action_accuracy"),
-        "route_acc":  last.get("valid_route_accuracy"),
+        "study":       trial_dir.parent.name.removeprefix("hypertune-"),
+        "trial":       trial_dir.name,
+        "epoch":       f"{epoch}/{n_epochs}",
+        "valid_loss":  last.get("valid_loss"),
+        "act_acc":     last.get("valid_action_accuracy"),
+        "route_acc":   last.get("valid_route_accuracy"),
         "frac_solved": frac,
-        "eta":        eta,
-        "heads":      m.get("n_heads", "?"),
-        "layers":     m.get("n_layers", "?"),
-        "dim":        m.get("head_dim", "?"),
-        "lr":         o.get("lr", "?"),
+        "eta":         eta,
+        "H":           m.get("n_heads", "?"),
+        "L":           m.get("n_layers", "?"),
+        "dim":         m.get("head_dim", "?"),
+        "lr":          f"{lr:.2e}" if isinstance(lr, float) else str(lr),
+        "_mtime":      jsonl_path.stat().st_mtime if jsonl_path.exists() else 0.0,
     }
 
 
@@ -112,49 +115,28 @@ def collect_all_trials(results_root: Path, study_filter: str | None) -> list[dic
 # Table rendering
 # ---------------------------------------------------------------------------
 
-def _fmt(val, fmt=".4f") -> str:
-    if val is None:
-        return "—"
-    try:
-        return format(val, fmt)
-    except (TypeError, ValueError):
-        return str(val)
-
-
-COLUMNS = [
-    ("study",       "Study",       "{}",    20),
-    ("trial",       "Trial",       "{}",    10),
-    ("epoch",       "Epoch",       "{}",     8),
-    ("valid_loss",  "Loss",        ".4f",    8),
-    ("act_acc",     "ActAcc",      ".4f",    8),
-    ("route_acc",   "RouteAcc",    ".4f",    9),
-    ("frac_solved", "FracSolved",  ".4f",   10),
-    ("eta",         "ETA",         "{}",     6),
-    ("heads",       "H",           "{}",     3),
-    ("layers",      "L",           "{}",     3),
-    ("dim",         "Dim",         "{}",     4),
-    ("lr",          "LR",          "{}",    10),
-]
-
-
-def print_table(rows: list[dict]) -> None:
+def print_table(rows: list[dict], top: int | None = None) -> None:
     if not rows:
         print("No trial data found.")
         return
-    header = "  ".join(f"{h:<{w}}" for _, h, _, w in COLUMNS)
-    sep = "  ".join("-" * w for _, _, _, w in COLUMNS)
-    print(header)
-    print(sep)
-    for row in rows:
-        cells = []
-        for key, _, fmt, width in COLUMNS:
-            val = row.get(key)
-            if fmt == "{}":
-                s = str(val) if val is not None else "—"
-            else:
-                s = _fmt(val, fmt)
-            cells.append(f"{s:<{width}}")
-        print("  ".join(cells))
+
+    import pandas as pd
+
+    rows = sorted(rows, key=lambda r: r["_mtime"], reverse=True)
+    if top:
+        rows = rows[:top]
+
+    display_cols = ["study", "trial", "epoch", "valid_loss", "act_acc",
+                    "route_acc", "frac_solved", "eta", "H", "L", "dim", "lr"]
+    df = pd.DataFrame(rows)[display_cols]
+
+    for col in ("valid_loss", "act_acc", "route_acc"):
+        df[col] = df[col].apply(lambda v: f"{v:.4f}" if v is not None else "—")
+    df["frac_solved"] = df["frac_solved"].apply(lambda v: f"{v:.4f}" if v is not None else "—")
+
+    df.columns = ["Study", "Trial", "Epoch", "Loss", "ActAcc",
+                  "RouteAcc", "FracSolved", "ETA", "H", "L", "Dim", "LR"]
+    print(df.to_string(index=False))
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +155,8 @@ def main() -> None:
                         help=f"Remote SSH host (default: {DEFAULT_HOST})")
     parser.add_argument("--results", default=DEFAULT_LOCAL, dest="results",
                         help=f"Local results directory (default: {DEFAULT_LOCAL})")
+    parser.add_argument("--top", type=int, default=None,
+                        help="Show only the N most recently updated trials")
     args = parser.parse_args()
 
     if not args.no_sync:
@@ -188,7 +172,7 @@ def main() -> None:
             print(f"[warning] rsync exited {rc}", file=sys.stderr)
 
     rows = collect_all_trials(Path(args.results), args.study)
-    print_table(rows)
+    print_table(rows, top=args.top)
 
 
 if __name__ == "__main__":
