@@ -57,6 +57,18 @@ def main():
         "--momentum", type=float, default=None, dest="momentum",
         help="Override optimizer.momentum from config",
     )
+    parser.add_argument(
+        "--structured-dropout-rate", type=float, default=None, dest="structured_dropout_rate",
+        help="Global multiplier on learned structured-dropout probabilities (0=off, 1=default)",
+    )
+    parser.add_argument(
+        "--eval-n-batches", type=int, default=None, dest="eval_n_batches",
+        help="Override evaluation.eval_n_batches from config (reduce for faster runs)",
+    )
+    parser.add_argument(
+        "--results-path", type=str, default=None, dest="results_path",
+        help="Override train.results_path from config",
+    )
     args = parser.parse_args()
     runner_main(
         config_path=args.config_path,
@@ -72,6 +84,9 @@ def main():
         lr=args.lr,
         dropout=args.dropout,
         momentum=args.momentum,
+        structured_dropout_rate=args.structured_dropout_rate,
+        eval_n_batches=args.eval_n_batches,
+        results_path=args.results_path,
     )
 
 

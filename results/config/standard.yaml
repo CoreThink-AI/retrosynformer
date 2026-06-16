@@ -1,38 +1,16 @@
-# Baseline config matching the paper's small-dataset experiment.
+# Standard-dataset training config reproducing the paper's main results.
 #
 # Paper: Granqvist et al., RetroSynFormer, Digital Discovery 2026, 5, 348-362
 #        DOI: 10.1039/d5dd00153f  (see docs/d5dd00153f-RetroSynFormer.md)
 #
-# Target result (Table 6, small dataset, beam_width=50):
+# Target result (Table 6, standard dataset, beam_width=50):
 #   N1 success rate: 0.950   N5 success rate: 0.833
-#   N1 top-1 accuracy: 0.182  N5 TED: 5.428
 #
 # Architecture: GPT-2 Decision Transformer (Section 3.3).
-# Hyperparameters were found via Optuna search (paper Table S1).
-# The values below reproduce the small-dataset model as closely as possible
-# given the published description; n_heads/n_layers/head_dim/lr are taken
-# from the Optuna-tuned standard-dataset model (the SI table is not publicly
-# available, but these values produced the results in this codebase).
+# Hyperparameters from Optuna search (paper Table S1).
 #
 # Usage:
-#   python -m retrosynformer.runner -c results/config/baseline_small.yaml
-#   rs-train -c results/config/baseline_small.yaml
-optuna:
-  objective_metric: valid_route_accuracy  # valid_action_accuracy | valid_route_accuracy | fraction_solved
-  n_heads: [1, 2, 4, 8]
-  n_layers: [2, 3, 4, 6, 8, 12, 16, 24, 32]
-  head_dim: [64, 128, 256]
-  lr:
-    low: 1.0e-4
-    high: 1.0
-    log: true
-  dropout:
-    low: 0.0
-    high: 0.3
-  structured_dropout_bottleneck:
-    low: 32
-    high: 512
-    log: true
+#   rs-train -c results/config/standard.yaml
 
 context:
   building_blocks: data/standard_building_blocks.csv

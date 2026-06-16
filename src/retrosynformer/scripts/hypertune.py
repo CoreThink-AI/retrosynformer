@@ -227,6 +227,8 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
         trial_number=trial.number,
         study_name=study_name,
     )
+    if eval_n_batches is not None:
+        model_params["eval_n_batches"] = eval_n_batches
     model_params.update(params)
     print("\n#### Model params")
     for k, v in model_params.items():

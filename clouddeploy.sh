@@ -43,23 +43,22 @@ gcloud builds submit \
     --project="${PROJECT}" \
     .
 
-echo "==> Deploying to Cloud Run (GPU L4)"
+echo "==> Deploying to Cloud Run (CPU — trial_000 is a small 16M-param model)"
+echo "    NOTE: redeploy with --gpu=1 --gpu-type=nvidia-l4 --cpu=8 --memory=32Gi"
+echo "          once the standard paper-repro model finishes training on taco."
 gcloud run deploy "${SERVICE}" \
     --image "${IMAGE}" \
     --region "${REGION}" \
     --project "${PROJECT}" \
-    --execution-environment gen2 \
-    --gpu=1 \
-    --gpu-type=nvidia-l4 \
-    --cpu=8 \
-    --memory=32Gi \
-    --concurrency=4 \
-    --min-instances=1 \
+    --cpu=2 \
+    --memory=8Gi \
+    --concurrency=1 \
+    --min-instances=0 \
     --max-instances=4 \
-    --timeout=120 \
+    --timeout=300 \
     --set-env-vars="MODEL_WEIGHTS_GCS=${MODEL_WEIGHTS_GCS},MODEL_CONFIG_GCS=${MODEL_CONFIG_GCS},BUILDING_BLOCKS_GCS=${BUILDING_BLOCKS_GCS},TEMPLATES_GCS=${TEMPLATES_GCS},MODEL_WEIGHTS_PATH=/tmp/model/model.pth,MODEL_CONFIG_PATH=/tmp/model/config.yaml,BUILDING_BLOCKS_PATH=/tmp/data/small_building_blocks.csv,TEMPLATES_PATH=/tmp/data/small_reaction_templates.pickle" \
     --set-secrets="API_KEY=retrosynformer-api-key:latest" \
-    --no-allow-unauthenticated
+    --allow-unauthenticated
 
 echo "==> Service URL:"
 SERVICE_URL=$(gcloud run services describe "${SERVICE}" \
@@ -70,11 +69,9 @@ echo "${SERVICE_URL}"
 
 echo ""
 echo "To test the deployed service:"
-echo "  TOKEN=\$(gcloud auth print-identity-token)"
 echo "  API_KEY=\$(gcloud secrets versions access latest --secret=retrosynformer-api-key --project=${PROJECT})"
 echo "  curl -X POST \"${SERVICE_URL}/health\""
 echo "  curl -X POST \"${SERVICE_URL}/predict\" \\"
-echo "    -H \"Authorization: Bearer \$TOKEN\" \\"
 echo "    -H \"X-API-Key: \$API_KEY\" \\"
 echo "    -H \"Content-Type: application/json\" \\"
 echo "    -d '{\"smiles\": \"CC(=O)Oc1ccccc1C(=O)O\", \"beam_width\": 10}'"
