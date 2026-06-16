@@ -7,9 +7,9 @@ __pycache__/
 results/hypertune*/
 !*.yaml
 !*.yml
-!*.jsonl
-!*.jsonlines
-!study.db
+# !*.jsonl
+# !*.jsonlines
+# !study.db
 
 # C extensions
 *.so
