@@ -38,7 +38,7 @@ optuna:
   # Narrowed here based on the Optuna winner (n_heads=4, n_layers=26, head_dim=256)
   # to explore the neighbourhood efficiently on the small dataset.
   n_heads: [1, 2, 4]
-  n_layers: [4, 8, 12, 18, 26]
+  n_layers: [3, 4, 8, 12, 18, 26]
   head_dim: [64, 128, 256]
 
   # --- Optimizer ---
