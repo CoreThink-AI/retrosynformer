@@ -16,7 +16,7 @@ uv sync --extra cpu            # CPU-only (or --extra rocm for AMD GPU)
 source .venv/bin/activate
 ```
 
-Python ≥ 3.12 required. Key pinned deps: `reaction-utils==1.9.3`, `rdchiral` (from git at `../rdchiral`). `torch` is **not** in base deps — must pick one extra: `cpu`, `rocm`, or `cuda`.
+Python ≥ 3.10 required. Key pinned deps: `reaction-utils==1.9.3`, `rdchiral` (from git at `../rdchiral`). `torch` is **not** in base deps — must pick one extra: `cpu`, `rocm`, or `cuda`.
 
 `rdchiral` must be cloned locally at `../rdchiral`; `reaction-utils==1.9.3` comes from PyPI.
 
