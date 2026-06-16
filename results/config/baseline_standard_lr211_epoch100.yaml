@@ -62,15 +62,15 @@ evaluation:
 model:
   action_tanh: false
   activation_function: relu
-  attn_pdrop: 0.02
-  embd_pdrop: 0.2
+  attn_pdrop: 0.05
+  embd_pdrop: 0.05          # was 0.2 — too high; brought into line with attn/resid
   head_dim: 128
   max_ep_len: 20
   n_heads: 4
   n_layers: 5
-  resid_pdrop: 0.08
+  resid_pdrop: 0.05
 optimizer:
-  lr: 0.211
+  lr: 0.001                 # was 0.211 — that lr early-stops at epoch ~15 with 7% accuracy
   momentum: 0.98
 reward:
   building_block_reward_factor: 0
