@@ -40,7 +40,7 @@ evaluation:
   # beam_width=50 is what the paper calls "RetroSynFormer50" (Section 4)
   # Use beam_width=1 (greedy) for fast sanity checks; 50 for paper-quality results
   beam_width: 50            # 1=greedy, 50=paper default (Fig. 7 shows peak ~width 10 for top-1)
-  eval_n_batches: 2
+  eval_n_batches: 10
   eval_routes_frequency: 100
   max_depth: 6              # maximum retrosynthesis depth (Section 3.7)
   test_frac: 0.1
@@ -50,17 +50,17 @@ evaluation:
 model:
   action_tanh: false        # discrete one-hot template selection; no tanh needed
   activation_function: relu # Section 3.3; GPT-2 default
-  attn_pdrop: 0.0           # paper explored dropout as a hyperparameter; default = 0
-  embd_pdrop: 0.0
-  head_dim: 256             # from Optuna study (Table S1)
+  attn_pdrop: 0.08          # best Optuna trial (002): dropout~0.078; zero dropout slightly worse
+  embd_pdrop: 0.08
+  head_dim: 128             # best Optuna trial: 128 (2×128=256 hidden); paper value incorrect
   max_ep_len: 20
-  n_heads: 4                # from Optuna study
-  n_layers: 26              # from Optuna study
-  resid_pdrop: 0.0
+  n_heads: 2                # best Optuna trial: 2; paper value incorrect
+  n_layers: 4               # best Optuna trial: 4; paper value (26) is certainly wrong
+  resid_pdrop: 0.08
   use_structured_dropout: false  # baseline: no structured dropout
 
 optimizer:
-  lr: 0.211                 # from Optuna study (Table S1)
+  lr: 0.001                 # best Optuna trial: 0.00099; lr=0.211 early-stops at epoch ~15
   momentum: 0.98
 
 reward:
@@ -75,9 +75,9 @@ reward:
   intermediate_scale_with_depth: 1    # mild depth scaling for intermediates
 
 train:
-  batch_size: 512
+  batch_size: 64
   loss: crossEntropyLoss
-  n_epochs: 200
-  early_stopping_patience: 50  # stop after this many epochs with no valid_loss improvement
-  lr_scheduler_patience: 20    # ReduceLROnPlateau patience before halving lr
+  n_epochs: 300               # best trial still improving at epoch 199; extend budget
+  early_stopping_patience: 30  # stop after this many epochs with no valid_loss improvement
+  lr_scheduler_patience: 15    # ReduceLROnPlateau patience before halving lr
   results_path: results/
