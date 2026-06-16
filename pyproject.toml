@@ -52,14 +52,14 @@ cpu = [
 # AMD ROCm GPU (Radeon / Strix Halo iGPU):
 #   uv sync --extra rocm
 #   uv sync --extra amdgpu  (alias)
+# Pinned to torch 2.5.1+rocm6.2 — verified working on taco (Ubuntu 25.10,
+# kernel 6.17, Strix Halo iGPU). rocm6.4/torch>=2.7.0 crashes that GPU.
 rocm = [
-    "torch>=2.7.0",
-    "pytorch-triton-rocm",
+    "torch>=2.5.0,<2.6.0",
+    "pytorch-triton-rocm==3.1.0",
+    "sympy==1.13.1",
 ]
-amdgpu = [
-    "torch>=2.7.0",
-    "pytorch-triton-rocm",
-]
+amdgpu = ["retrosynformer[rocm]"]
 
 # Inference REST API:  uv sync --extra serve
 serve = [
@@ -103,7 +103,6 @@ conflicts = [
   [
     { extra = "cpu" },
     { extra = "rocm" },
-    { extra = "amdgpu" },
     { extra = "cuda" },
   ],
 ]
@@ -125,17 +124,15 @@ filterwarnings = [
 rdchiral = { path = "../rdchiral", editable = true }
 torch = [
     { index = "pytorch-rocm", extra = "rocm" },
-    { index = "pytorch-rocm", extra = "amdgpu" },
     { index = "pytorch-cpu", extra = "cpu" },
 ]
 pytorch-triton-rocm = [
     { index = "pytorch-rocm", extra = "rocm" },
-    { index = "pytorch-rocm", extra = "amdgpu" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm6.4"
+url = "https://download.pytorch.org/whl/rocm6.2"
 explicit = true
 
 [[tool.uv.index]]
