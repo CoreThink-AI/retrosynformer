@@ -16,7 +16,7 @@
 #   - action space size explored separately (Section 4.6, Table 6)
 #
 # Usage:
-#   retrosynformer-hypertune -c results/config/baseline_small_hyperparameter_tuning.yaml \
+#   rs-hypertune -c results/config/baseline_small_hyperparameter_tuning.yaml \
 #       --study-name small-hypertune --n-trials 30 --n-epochs 80
 #
 # Results land in:  results/hypertune-small-hypertune/
