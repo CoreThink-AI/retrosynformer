@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ study.study_name }} / trial_{{ "%03d"|format(trial.trial_number) }}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    .param-badge { font-family: monospace; font-size: 0.8rem; }
+    canvas { max-height: 300px; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <a class="navbar-brand" href="/">RetroSynFormer</a>
+  <div class="navbar-nav">
+    <a class="nav-link" href="/">Dashboard</a>
+    <a class="nav-link" href="/admin/trial_admin/">Trials</a>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+  <h5>
+    {{ study.study_name }}
+    <span class="text-muted">/</span>
+    trial_{{ "%03d"|format(trial.trial_number) }}
+    <span class="badge badge-{{ trial.state | lower }}">{{ trial.state }}</span>
+  </h5>
+
+  <div class="row mb-3">
+    <div class="col-auto">
+      {% for k, v in params.items() %}
+      <span class="badge badge-secondary param-badge mr-1">{{ k }}={{ v }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="row mb-2">
+    {% set stats = [
+      ("Epochs",          trial.epoch_count),
+      ("Valid Loss",      "%.4f"|format(trial.valid_loss) if trial.valid_loss is not none else "—"),
+      ("Action Acc",      "%.4f"|format(trial.valid_action_accuracy) if trial.valid_action_accuracy is not none else "—"),
+      ("Route Acc",       "%.4f"|format(trial.valid_route_accuracy) if trial.valid_route_accuracy is not none else "—"),
+      ("Frac Solved",     "%.4f"|format(trial.fraction_targets_solved) if trial.fraction_targets_solved is not none else "—"),
+      ("Optuna Score",    "%.4f"|format(trial.optuna_score) if trial.optuna_score is not none else "—"),
+    ] %}
+    {% for label, val in stats %}
+    <div class="col-md-2 col-4 mb-2">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h5 mb-0" style="font-family:monospace">{{ val }}</div>
+          <div class="text-muted small">{{ label }}</div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <div class="card">
+        <div class="card-header py-1">Loss</div>
+        <div class="card-body py-2">
+          <canvas id="lossChart"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6 mb-3">
+      <div class="card">
+        <div class="card-header py-1">Action Accuracy</div>
+        <div class="card-body py-2">
+          <canvas id="accChart"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6 mb-3">
+      <div class="card">
+        <div class="card-header py-1">Route Accuracy (teacher-forced)</div>
+        <div class="card-body py-2">
+          <canvas id="routeAccChart"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6 mb-3">
+      <div class="card">
+        <div class="card-header py-1">Seconds / Epoch</div>
+        <div class="card-body py-2">
+          <canvas id="spdChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const rawData = {{ epochs_data | safe }};
+
+if (rawData.length === 0) {
+  document.querySelector('.container-fluid').insertAdjacentHTML('beforeend',
+    '<div class="alert alert-warning">No epoch data yet.</div>');
+} else {
+  const epochs      = rawData.map(r => r.epoch);
+  const trainLoss   = rawData.map(r => r.train_loss);
+  const validLoss   = rawData.map(r => r.valid_loss);
+  const trainAcc    = rawData.map(r => r.train_action_accuracy);
+  const validAcc    = rawData.map(r => r.valid_action_accuracy);
+  const trainRoute  = rawData.map(r => r.train_route_accuracy);
+  const validRoute  = rawData.map(r => r.valid_route_accuracy);
+  const spd         = rawData.map(r => r.seconds_per_epoch);
+
+  function makeChart(id, labels, datasets) {
+    new Chart(document.getElementById(id), {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        animation: false,
+        plugins: { legend: { position: 'bottom' } },
+        elements: { point: { radius: 0 }, line: { borderWidth: 1.5 } },
+        scales: { x: { title: { display: true, text: 'Epoch' } } }
+      }
+    });
+  }
+
+  makeChart('lossChart', epochs, [
+    { label: 'train_loss',  data: trainLoss,  borderColor: '#fd7e14', fill: false },
+    { label: 'valid_loss',  data: validLoss,  borderColor: '#007bff', fill: false },
+  ]);
+  makeChart('accChart', epochs, [
+    { label: 'train_acc',  data: trainAcc,  borderColor: '#fd7e14', fill: false },
+    { label: 'valid_acc',  data: validAcc,  borderColor: '#007bff', fill: false },
+  ]);
+  makeChart('routeAccChart', epochs, [
+    { label: 'train_route_acc',  data: trainRoute,  borderColor: '#fd7e14', fill: false },
+    { label: 'valid_route_acc',  data: validRoute,  borderColor: '#007bff', fill: false },
+  ]);
+  makeChart('spdChart', epochs, [
+    { label: 'sec/epoch',  data: spd,  borderColor: '#6c757d', fill: false },
+  ]);
+}
+</script>
+</body>
+</html>
