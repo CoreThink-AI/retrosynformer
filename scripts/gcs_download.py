@@ -26,7 +26,8 @@ def _download(gcs_uri: str, local_path: str) -> None:
     bucket_name, blob_name = gcs_uri[5:].split("/", 1)
     client = storage.Client()
     blob = client.bucket(bucket_name).blob(blob_name)
-    size_mb = blob.size / 1e6 if blob.size else "?"
+    blob.reload()  # fetch metadata so blob.size is populated
+    size_mb = blob.size / 1e6 if blob.size else 0.0
     print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
     blob.download_to_filename(local_path)
     print(f"  Done ({path.stat().st_size / 1e6:.1f} MB)", flush=True)

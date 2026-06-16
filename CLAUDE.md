@@ -1,21 +1,24 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What this is
+## RetroSynFormer
 
 RetroSynFormer is a retrosynthesis route planner that frames multi-step chemical synthesis as a sequence-modeling problem. A Decision Transformer (via HuggingFace `transformers`) iteratively selects reaction templates to decompose a target molecule into purchasable building blocks. Routes are scored with a reward function during beam-search (tree search) inference to predict a retrosynthesis reaction pathway that can be used to manufacture the target molecule (SMILES), usually a drug or bio-relevant compound.
 
 Paper: Granqvist et al., *RetroSynFormer*, chemRxiv 2025, DOI: 10.26434/chemrxiv-2025-kd6gb
+Paper converted to markdown: /home/hobs/code/corethink/retrosynformer/docs/d5dd00153f-RetroSynFormer.md
 
 ## Setup
 
 ```bash
-uv sync                        # install deps into .venv
+uv sync --extra cpu            # CPU-only (or --extra rocm for AMD GPU)
 source .venv/bin/activate
 ```
 
-Python ≥ 3.10 required. Key pinned deps: `torch`, `transformers==4.35.0`, `tokenizers==0.14.1`, `rdkit`, `rdchiral`, `reaction-utils`.
+Python ≥ 3.10 required. Key pinned deps: `reaction-utils==1.9.3`, `rdchiral` (from git at `../rdchiral`). `torch` is **not** in base deps — must pick one extra: `cpu`, `rocm`, or `cuda`.
+
+`rdchiral` must be cloned locally at `../rdchiral`; `reaction-utils==1.9.3` comes from PyPI.
 
 Download the PaRoutes dataset from <https://zenodo.org/records/17177425> and place files in `data/`. Update all paths in `results/config.yaml` to match.
 
@@ -84,9 +87,10 @@ Computes fraction of targets solved, valid routes, and TED distance to ground-tr
 
 | Version | Summary |
 |---------|---------|
+| **0.1.7** | `rs-plot-learning-curves` and `rs-sync-results` CLI commands; configurable Optuna objective (`objective_metric`); `eval_routes_at_end` flag; rocm extra pinned to `torch 2.5.1+rocm6.2`; `amdgpu` made alias for `rocm` |
 | **0.1.6** | `[cpu]` and `[rocm]` torch extras added; torch removed from base deps; fixed `KeyError: 'epoch'` crash when early stopping fires before first route-eval epoch; tightened hypertune search space (`n_heads/n_layers`) and raised `early_stopping_patience` to 6 |
 | **0.1.5** | Scripts installable as CLI commands (`rs-train`, `rs-hypertune`, etc.) via `[project.scripts]`; logic moved to `src/retrosynformer/scripts/`; `scripts/*.py` are now thin shims |
-| **0.1.4** | Structured dropout (`MoleculeConditionedMaskGenerator`); Optuna study tooling (`study.py`, `show_study.py`, `show_all_studies.py`); early-stopping patience; `RemoteTrialMonitor`; AMD ROCm `[amdgpu]` extra; 700+ lines of tests |
+| **0.1.4** | Structured dropout (`MoleculeConditionedMaskGenerator`); Optuna study tooling (`study.py`, `show_study.py`, `show_all_studies.py`); early-stopping patience; `RemoteTrialMonitor`; AMD ROCm `[rocm]`/`[amdgpu]` extras; 700+ lines of tests |
 
 See [`CHANGELOG.md`](../CHANGELOG.md) and [`docs/`](docs/) for full release notes.
 
