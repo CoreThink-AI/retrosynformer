@@ -3,8 +3,8 @@
 
 Usage
 -----
-    retrosynformer-show-study results/hypertune/study.db
-    retrosynformer-show-study results/hypertune-my-study/study.db --sort score
+    rs-show-study results/hypertune/study.db
+    rs-show-study results/hypertune-my-study/study.db --sort score
 """
 import argparse
 import os

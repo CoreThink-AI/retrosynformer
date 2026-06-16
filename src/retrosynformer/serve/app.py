@@ -130,7 +130,7 @@ async def retrosynthesis(req: RetrosynthesisRequest) -> RetrosynthesisResponse:
 
 
 def run() -> None:
-    """Entry point used by the ``retrosynformer-serve`` CLI command."""
+    """Entry point used by the ``rs-serve`` CLI command."""
     import uvicorn
 
     port = int(os.environ.get("PORT", 8080))

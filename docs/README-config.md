@@ -14,13 +14,13 @@ workflow.
 python -m retrosynformer.runner -c results/config/small.yaml
 
 # Run 20 Optuna trials
-retrosynformer-hypertune -c results/config/small.yaml --n-trials 20 --n-epochs 100 --study-name my-study
+rs-hypertune -c results/config/small.yaml --n-trials 20 --n-epochs 100 --study-name my-study
 
 # Plot learning curves for the top 10 trials
-retrosynformer-plot-learning-curves --study my-study
+rs-plot-learning-curves --study my-study
 
 # Pull results from a remote host
-retrosynformer-sync-results --host taco
+rs-sync-results --host taco
 ```
 
 ---
@@ -218,7 +218,7 @@ reward:
 ### `optuna`
 
 Hyperparameter search space and study configuration.  Only present (and used)
-when you run `retrosynformer-hypertune`.
+when you run `rs-hypertune`.
 
 ```yaml
 optuna:
@@ -323,10 +323,10 @@ Copy the closest pre-built config and adjust paths, `action_dim`, and the
 cp results/config/small.yaml results/config/my_experiment.yaml
 ```
 
-### 2. Launch `retrosynformer-hypertune`
+### 2. Launch `rs-hypertune`
 
 ```bash
-retrosynformer-hypertune \
+rs-hypertune \
   -c results/config/my_experiment.yaml \
   --study-name my-experiment \
   --n-trials 30 \
@@ -369,10 +369,10 @@ Press `y` to append new trials to the same Optuna study.
 ### 4. Pull results from a remote machine
 
 ```bash
-retrosynformer-sync-results --host taco
+rs-sync-results --host taco
 
 # Preview first:
-retrosynformer-sync-results --host taco --dry-run
+rs-sync-results --host taco --dry-run
 ```
 
 This pulls only `study.db` and `train_progress.jsonl` (no model weights) and
@@ -382,10 +382,10 @@ mirrors the remote `results/` tree locally.
 
 ```bash
 # Top 10 trials by valid_action_accuracy
-retrosynformer-plot-learning-curves
+rs-plot-learning-curves
 
 # Filter to one study, rank by route accuracy, save to file
-retrosynformer-plot-learning-curves \
+rs-plot-learning-curves \
   --study my-experiment \
   --metric valid_route_accuracy \
   --top 5 \
@@ -395,8 +395,8 @@ retrosynformer-plot-learning-curves \
 ### 6. Inspect the Optuna study
 
 ```bash
-retrosynformer-show-study results/hypertune-my-experiment/study.db
-retrosynformer-show-all-studies "results/**/study.db"
+rs-show-study results/hypertune-my-experiment/study.db
+rs-show-all-studies "results/**/study.db"
 ```
 
 ---

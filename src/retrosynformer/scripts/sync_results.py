@@ -6,10 +6,10 @@ files passed via --include) while preserving the remote directory structure.
 
 Usage
 -----
-    retrosynformer-sync-results
-    retrosynformer-sync-results --host taco --dry-run
-    retrosynformer-sync-results --include run.jsonl --include "*.png"
-    retrosynformer-sync-results --remote-path code/corethink/retrosynformer/results/
+    rs-sync-results
+    rs-sync-results --host taco --dry-run
+    rs-sync-results --include run.jsonl --include "*.png"
+    rs-sync-results --remote-path code/corethink/retrosynformer/results/
 """
 import argparse
 import sys

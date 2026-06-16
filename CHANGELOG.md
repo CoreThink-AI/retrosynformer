@@ -9,8 +9,8 @@ Full release notes are in [`docs/`](docs/).
 
 **Learning-curve CLI, rsync utility, configurable Optuna objective.**
 
-- New `retrosynformer-plot-learning-curves` command: aggregates all `study.db` files, ranks completed Optuna trials by a chosen metric, and overlays per-epoch learning curves from `train_progress.jsonl`; handles epoch-reset restarts, rsync-nested duplicates, and multi-study SQLite files.
-- New `retrosynformer-sync-results` command and `retrosynformer.rsync` module: pulls only `study.db` + `train_progress.jsonl` from a remote host via rsync while preserving directory structure.
+- New `rs-plot-learning-curves` command: aggregates all `study.db` files, ranks completed Optuna trials by a chosen metric, and overlays per-epoch learning curves from `train_progress.jsonl`; handles epoch-reset restarts, rsync-nested duplicates, and multi-study SQLite files.
+- New `rs-sync-results` command and `retrosynformer.rsync` module: pulls only `study.db` + `train_progress.jsonl` from a remote host via rsync while preserving directory structure.
 - Trainer: added `eval_routes_at_end` flag so a full route evaluation always runs at least once per hypertune trial, preventing spurious 0.0 Optuna scores when early stopping fires before the first `eval_routes_frequency` epoch.
 - Hypertune: Optuna objective changed from `fraction_targets_solved` → `max(valid_route_accuracy)` — always non-zero, better reflects training progress.
 - Hypertune: `objective_metric` key in the `optuna:` config section makes the objective configurable without editing Python (`valid_action_accuracy` | `valid_route_accuracy` | `fraction_solved`); validated by `_validate_config`.

@@ -7,9 +7,9 @@ trial's train_progress.jsonl.
 
 Usage
 -----
-    retrosynformer-plot-learning-curves
-    retrosynformer-plot-learning-curves --top 5 --metric valid_action_accuracy
-    retrosynformer-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
+    rs-plot-learning-curves
+    rs-plot-learning-curves --top 5 --metric valid_action_accuracy
+    rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
 """
 import argparse
 import glob

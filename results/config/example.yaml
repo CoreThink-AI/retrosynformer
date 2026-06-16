@@ -147,7 +147,7 @@ train:
   results_path: results/
 
 # ---------------------------------------------------------------------------
-# optuna — hyperparameter search (only needed for retrosynformer-hypertune)
+# optuna — hyperparameter search (only needed for rs-hypertune)
 # ---------------------------------------------------------------------------
 optuna:
   # Metric maximised by Optuna across trials:

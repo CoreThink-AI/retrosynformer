@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install retrosynformer wheel + inference-only Python deps.
 # rdchiral is installed from the CoreThink-AI fork via git (not the local path
 # used in development).
+# google-cloud-storage is used by scripts/gcs_download.py to fetch model
+# artifacts from GCS at container startup.
 COPY --from=builder /dist/*.whl /tmp/
 
 RUN pip install --no-cache-dir \
@@ -40,21 +42,26 @@ RUN pip install --no-cache-dir \
         "pydantic>=2.0,<3" \
         rdkit \
         pandas \
-        httpx
+        httpx \
+        google-cloud-storage
 
-# Bake in small data files (< 3 MB total).
-# model.pth and config.yaml are NOT baked in — mount from GCS at runtime.
-COPY data/standard_building_blocks.csv       /app/data/standard_building_blocks.csv
-COPY data/standard_reaction_templates.pickle /app/data/standard_reaction_templates.pickle
+# Startup script: downloads model artifacts from GCS, then launches rs-serve.
+COPY scripts/gcs_download.py /app/scripts/gcs_download.py
+COPY scripts/entrypoint.sh   /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-ENV MODEL_CONFIG_PATH=/app/model/config.yaml \
-    MODEL_WEIGHTS_PATH=/app/model/model.pth \
-    BUILDING_BLOCKS_PATH=/app/data/standard_building_blocks.csv \
-    TEMPLATES_PATH=/app/data/standard_reaction_templates.pickle \
+# GCS source URIs (overridable at deploy time via --set-env-vars).
+# Local destination paths are where the app reads the files after download.
+ENV MODEL_WEIGHTS_GCS=gs://biochem-db-by-hobs/retrosynformer/models/trial_000/model.pth \
+    MODEL_CONFIG_GCS=gs://biochem-db-by-hobs/retrosynformer/models/trial_000/config.yaml \
+    BUILDING_BLOCKS_GCS=gs://biochem-db-by-hobs/retrosynformer/data/small_building_blocks.csv \
+    TEMPLATES_GCS=gs://biochem-db-by-hobs/retrosynformer/data/small_reaction_templates.pickle \
+    MODEL_WEIGHTS_PATH=/tmp/model/model.pth \
+    MODEL_CONFIG_PATH=/tmp/model/config.yaml \
+    BUILDING_BLOCKS_PATH=/tmp/data/small_building_blocks.csv \
+    TEMPLATES_PATH=/tmp/data/small_reaction_templates.pickle \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
-# --workers 1 required when using a single GPU; the asyncio.Semaphore in app.py
-# serialises concurrent requests within the one process.
-CMD ["retrosynformer-serve", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+ENTRYPOINT ["/app/entrypoint.sh"]

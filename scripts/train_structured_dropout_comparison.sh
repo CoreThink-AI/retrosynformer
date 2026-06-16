@@ -3,7 +3,7 @@
 
 # 1 — Baseline (standard dropout)
 # .venv-rocm/bin/python scripts/hypertune.py \
-retrosynformer-hypertune \
+rs-hypertune \
   -c results/config/small_standard.yaml \
   --study-name compare2_small_standard_dropout \
   --n-trials 5 \
@@ -12,7 +12,7 @@ retrosynformer-hypertune \
 
 # 2 — Structured dropout
 # .venv-rocm/bin/python scripts/hypertune.py \
-retrosynformer-hypertune \
+rs-hypertune \
   -c results/config/small_structured.yaml \
   --study-name compare2_small_structured_dropout \
   --n-trials 5 \

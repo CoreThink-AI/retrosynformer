@@ -2,7 +2,7 @@
 
 Usage::
 
-    retrosynformer-serve [--host HOST] [--port PORT] [--workers N]
+    rs-serve [--host HOST] [--port PORT] [--workers N]
 
 Required environment variables (set before running):
 

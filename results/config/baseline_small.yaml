@@ -16,7 +16,7 @@
 #
 # Usage:
 #   python -m retrosynformer.runner -c results/config/baseline_small.yaml
-#   retrosynformer-train -c results/config/baseline_small.yaml
+#   rs-train -c results/config/baseline_small.yaml
 
 context:
   building_blocks: data/standard_building_blocks.csv
@@ -24,7 +24,7 @@ context:
   templates_path: data/standard_reaction_templates.pickle
 
 dataset:
-  # Small dataset: 588 templates, 53 626 unique targets (paper Table 1)
+  # Small dataset: 588 templates, 53,626 unique targets (paper Table 1)
   action_dim: 588           # small=588, standard=1572, large=2986
   drop_duplicates: true
   fp_dim: 1024              # 1024-bit Morgan radius-2 fingerprints (Section 3.3.2)

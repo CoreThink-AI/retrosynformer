@@ -14,7 +14,7 @@ metric in the YAML config.
 
 ## Changes
 
-### 1. `retrosynformer-plot-learning-curves` CLI
+### 1. `rs-plot-learning-curves` CLI
 
 New script at `src/retrosynformer/scripts/plot_learning_curves.py`.
 
@@ -38,7 +38,7 @@ New script at `src/retrosynformer/scripts/plot_learning_curves.py`.
   | `--xscale` / `--yscale` | linear / log | Axis scaling |
   | `--out PATH` | (show) | Save figure to file instead of displaying |
 
-### 2. `retrosynformer-sync-results` CLI
+### 2. `rs-sync-results` CLI
 
 New `retrosynformer.rsync` module and `src/retrosynformer/scripts/sync_results.py`.
 
@@ -49,9 +49,9 @@ New `retrosynformer.rsync` module and `src/retrosynformer/scripts/sync_results.p
 - `--include` flag lets you add extra patterns; `--dry-run` / `--quiet` pass through.
 
 ```bash
-retrosynformer-sync-results                          # pull from taco → results/
-retrosynformer-sync-results --dry-run
-retrosynformer-sync-results --include run.jsonl --include "*.png"
+rs-sync-results                          # pull from taco → results/
+rs-sync-results --dry-run
+rs-sync-results --include run.jsonl --include "*.png"
 ```
 
 ### 3. Optuna objective score is never 0.0 (`trainer.py`, `hypertune.py`)
@@ -100,5 +100,5 @@ All six configs in `results/config/` were updated with the documented key.
 - Existing `study.db` files are forward-compatible; Optuna scores from earlier
   trials using `fraction_targets_solved` will look low relative to the new
   `valid_route_accuracy` scores. Start a fresh study when switching objective.
-- `retrosynformer-plot-learning-curves` and `retrosynformer-sync-results` require
+- `rs-plot-learning-curves` and `rs-sync-results` require
   `uv sync` / `pip install -e .` to register the new entry points.
