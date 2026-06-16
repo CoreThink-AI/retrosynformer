@@ -62,4 +62,4 @@ train:
   loss: crossEntropyLoss
   n_epochs: 1
   early_stopping_patience: 4
-  results_path: results/
+  results_path: results/standard-paper-repo/
