@@ -1,0 +1,19 @@
+[Unit]
+Description=RetroSynFormer Training Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hobs/code/corethink/retrosynformer
+EnvironmentFile=/home/hobs/code/corethink/retrosynformer/.env.dashboard
+ExecStart=/home/hobs/code/corethink/retrosynformer/.venv-rocm/bin/rs-dashboard \
+    --host 0.0.0.0 \
+    --port 5050 \
+    --results /home/hobs/code/corethink/retrosynformer/results/
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
