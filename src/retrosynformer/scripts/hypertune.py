@@ -58,6 +58,7 @@ import time
 
 import optuna
 
+import retrosynformer.trainer as _trainer_mod
 from retrosynformer.runner import main as train
 from retrosynformer.runner import read_config
 
@@ -404,9 +405,18 @@ def main():
             },
         }, run_jsonl)
 
+    def _objective_with_interrupt(trial):
+        # Register study.stop as the interrupt callback so a Ctrl-C stops the
+        # study after the current trial completes and its result is recorded.
+        _trainer_mod.set_interrupt_callback(study.stop)
+        try:
+            return objective(trial, args.config_path, args.n_epochs, args.dataset,
+                             results_base, run_jsonl, args.eval_n_batches, args.study_name)
+        finally:
+            _trainer_mod.clear_interrupt_callback()
+
     study.optimize(
-        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset,
-                                results_base, run_jsonl, args.eval_n_batches, args.study_name),
+        _objective_with_interrupt,
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )
@@ -425,6 +435,9 @@ def main():
     print(f"  fraction_targets_solved: {best.value:.4f}")
     print(f"  params: {best.params}")
     print(f"  results: {os.path.join(results_base, f'trial_{best.number:03d}')}")
+
+    if _trainer_mod.is_interrupted():
+        raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import signal
 import tempfile
 import time
 from datetime import datetime
@@ -11,6 +12,60 @@ from sklearn.metrics import accuracy_score
 
 from .inference import RoutePredictor
 from .utils import utils
+
+# ---------------------------------------------------------------------------
+# Graceful Ctrl-C handling
+#
+# On the first SIGINT the handler sets _interrupted and (optionally) calls
+# _stop_study_callback so Optuna does not start another trial.  The training
+# loop detects the flag at the end of each epoch, breaks, runs route eval,
+# and returns normally — allowing Optuna to record the trial result.
+#
+# A second SIGINT arriving within 1 second of the first restores the original
+# handler and re-raises immediately (no waiting for the epoch to finish).
+# ---------------------------------------------------------------------------
+
+_interrupted: bool = False
+_last_interrupt_time: float = 0.0
+_stop_study_callback = None   # optional callable, e.g. study.stop
+_original_sigint = signal.SIG_DFL
+
+
+def set_interrupt_callback(fn) -> None:
+    """Register a zero-argument callable invoked on the first Ctrl-C (e.g. study.stop)."""
+    global _stop_study_callback
+    _stop_study_callback = fn
+
+
+def clear_interrupt_callback() -> None:
+    global _stop_study_callback
+    _stop_study_callback = None
+
+
+def is_interrupted() -> bool:
+    """True if training was stopped by Ctrl-C (check after train() returns)."""
+    return _interrupted
+
+
+def _handle_sigint(signum, frame):
+    global _interrupted, _last_interrupt_time, _original_sigint
+    now = time.time()
+    if now - _last_interrupt_time < 1.0:
+        # Second Ctrl-C within 1 s — restore original handler and raise immediately.
+        signal.signal(signal.SIGINT, _original_sigint)
+        raise KeyboardInterrupt
+    _last_interrupt_time = now
+    _interrupted = True
+    print(
+        "\n[trainer] Ctrl-C caught — finishing current epoch and running route "
+        "evaluation before stopping. Hit Ctrl-C again within 1 s to abort immediately.",
+        flush=True,
+    )
+    if _stop_study_callback is not None:
+        try:
+            _stop_study_callback()
+        except Exception:
+            pass
 
 
 class RetroTrainer:
@@ -204,6 +259,24 @@ class RetroTrainer:
 
     def train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
               trial_number=None, study_name=None):
+        global _interrupted, _last_interrupt_time, _original_sigint
+        _interrupted = False
+        _last_interrupt_time = 0.0
+        _original_sigint = signal.signal(signal.SIGINT, _handle_sigint)
+
+        try:
+            return self._train(
+                verbose=verbose,
+                start_epoch=start_epoch,
+                eval_routes_at_end=eval_routes_at_end,
+                trial_number=trial_number,
+                study_name=study_name,
+            )
+        finally:
+            signal.signal(signal.SIGINT, _original_sigint)
+
+    def _train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
+               trial_number=None, study_name=None):
         time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
@@ -378,6 +451,11 @@ class RetroTrainer:
 
             if patience > 0 and epochs_no_improve >= patience:
                 print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
+                break
+
+            if _interrupted:
+                print(f"[trainer] Stopped after epoch {epoch} (Ctrl-C). Running final route eval before exit.")
+                eval_routes_at_end = True
                 break
 
         # Run final route evaluation when explicitly requested (hypertune) or

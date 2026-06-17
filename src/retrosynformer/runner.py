@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
 
 from .data import RouteDatasetTorch, collate_fn
+from . import trainer as _trainer_mod
 from .trainer import RetroTrainer
 from .utils import evaluation, reward_functions, utils
 
@@ -403,6 +404,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
             evaluation.main(result_dir=result_dir)
         except Exception as exc:
             logger.error("Post-training evaluation failed (non-fatal): %s", exc)
+
+    if _trainer_mod.is_interrupted():
+        raise KeyboardInterrupt
 
     return (
         validation_loss,
