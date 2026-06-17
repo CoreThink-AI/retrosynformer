@@ -5,6 +5,20 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.10] — 2026-06-17
+
+**Graceful Ctrl-C: route eval and study.db write before stopping.**
+
+- First Ctrl-C finishes the current epoch, runs route evaluation, returns normally so Optuna records the trial result to `study.db`, then raises `KeyboardInterrupt`.
+- Second Ctrl-C within 1 second raises `KeyboardInterrupt` immediately.
+- `trainer.py`: `_handle_sigint`, `set/clear_interrupt_callback`, `is_interrupted`; handler installed/restored in `train()` via `try/finally`; interrupt flag checked at end of epoch loop, forces `eval_routes_at_end=True`.
+- `hypertune.py`: `_objective_with_interrupt` wrapper registers `study.stop` as callback; raises `KeyboardInterrupt` after `study.optimize()` if interrupted.
+- `runner.py`: raises `KeyboardInterrupt` after `train()` if interrupted (`rs-train`).
+
+[Full notes](docs/release-notes-0.1.10.md)
+
+---
+
 ## [0.1.9] — 2026-06-17
 
 **Layer-shared residual dropout; atomic per-epoch checkpointing.**
