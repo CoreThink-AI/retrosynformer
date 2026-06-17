@@ -237,3 +237,46 @@ def test_validate_config_discrete_saturation_skipped_for_continuous():
 def test_validate_config_discrete_saturation_skipped_when_n_trials_none():
     cfg = {"optuna": {"n_heads": [1, 2]}}
     ht._validate_config(cfg, n_trials=None)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# _validate_config — random_seed spec checks
+# ---------------------------------------------------------------------------
+
+def test_validate_config_random_seed_list_of_ints_passes():
+    cfg = {"optuna": {"random_seed": [1, 42, 137]}}
+    ht._validate_config(cfg)  # must not raise
+
+
+def test_validate_config_random_seed_int_range_passes():
+    cfg = {"optuna": {"random_seed": {"low": 1, "high": 1000}}}
+    ht._validate_config(cfg)  # must not raise
+
+
+def test_validate_config_random_seed_int_range_with_step_passes():
+    cfg = {"optuna": {"random_seed": {"low": 0, "high": 100, "step": 10}}}
+    ht._validate_config(cfg)  # must not raise
+
+
+def test_validate_config_random_seed_list_with_float_raises():
+    cfg = {"optuna": {"random_seed": [1, 2.5, 3]}}
+    with pytest.raises(ValueError, match="integers"):
+        ht._validate_config(cfg)
+
+
+def test_validate_config_random_seed_float_range_raises():
+    cfg = {"optuna": {"random_seed": {"low": 0.0, "high": 1.0}}}
+    with pytest.raises(ValueError, match="integers"):
+        ht._validate_config(cfg)
+
+
+def test_validate_config_random_seed_log_range_raises():
+    cfg = {"optuna": {"random_seed": {"low": 1, "high": 1000, "log": True}}}
+    with pytest.raises(ValueError, match="log"):
+        ht._validate_config(cfg)
+
+
+def test_validate_config_random_seed_scalar_raises():
+    cfg = {"optuna": {"random_seed": 42}}
+    with pytest.raises(ValueError, match="list of ints or a dict"):
+        ht._validate_config(cfg)
