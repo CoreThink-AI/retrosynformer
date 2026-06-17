@@ -47,6 +47,7 @@ class TrialAdmin(ModelView):
     can_delete = False
     can_edit = False
     column_formatters = {
+        "study": lambda v, c, m, n: m.study.study_name if m.study else "?",
         "optuna_score": lambda v, c, m, n: f"{m.optuna_score:.4f}" if m.optuna_score is not None else "—",
         "valid_loss": lambda v, c, m, n: f"{m.valid_loss:.4f}" if m.valid_loss is not None else "—",
         "valid_action_accuracy": lambda v, c, m, n: f"{m.valid_action_accuracy:.4f}" if m.valid_action_accuracy is not None else "—",
