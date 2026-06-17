@@ -5,6 +5,16 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.12] — 2026-06-17
+
+**Removed rs-bump command and anthropic API dependency.**
+
+- Deleted `scripts/bump.py` and `src/retrosynformer/scripts/bump.py`.
+- Removed `rs-bump` and `bump` entry points from `[project.scripts]`.
+- Removed `anthropic>=0.25` from the `[dev]` extra.
+
+---
+
 ## [0.1.11] — 2026-06-17
 
 **Fixed verbose training column alignment; header reprints every 10 epochs.**
