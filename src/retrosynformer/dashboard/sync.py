@@ -271,10 +271,17 @@ def sync_study(db_path: str, root: str, force: bool = False) -> bool:
             else min(complete, key=lambda t: t["score"] or 0)
         existing.best_trial_number = best_trial["trial_number"]
 
+    # Count manually-stopped trials in the dashboard (preserved across syncs).
+    n_stopped = (
+        Trial.query.filter_by(study_id=existing.id, state="STOPPED").count()
+        if existing.id else 0
+    )
     if running:
         existing.status = "active"
     elif complete:
         existing.status = "complete"
+    elif n_stopped > 0:
+        existing.status = "stopped"
     else:
         existing.status = "unknown"
 
@@ -299,7 +306,9 @@ def _sync_trials(study_row: Study, optuna_trials: list[dict],
             t = existing_map[trial_number]
 
         t.optuna_trial_id = ot["trial_id"]
-        t.state = ot["state"]
+        # Preserve a manually-set STOPPED state — don't let a re-sync overwrite it.
+        if t.state != "STOPPED":
+            t.state = ot["state"]
         t.params_json = json.dumps(ot["params"]) if ot["params"] else None
         t.optuna_score = ot["score"]
         t.trial_dir = trial_dir if os.path.isdir(trial_dir) else None

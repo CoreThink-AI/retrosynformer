@@ -10,6 +10,7 @@ from flask import (Blueprint, current_app, jsonify, redirect, render_template,
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
 from markupsafe import Markup
+from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .extensions import limiter
@@ -132,6 +133,11 @@ def index():
     studies = Study.query.order_by(Study.last_synced_at.desc()).all()
     active = [s for s in studies if s.status == "active"]
     cloud_run_url = current_app.config.get("CLOUD_RUN_URL", "")
+    study_epochs = dict(
+        db.session.query(Trial.study_id, func.max(Trial.epoch_count))
+        .group_by(Trial.study_id)
+        .all()
+    )
     return render_template(
         "dashboard/index.html",
         studies=studies,
@@ -139,6 +145,7 @@ def index():
         cloud_run_url=cloud_run_url,
         now=datetime.utcnow(),
         stale_hours=STALE_TRIAL_HOURS,
+        study_epochs=study_epochs,
     )
 
 
