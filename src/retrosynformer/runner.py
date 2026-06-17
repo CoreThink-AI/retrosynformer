@@ -209,8 +209,19 @@ def init_model(config, model_path=None):
         print(f"Using StructuredDropoutDecisionTransformer (fp_dim={fp_dim}, bottleneck={bottleneck}, rate={rate})")
     else:
         model = DecisionTransformerModel(dt_config)
+
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=torch.device(DEVICE)))
+
+    lsrd = config["model"].get("layer_shared_resid_dropout", False)
+    if lsrd:
+        from .dropout import apply_layer_shared_resid_dropout
+        p = config["model"].get("resid_pdrop", 0.0)
+        # lsrd may be True (all layers) or a list[bool] (per-layer)
+        flags = lsrd if isinstance(lsrd, list) else True
+        n = apply_layer_shared_resid_dropout(model, p, flags=flags)
+        print(f"layer_shared_resid_dropout: tied resid masks in {n}/{config['model']['n_layers']} blocks (p={p}, flags={flags})")
+
     return model
 
 
@@ -221,7 +232,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, attn_pdrop=None, embd_pdrop=None, resid_pdrop=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, eval_routes_at_end=False, trial_number=None, study_name=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, attn_pdrop=None, embd_pdrop=None, resid_pdrop=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, layer_shared_resid_dropout=None, eval_routes_at_end=False, trial_number=None, study_name=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -273,6 +284,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if resid_pdrop is not None:
         config["model"]["resid_pdrop"] = resid_pdrop
         print(f"resid_pdrop override: {resid_pdrop}")
+    if layer_shared_resid_dropout is not None:
+        config["model"]["layer_shared_resid_dropout"] = bool(layer_shared_resid_dropout)
+        print(f"layer_shared_resid_dropout override: {layer_shared_resid_dropout}")
     if eval_n_batches is not None:
         config["evaluation"]["eval_n_batches"] = eval_n_batches
         print(f"eval_n_batches override: {eval_n_batches}")
@@ -450,6 +464,13 @@ if __name__ == "__main__":
         help="Global multiplier on learned structured-dropout probabilities (0=off, 1=default, >1=amplify)",
     )
     parser.add_argument(
+        "--layer-shared-resid-dropout",
+        action="store_true",
+        default=None,
+        dest="layer_shared_resid_dropout",
+        help="Tie the two resid_dropout masks within each layer (same mask for attention and MLP residuals)",
+    )
+    parser.add_argument(
         "--momentum",
         type=float,
         default=None,
@@ -473,4 +494,5 @@ if __name__ == "__main__":
         dropout=args.dropout,
         momentum=args.momentum,
         structured_dropout_rate=args.structured_dropout_rate,
+        layer_shared_resid_dropout=args.layer_shared_resid_dropout,
     )
