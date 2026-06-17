@@ -5,6 +5,19 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.11] — 2026-06-17
+
+**Fixed verbose training column alignment; header reprints every 10 epochs.**
+
+- `study_name` was prepended to each row (before `epoch`) but the header printed it as a suffix (after `note`) — both now use suffix position.
+- Replaced tab-separated columns with fixed-width space-aligned format (`>5` epoch/trial, `>7` loss/accuracy, `>6` s/ep, `<4` note).
+- Header row reprints automatically every 10 epochs relative to `start_epoch`, keeping labels visible during long runs.
+- Extracted header print into a `_print_header()` closure so the format is defined once.
+
+[Full notes](docs/release-notes-0.1.11.md)
+
+---
+
 ## [0.1.10] — 2026-06-17
 
 **Graceful Ctrl-C: route eval and study.db write before stopping.**
