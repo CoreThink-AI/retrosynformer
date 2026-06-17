@@ -160,3 +160,74 @@ def test_validate_config_lsrd_no_duplicates_passes():
         }
     }
     ht._validate_config(cfg)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# _count_discrete_combinations
+# ---------------------------------------------------------------------------
+
+def test_count_discrete_flat_lists():
+    cfg = {"n_heads": [1, 2, 4], "n_layers": [2, 4, 8, 16]}
+    assert ht._count_discrete_combinations(cfg) == 12
+
+
+def test_count_discrete_list_of_lists():
+    cfg = {"layer_shared_resid_dropout": [[True, False], [False, True], [True, True]]}
+    assert ht._count_discrete_combinations(cfg) == 3
+
+
+def test_count_discrete_choices_dict():
+    cfg = {"n_heads": {"choices": [1, 2, 4, 8]}, "dropout": [0.0, 0.1, 0.2]}
+    assert ht._count_discrete_combinations(cfg) == 12
+
+
+def test_count_discrete_int_range_with_step():
+    cfg = {"n_layers": {"low": 2, "high": 8, "step": 2}}
+    # values: 2, 4, 6, 8 → 4 choices
+    assert ht._count_discrete_combinations(cfg) == 4
+
+
+def test_count_discrete_int_range_default_step():
+    cfg = {"n_layers": {"low": 1, "high": 4}}
+    # values: 1, 2, 3, 4 → 4 choices
+    assert ht._count_discrete_combinations(cfg) == 4
+
+
+def test_count_discrete_float_range_returns_none():
+    cfg = {"lr": {"low": 1e-4, "high": 1e-2, "log": True}}
+    assert ht._count_discrete_combinations(cfg) is None
+
+
+def test_count_discrete_mixed_continuous_returns_none():
+    cfg = {"n_heads": [1, 2, 4], "lr": {"low": 1e-4, "high": 1e-2}}
+    assert ht._count_discrete_combinations(cfg) is None
+
+
+def test_count_discrete_skips_reserved_keys():
+    cfg = {"objective_metric": "valid_action_accuracy", "n_heads": [1, 2]}
+    assert ht._count_discrete_combinations(cfg) == 2
+
+
+# ---------------------------------------------------------------------------
+# _validate_config — discrete saturation check
+# ---------------------------------------------------------------------------
+
+def test_validate_config_discrete_saturation_raises():
+    cfg = {"optuna": {"n_heads": [1, 2], "n_layers": [2, 4]}}  # 4 combinations
+    with pytest.raises(ValueError, match="n_trials=5 exceeds.*4"):
+        ht._validate_config(cfg, n_trials=5)
+
+
+def test_validate_config_discrete_saturation_exact_passes():
+    cfg = {"optuna": {"n_heads": [1, 2], "n_layers": [2, 4]}}  # 4 combinations
+    ht._validate_config(cfg, n_trials=4)  # must not raise
+
+
+def test_validate_config_discrete_saturation_skipped_for_continuous():
+    cfg = {"optuna": {"n_heads": [1, 2], "lr": {"low": 1e-4, "high": 1e-2, "log": True}}}
+    ht._validate_config(cfg, n_trials=1000)  # continuous param → no check
+
+
+def test_validate_config_discrete_saturation_skipped_when_n_trials_none():
+    cfg = {"optuna": {"n_heads": [1, 2]}}
+    ht._validate_config(cfg, n_trials=None)  # must not raise
