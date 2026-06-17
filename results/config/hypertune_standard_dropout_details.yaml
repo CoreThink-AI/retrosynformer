@@ -12,16 +12,16 @@
 
 optuna:
   objective_metric: valid_route_accuracy
-  n_heads: [1, 2, 4]
-  n_layers: [2, 3, 4, 6, 8, 12, 16, 24, 32]
-  head_dim: [64, 128, 256]
+  n_heads: [2, 3, 4, 5]
+  n_layers: [6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 23, 24]
+  head_dim: [64, 72, 96, 128, 192, 256]
   lr:
     low: 5.0e-5
     high: 5.0e-3
     log: true
   dropout:
     low: 0.0
-    high: 0.3
+    high: 0.25
 
 context:
   building_blocks: data/standard_building_blocks.csv
