@@ -83,6 +83,7 @@ cuda = [
 # Development / testing:  uv sync --extra dev
 dev = [
     "pytest>=8",
+    "fastapi>=0.115,<1",
     "httpx>=0.27",   # required by FastAPI TestClient
 ]
 
@@ -138,11 +139,6 @@ filterwarnings = [
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
     # starlette TestClient / httpx compatibility shim — not our code.
     "ignore::starlette.exceptions.StarletteDeprecationWarning",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=9.1.0",
 ]
 
 [tool.uv.sources]

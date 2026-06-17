@@ -3431,6 +3431,7 @@ dashboard = [
     { name = "wtforms" },
 ]
 dev = [
+    { name = "fastapi" },
     { name = "httpx" },
     { name = "pytest" },
 ]
@@ -3442,11 +3443,6 @@ rocm = [
 serve = [
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -3466,6 +3462,7 @@ requires-dist = [
     { name = "cython" },
     { name = "dask" },
     { name = "dill" },
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115,<1" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115,<1" },
     { name = "filelock" },
     { name = "flask", marker = "extra == 'dashboard'", specifier = ">=3.0,<4" },
@@ -3498,9 +3495,6 @@ requires-dist = [
     { name = "wtforms", marker = "extra == 'dashboard'", specifier = ">=3.1,<4" },
 ]
 provides-extras = ["cpu", "rocm", "serve", "dashboard", "cuda", "dev"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.0" }]
 
 [[package]]
 name = "rich"
