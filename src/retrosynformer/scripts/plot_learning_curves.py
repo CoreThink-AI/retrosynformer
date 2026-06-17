@@ -161,6 +161,10 @@ def main() -> None:
                         help="Save figure to this path instead of showing interactively")
     parser.add_argument("--root", default=".",
                         help="Root directory for glob resolution (default: .)")
+    parser.add_argument("--xmin", type=float, default=None, help="X-axis lower limit")
+    parser.add_argument("--xmax", type=float, default=None, help="X-axis upper limit")
+    parser.add_argument("--ymin", type=float, default=None, help="Y-axis lower limit")
+    parser.add_argument("--ymax", type=float, default=None, help="Y-axis upper limit")
     args = parser.parse_args()
 
     metrics: list[str] = args.metrics or ["valid_action_accuracy"]
@@ -298,10 +302,10 @@ def main() -> None:
     # Param columns present across the top trials (exclude bookkeeping columns).
     _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
                   "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial", "jsonl_path"}
-    PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
-                   "structured_dropout_bottleneck"]
+    PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr"]
+    _HIDDEN_PARAMS = {"structured_dropout_bottleneck", "structured_dropout_rate"}
     present_params = [c for c in PARAM_ORDER if c in top.columns]
-    extra_params = [c for c in top.columns if c not in _non_param and c not in present_params]
+    extra_params = [c for c in top.columns if c not in _non_param and c not in present_params and c not in _HIDDEN_PARAMS]
     param_cols = present_params + extra_params
 
     def _hdr(c: str) -> str:
@@ -401,25 +405,32 @@ def main() -> None:
         sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
 
     y_label = metrics[0].replace("_", " ") if len(metrics) == 1 else "metric value"
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel(y_label)
+    ax.set_xlabel("Epoch", fontsize=13)
+    ax.set_ylabel(y_label, fontsize=13)
     ax.set_xscale(args.xscale)
     ax.set_yscale(args.yscale)
-    ax.set_title(f"Learning curves — top {plotted} trials by {rank_metric.replace('_', ' ')}")
+    ax.set_title(f"Learning curves — top {plotted} trials by {rank_metric.replace('_', ' ')}",
+                 fontsize=15)
+    ax.tick_params(labelsize=11)
 
     if len(metrics) > 1:
         # Two-part legend: trial colors (upper-left) + metric linestyles (lower-right).
-        trial_legend = ax.legend(fontsize=9, loc="upper left", framealpha=0.8)
+        trial_legend = ax.legend(fontsize=11, loc="upper left", framealpha=0.8)
         ax.add_artist(trial_legend)
         metric_handles = [
             Line2D([0], [0], color="gray", linestyle=LINESTYLES[i % len(LINESTYLES)],
                    linewidth=2.5, label=m.replace("_", " "))
             for i, m in enumerate(metrics)
         ]
-        ax.legend(handles=metric_handles, fontsize=9, loc="lower right",
-                  framealpha=0.8, title="metrics")
+        ax.legend(handles=metric_handles, fontsize=11, loc="lower right",
+                  framealpha=0.8, title="metrics", title_fontsize=11)
     else:
-        ax.legend(fontsize=9, loc="best", framealpha=0.8)
+        ax.legend(fontsize=11, loc="best", framealpha=0.8)
+
+    if args.xmin is not None or args.xmax is not None:
+        ax.set_xlim(left=args.xmin, right=args.xmax)
+    if args.ymin is not None or args.ymax is not None:
+        ax.set_ylim(bottom=args.ymin, top=args.ymax)
 
     plt.tight_layout()
 
