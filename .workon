@@ -1,2 +1,2 @@
-source .venv-rocm/bin/activate
+source .venv-rocm/bin/activate || source .venv/bin/activate
 git status
