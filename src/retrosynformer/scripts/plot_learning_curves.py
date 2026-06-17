@@ -405,25 +405,27 @@ def main() -> None:
         sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
 
     y_label = metrics[0].replace("_", " ") if len(metrics) == 1 else "metric value"
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel(y_label)
+    ax.set_xlabel("Epoch", fontsize=13)
+    ax.set_ylabel(y_label, fontsize=13)
     ax.set_xscale(args.xscale)
     ax.set_yscale(args.yscale)
-    ax.set_title(f"Learning curves — top {plotted} trials by {rank_metric.replace('_', ' ')}")
+    ax.set_title(f"Learning curves — top {plotted} trials by {rank_metric.replace('_', ' ')}",
+                 fontsize=15)
+    ax.tick_params(labelsize=11)
 
     if len(metrics) > 1:
         # Two-part legend: trial colors (upper-left) + metric linestyles (lower-right).
-        trial_legend = ax.legend(fontsize=9, loc="upper left", framealpha=0.8)
+        trial_legend = ax.legend(fontsize=11, loc="upper left", framealpha=0.8)
         ax.add_artist(trial_legend)
         metric_handles = [
             Line2D([0], [0], color="gray", linestyle=LINESTYLES[i % len(LINESTYLES)],
                    linewidth=2.5, label=m.replace("_", " "))
             for i, m in enumerate(metrics)
         ]
-        ax.legend(handles=metric_handles, fontsize=9, loc="lower right",
-                  framealpha=0.8, title="metrics")
+        ax.legend(handles=metric_handles, fontsize=11, loc="lower right",
+                  framealpha=0.8, title="metrics", title_fontsize=11)
     else:
-        ax.legend(fontsize=9, loc="best", framealpha=0.8)
+        ax.legend(fontsize=11, loc="best", framealpha=0.8)
 
     if args.xmin is not None or args.xmax is not None:
         ax.set_xlim(left=args.xmin, right=args.xmax)
