@@ -271,11 +271,6 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     trial_dir = os.path.join(results_base, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
 
-    _write({
-        "event": "trial_start",
-        "trial": {"number": trial.number, "dir": trial_dir},
-        "params": dict(trial.params),
-    }, run_jsonl)
     print(f"\n### Trial {trial.number} params")
     for k, v in trial.params.items():
         print(f"  {k}: {v}")
@@ -291,6 +286,18 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     if eval_n_batches is not None:
         model_params["eval_n_batches"] = eval_n_batches
     model_params.update(params)
+    # Keys that are control/path metadata — exclude from the all_params snapshot
+    # written to run.jsonl so that rs-plot-learning-curves can display fixed
+    # architecture params alongside Optuna-suggested ones.
+    _META_KEYS = {"config_path", "results_path", "eval_routes_at_end",
+                  "trial_number", "study_name", "eval_n_batches"}
+    _write({
+        "event": "trial_start",
+        "trial": {"number": trial.number, "dir": trial_dir},
+        "params": dict(trial.params),
+        "all_params": {k: v for k, v in model_params.items() if k not in _META_KEYS},
+        "optuna_keys": list(params.keys()),
+    }, run_jsonl)
     print("\n#### Model params")
     for k, v in model_params.items():
         print(f"    {k}: {v}")

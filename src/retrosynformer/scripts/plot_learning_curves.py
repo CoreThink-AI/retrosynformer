@@ -108,6 +108,28 @@ def _jsonl_path(trial_base_dir: str, trial_number: int) -> str:
     return os.path.join(trial_base_dir, f"trial_{int(trial_number):03d}", "train_progress.jsonl")
 
 
+def _load_run_params(trial_base_dir: str) -> dict[int, tuple[dict, list[str]]]:
+    """Read run.jsonl and return {trial_num: (all_params, optuna_keys)} for trial_start events."""
+    path = os.path.join(trial_base_dir, "run.jsonl")
+    result: dict[int, tuple[dict, list[str]]] = {}
+    if not os.path.exists(path):
+        return result
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("event") == "trial_start" and "all_params" in rec:
+                n = rec.get("trial", {}).get("number")
+                if n is not None:
+                    result[int(n)] = (rec["all_params"], rec.get("optuna_keys", []))
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -253,6 +275,26 @@ def main() -> None:
             sys.exit(f"No completed trials with {filter_desc}.")
     top = all_trials.head(args.top)
 
+    # Supplement Optuna trial params with fixed architecture params from run.jsonl.
+    _run_cache: dict[str, dict[int, tuple[dict, list[str]]]] = {}
+    for tbd in top["trial_base_dir"].unique():
+        _run_cache[str(tbd)] = _load_run_params(str(tbd))
+
+    optuna_col_set: set[str] = set()
+    new_cols: set[str] = set()
+    for _, row in top.iterrows():
+        all_p, okeys = _run_cache.get(str(row["trial_base_dir"]), {}).get(int(row["original_trial"]), ({}, []))
+        new_cols.update(all_p.keys())
+        optuna_col_set.update(okeys)
+
+    for col in new_cols:
+        if col not in top.columns:
+            top[col] = top.apply(
+                lambda r, c=col: _run_cache.get(str(r["trial_base_dir"]), {})
+                    .get(int(r["original_trial"]), ({}, []))[0].get(c),
+                axis=1,
+            )
+
     # Param columns present across the top trials (exclude bookkeeping columns).
     _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
                   "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial", "jsonl_path"}
@@ -261,6 +303,9 @@ def main() -> None:
     present_params = [c for c in PARAM_ORDER if c in top.columns]
     extra_params = [c for c in top.columns if c not in _non_param and c not in present_params]
     param_cols = present_params + extra_params
+
+    def _hdr(c: str) -> str:
+        return c + "*" if c in optuna_col_set else c
 
     def _fmt(col: str, val) -> str:
         # Check for lists before pd.isna — isna raises ValueError on list inputs.
@@ -291,11 +336,11 @@ def main() -> None:
     col_w = max(len(metric_hdr), 9)
     direction = "↑" if not rank_lower_is_better else "↓"
     fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'ep':>4}  {'trial':>5}  {'study':<40}"
-    param_hdr = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
+    param_hdr = "  ".join(f"{_hdr(c):<{max(len(_hdr(c)),6)}}" for c in param_cols)
     print(f"Top {len(top)} completed trials by {rank_metric}:")
     print(f"{fixed_hdr}  {param_hdr}")
     print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'----':>4}  {'-----':>5}  {'-'*40}  " +
-          "  ".join("-" * max(len(c), 6) for c in param_cols))
+          "  ".join("-" * max(len(_hdr(c)), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
         study_short = str(row["study_name"])[:40]
@@ -305,7 +350,7 @@ def main() -> None:
                       f"{optuna_score}  {n_ep:>4}  "
                       f"{int(row['original_trial']):>5}  {study_short:<40}")
         param_part = "  ".join(
-            f"{_fmt(c, row[c]):<{max(len(c),6)}}" for c in param_cols
+            f"{_fmt(c, row[c]):<{max(len(_hdr(c)),6)}}" for c in param_cols
         )
         print(f"{fixed_part}  {param_part}")
     print()
