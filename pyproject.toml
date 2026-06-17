@@ -140,6 +140,11 @@ filterwarnings = [
     "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
+
 [tool.uv.sources]
 rdchiral = { path = "../rdchiral", editable = true }
 torch = [
