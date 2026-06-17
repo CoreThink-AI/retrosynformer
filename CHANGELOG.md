@@ -5,6 +5,20 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.13] — 2026-06-17
+
+**`rs-plot-learning-curves`: multiple `--metric` flags; fixed params in trial table; Optuna params marked with `*`.**
+
+- `--metric` now accepts multiple values (repeat the flag); trials ranked by first metric; each metric drawn with a distinct linestyle; two-part legend (trial colors + metric linestyles) when multiple metrics are active.
+- `--also-train` extended: inserts `train_*` counterparts for each `valid_*` metric not already listed.
+- `hypertune.py`: `trial_start` record in `run.jsonl` now includes `all_params` (full resolved config minus path/control metadata) and `optuna_keys` (params actually suggested by Optuna).
+- Plot script reads `run.jsonl` to supplement Optuna trial params with fixed architecture values (`n_heads`, `n_layers`, `head_dim`, `lr`, etc.); Optuna-searched column headers are suffixed with `*`.
+- Long list params (e.g. `layer_shared_resid_dropout`) summarised as `[first ... last]` in the trial table.
+
+[Full notes](docs/release-notes-0.1.13.md)
+
+---
+
 ## [0.1.12] — 2026-06-17
 
 **Removed rs-bump command and anthropic API dependency.**
