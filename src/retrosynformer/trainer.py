@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import time
 from datetime import datetime
 
@@ -288,7 +289,16 @@ class RetroTrainer:
             if valid_loss < lowest_valid_loss:
                 model_path = save_folder + "/model.pth"
                 lowest_valid_loss = valid_loss
-                torch.save(self.model.state_dict(), model_path)
+                # Atomic save: write to a temp file then rename so rsync or
+                # any reader always sees a complete checkpoint, never a partial write.
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+                try:
+                    os.close(tmp_fd)
+                    torch.save(self.model.state_dict(), tmp_path)
+                    os.replace(tmp_path, model_path)
+                except Exception:
+                    os.unlink(tmp_path)
+                    raise
                 epochs_no_improve = 0
                 note = "*"
             else:
