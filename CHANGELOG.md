@@ -5,6 +5,20 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.8] — 2026-06-16
+
+**Training dashboard, trial status CLI, ntfy.sh alerter, ROCm pin fixes.**
+
+- New `rs-dashboard`: Flask-Admin web app over a local SQLite mirror of Optuna trial data; login-gated, deployed to `taco` via Tailscale user-mode systemd.
+- New `rs-status`: syncs remote results and prints a ranked Pandas table of trials with score, accuracy, `frac_solved`, LR, architecture dims, and last-modified time; `--top N` flag.
+- New `rs-monitor` (`monitor_training.py`): background ntfy.sh alerter that fires a push notification whenever `valid_action_accuracy` improves.
+- Fixed ROCm deps: reverted `uv.lock` to ROCm 6.2 / torch 2.5.1 (6.4 crashes taco iGPU); removed the `amdgpu` alias extra from `pyproject.toml`.
+- Fixed dashboard Trials table showing `Study` repr instead of `study_name`.
+
+[Full notes](docs/release-notes-0.1.8.md)
+
+---
+
 ## [0.1.7] — 2026-06-15
 
 **Learning-curve CLI, rsync utility, configurable Optuna objective.**

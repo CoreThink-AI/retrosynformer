@@ -7,6 +7,7 @@ from flask import (Blueprint, current_app, jsonify, redirect, render_template,
                    request, session, url_for)
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
+from markupsafe import Markup
 from werkzeug.security import check_password_hash
 
 from .models import Study, Trial, db
@@ -22,12 +23,17 @@ class StudyAdmin(ModelView):
         "study_name", "status", "n_trials", "n_complete", "n_running",
         "best_score", "best_trial_number", "objective_metric", "last_synced_at",
     ]
+    column_sortable_list = [
+        "study_name", "status", "n_trials", "n_complete", "n_running",
+        "best_score", "best_trial_number", "objective_metric", "last_synced_at",
+    ]
     column_searchable_list = ["study_name"]
     column_filters = ["status", "best_score", "n_trials"]
     column_default_sort = ("last_synced_at", True)
     can_create = False
     can_delete = True
     can_edit = False
+    can_view_details = True
     column_formatters = {
         "best_score": lambda v, c, m, n: f"{m.best_score:.4f}" if m.best_score is not None else "—",
         "last_synced_at": lambda v, c, m, n: m.last_synced_at.strftime("%H:%M:%S") if m.last_synced_at else "—",
@@ -40,6 +46,11 @@ class TrialAdmin(ModelView):
         "optuna_score", "valid_loss", "valid_action_accuracy",
         "valid_route_accuracy", "fraction_targets_solved", "duration_min",
     ]
+    column_sortable_list = [
+        ("study", "study.study_name"), "trial_number", "state", "epoch_count",
+        "optuna_score", "valid_loss", "valid_action_accuracy",
+        "valid_route_accuracy", "fraction_targets_solved", "duration_min",
+    ]
     column_searchable_list = []
     column_filters = ["state", "optuna_score", "fraction_targets_solved", "epoch_count"]
     column_default_sort = ("synced_at", True)
@@ -47,7 +58,10 @@ class TrialAdmin(ModelView):
     can_delete = False
     can_edit = False
     column_formatters = {
-        "study": lambda v, c, m, n: m.study.study_name if m.study else "?",
+        "study": lambda v, c, m, n: Markup(
+            f'<a href="{url_for("study_admin.details_view", id=m.study.id)}">'
+            f'{m.study.study_name}</a>'
+        ) if m.study else "?",
         "optuna_score": lambda v, c, m, n: f"{m.optuna_score:.4f}" if m.optuna_score is not None else "—",
         "valid_loss": lambda v, c, m, n: f"{m.valid_loss:.4f}" if m.valid_loss is not None else "—",
         "valid_action_accuracy": lambda v, c, m, n: f"{m.valid_action_accuracy:.4f}" if m.valid_action_accuracy is not None else "—",
@@ -58,7 +72,6 @@ class TrialAdmin(ModelView):
     def _curves_link(self, context, model, name):
         if model.trial_dir is None:
             return "—"
-        from markupsafe import Markup
         study_name = model.study.study_name if model.study else "?"
         url = url_for("dashboard.trial_curves", study_name=study_name,
                       trial_num=model.trial_number)
