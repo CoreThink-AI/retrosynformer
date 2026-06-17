@@ -51,15 +51,13 @@ cpu = [
 
 # AMD ROCm GPU (Radeon / Strix Halo iGPU):
 #   uv sync --extra rocm
-#   uv sync --extra amdgpu  (alias)
 # Pinned to torch 2.5.1+rocm6.2 — verified working on taco (Ubuntu 25.10,
-# kernel 6.17, Strix Halo iGPU). rocm6.4/torch>=2.7.0 crashes that GPU.
+# kernel 6.17, Strix Halo iGPU). DO NOT upgrade to rocm6.4 or torch>=2.6 —
+# rocm6.4/torch>=2.7.0 crashes taco's Strix Halo iGPU.
 rocm = [
     "torch>=2.5.0,<2.6.0",
-    "pytorch-triton-rocm==3.1.0",
     "sympy==1.13.1",
 ]
-amdgpu = ["retrosynformer[rocm]"]
 
 # Inference REST API:  uv sync --extra serve
 serve = [
@@ -109,6 +107,8 @@ where = ["src"]
 # reaction-utils==1.9.3 declares rdkit<2024.0.0 but is runtime-compatible
 # with newer rdkit; override so we can use the current release.
 override-dependencies = ["rdkit>=2025.3.1"]
+# Declare torch extras as mutually exclusive so uv doesn't try to resolve
+# pytorch-cpu and pytorch-rocm indexes simultaneously.
 conflicts = [
   [
     { extra = "cpu" },
@@ -116,6 +116,15 @@ conflicts = [
     { extra = "cuda" },
   ],
 ]
+
+# pytorch-triton-rocm is bundled inside the torch+rocm6.2 wheel and is not
+# available as a separate download from any index.  This stub tells uv the
+# package exists so lock resolution succeeds; taco installs it via the torch
+# wheel, not as a separate package.
+[[tool.uv.dependency-metadata]]
+name = "pytorch-triton-rocm"
+version = "3.1.0"
+requires-dist = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -135,9 +144,6 @@ rdchiral = { path = "../rdchiral", editable = true }
 torch = [
     { index = "pytorch-rocm", extra = "rocm" },
     { index = "pytorch-cpu", extra = "cpu" },
-]
-pytorch-triton-rocm = [
-    { index = "pytorch-rocm", extra = "rocm" },
 ]
 
 [[tool.uv.index]]
