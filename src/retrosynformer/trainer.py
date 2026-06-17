@@ -384,6 +384,17 @@ class RetroTrainer:
                   f"({sum(solved_routes)}/{len(solved_routes)}) "
                   f"in {(time.time() - eval_start_time) / 60:.1f} min")
 
+        # Save the final checkpoint regardless of whether it is the best.
+        last_path = save_folder + "/model.last.pth"
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+        try:
+            os.close(tmp_fd)
+            torch.save(self.model.state_dict(), tmp_path)
+            os.replace(tmp_path, last_path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(
             save_folder + "/train_progress.jsonl",
