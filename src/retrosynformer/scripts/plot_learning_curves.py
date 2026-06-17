@@ -263,8 +263,21 @@ def main() -> None:
     param_cols = present_params + extra_params
 
     def _fmt(col: str, val) -> str:
-        if pd.isna(val):
-            return "-"
+        # Check for lists before pd.isna — isna raises ValueError on list inputs.
+        if isinstance(val, list):
+            return f"[{val[0]} ... {val[-1]}]" if len(val) > 3 else str(val)
+        if isinstance(val, str) and val.startswith("["):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list) and len(parsed) > 3:
+                    return f"[{parsed[0]} ... {parsed[-1]}]"
+            except (ValueError, json.JSONDecodeError):
+                pass
+        try:
+            if pd.isna(val):
+                return "-"
+        except (TypeError, ValueError):
+            pass
         if col == "lr":
             return f"{val:.2e}"
         if isinstance(val, float) and val == int(val):
