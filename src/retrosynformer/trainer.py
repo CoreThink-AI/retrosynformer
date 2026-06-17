@@ -333,13 +333,16 @@ class RetroTrainer:
 
         print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
         if verbose:
-            _hdr_prefix = []
-            if trial_number is not None:
-                _hdr_prefix.append("trial")
+            _hdr_prefix = [f"{'trial':>5}"] if trial_number is not None else []
             _hdr_suffix = ["study"] if study_name is not None else []
-            print("\t".join(_hdr_prefix + ["epoch", "t_loss", "t_acc", "t_racc",
-                                           "v_loss", "v_acc", "v_racc", "s/ep", "note"] + _hdr_suffix),
-                  flush=True)
+
+            def _print_header():
+                print("  ".join(_hdr_prefix + [
+                    f"{'epoch':>5}", f"{'t_loss':>7}", f"{'t_acc':>7}", f"{'t_racc':>7}",
+                    f"{'v_loss':>7}", f"{'v_acc':>7}", f"{'v_racc':>7}", f"{'s/ep':>6}", f"{'note':<4}",
+                ] + _hdr_suffix), flush=True)
+
+            _print_header()
 
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
@@ -427,22 +430,23 @@ class RetroTrainer:
             )
 
             if verbose:
+                if epoch != start_epoch and (epoch - start_epoch) % 10 == 0:
+                    _print_header()
                 _row_prefix = []
                 if trial_number is not None:
-                    _row_prefix.append(str(trial_number))
-                if study_name is not None:
-                    _row_prefix.append(str(study_name))
-                print("\t".join(_row_prefix + [
-                    str(epoch),
-                    f"{train_loss:.5f}",
-                    f"{train_action_accuracy:.5f}",
-                    f"{train_route_accuracy:.5f}",
-                    f"{valid_loss:.5f}",
-                    f"{valid_action_accuracy:.5f}",
-                    f"{valid_route_accuracy:.5f}",
-                    f"{seconds_this_epoch:.1f}",
-                    note,
-                ]), flush=True)
+                    _row_prefix.append(f"{trial_number:>5}")
+                _row_suffix = [str(study_name)] if study_name is not None else []
+                print("  ".join(_row_prefix + [
+                    f"{epoch:>5}",
+                    f"{train_loss:>7.5f}",
+                    f"{train_action_accuracy:>7.5f}",
+                    f"{train_route_accuracy:>7.5f}",
+                    f"{valid_loss:>7.5f}",
+                    f"{valid_action_accuracy:>7.5f}",
+                    f"{valid_route_accuracy:>7.5f}",
+                    f"{seconds_this_epoch:>6.1f}",
+                    f"{note:<4}",
+                ] + _row_suffix), flush=True)
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
