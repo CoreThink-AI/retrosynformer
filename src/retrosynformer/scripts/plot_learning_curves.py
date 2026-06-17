@@ -9,6 +9,7 @@ Usage
 -----
     rs-plot-learning-curves
     rs-plot-learning-curves --top 5 --metric valid_action_accuracy
+    rs-plot-learning-curves --metric valid_route_accuracy --metric train_route_accuracy --metric valid_action_accuracy
     rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
 """
 import argparse
@@ -16,9 +17,8 @@ import glob
 import json
 import os
 import sys
-from typing import Optional
-
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import pandas as pd
 import seaborn as sns
 
@@ -119,10 +119,12 @@ def main() -> None:
     )
     parser.add_argument("--top", type=int, default=10,
                         help="Number of top trials to plot (default: 10)")
-    parser.add_argument("--metric", default="valid_action_accuracy", choices=METRICS,
-                        help="Metric to rank by and plot on y-axis (default: valid_action_accuracy)")
+    parser.add_argument("--metric", action="append", dest="metrics",
+                        metavar="METRIC", choices=METRICS,
+                        help="Metric(s) to plot (repeat for multiple); trials are ranked by "
+                             "the first metric (default: valid_action_accuracy)")
     parser.add_argument("--also-train", action="store_true",
-                        help="Overlay the corresponding train_* metric as a dashed line")
+                        help="For each valid_* metric, also overlay the corresponding train_* metric")
     parser.add_argument("--xscale", default="linear", choices=["linear", "log", "symlog", "logit"],
                         help="X-axis scale (default: linear)")
     parser.add_argument("--yscale", default="log", choices=["linear", "log", "symlog", "logit"],
@@ -138,6 +140,16 @@ def main() -> None:
     parser.add_argument("--root", default=".",
                         help="Root directory for glob resolution (default: .)")
     args = parser.parse_args()
+
+    metrics: list[str] = args.metrics or ["valid_action_accuracy"]
+    if args.also_train:
+        extras = [
+            m.replace("valid_", "train_") for m in metrics
+            if m.startswith("valid_") and m.replace("valid_", "train_") not in metrics
+        ]
+        if not extras:
+            print("WARNING: --also-train has no effect (no valid_* metrics without a train counterpart already listed).")
+        metrics = metrics + extras
 
     paths = sorted(glob.glob(os.path.join(args.root, args.pattern), recursive=True))
     if not paths:
@@ -208,7 +220,7 @@ def main() -> None:
     # Rank by the selected --metric from the last contiguous training run.
     # Loss metrics: lower is better (min, sort ascending).
     # Accuracy metrics: higher is better (max, sort descending).
-    rank_metric = args.metric
+    rank_metric = metrics[0]
     rank_lower_is_better = "loss" in rank_metric
     # Default threshold of 0.2 only for valid_action_accuracy; other metrics have no default filter.
     min_score = args.min_score if args.min_score is not None else (0.2 if rank_metric == "valid_action_accuracy" else None)
@@ -285,13 +297,7 @@ def main() -> None:
         print(f"{fixed_part}  {param_part}")
     print()
 
-    # Derive the matching train_* metric for --also-train.
-    train_metric: Optional[str] = None
-    if args.also_train:
-        train_metric = args.metric.replace("valid_", "train_")
-        if train_metric == args.metric:
-            print("WARNING: --also-train has no effect for train_* metrics.")
-            train_metric = None
+    LINESTYLES = ["solid", "dashed", "dotted", "dashdot"]
 
     sns.set_theme(style="darkgrid", palette="tab10", font_scale=1.6)
     fig, ax = plt.subplots(figsize=(13, 6))
@@ -310,38 +316,53 @@ def main() -> None:
             print(f"  SKIP #{rank}: could not read {jsonl}: {exc}")
             continue
 
-        if args.metric not in progress.columns:
-            print(f"  SKIP #{rank}: column '{args.metric}' missing in {jsonl}")
+        if not any(m in progress.columns for m in metrics):
+            print(f"  SKIP #{rank}: none of {metrics} found in {jsonl}")
             continue
 
         color = palette[plotted % len(palette)]
         study_short = str(row["study_name"])
         if len(study_short) > 28:
             study_short = study_short[:25] + "..."
-        label = f"#{rank} t{int(row['original_trial'])} {study_short} ({metric_hdr}={row['rank_val']:.4f})"
 
-        ax.plot(progress["epoch"], progress[args.metric],
-                label=label, color=color, linewidth=5.0, alpha=0.5)
-
-        if train_metric and train_metric in progress.columns:
-            ax.plot(progress["epoch"], progress[train_metric],
-                    color=color, linewidth=2.8, linestyle="--", alpha=0.5)
+        for m_idx, metric in enumerate(metrics):
+            if metric not in progress.columns:
+                print(f"  SKIP #{rank} {metric}: column missing in {jsonl}")
+                continue
+            ls = LINESTYLES[m_idx % len(LINESTYLES)]
+            lw = 4.0 if m_idx == 0 else 2.5
+            # Only the first metric line per trial gets a legend entry.
+            label = (f"#{rank} t{int(row['original_trial'])} {study_short} ({metric_hdr}={row['rank_val']:.4f})"
+                     if m_idx == 0 else "_nolegend_")
+            ax.plot(progress["epoch"], progress[metric],
+                    label=label, color=color, linewidth=lw, linestyle=ls, alpha=0.5)
 
         plotted += 1
 
     if plotted == 0:
         sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
 
-    y_label = args.metric.replace("_", " ")
+    y_label = metrics[0].replace("_", " ") if len(metrics) == 1 else "metric value"
     ax.set_xlabel("Epoch")
     ax.set_ylabel(y_label)
     ax.set_xscale(args.xscale)
     ax.set_yscale(args.yscale)
-    title = f"Learning curves — top {plotted} trials by Optuna score  ({y_label})"
-    if train_metric:
-        title += f"\nsolid={args.metric}  dashed={train_metric}"
-    ax.set_title(title)
-    ax.legend(fontsize=9, loc="best", framealpha=0.8)
+    ax.set_title(f"Learning curves — top {plotted} trials by {rank_metric.replace('_', ' ')}")
+
+    if len(metrics) > 1:
+        # Two-part legend: trial colors (upper-left) + metric linestyles (lower-right).
+        trial_legend = ax.legend(fontsize=9, loc="upper left", framealpha=0.8)
+        ax.add_artist(trial_legend)
+        metric_handles = [
+            Line2D([0], [0], color="gray", linestyle=LINESTYLES[i % len(LINESTYLES)],
+                   linewidth=2.5, label=m.replace("_", " "))
+            for i, m in enumerate(metrics)
+        ]
+        ax.legend(handles=metric_handles, fontsize=9, loc="lower right",
+                  framealpha=0.8, title="metrics")
+    else:
+        ax.legend(fontsize=9, loc="best", framealpha=0.8)
+
     plt.tight_layout()
 
     if args.out:
