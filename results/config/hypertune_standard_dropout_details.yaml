@@ -25,9 +25,9 @@
 
 optuna:
   objective_metric: valid_route_accuracy
-  n_heads: [2, 4]
-  n_layers: [2, 3, 4, 6, 8, 12]
-  head_dim: [64, 128]
+  n_heads: [3, 4, 5]
+  n_layers: [6, 8, 10]
+  head_dim: [96, 128]
   lr:
     low: 2.0e-4
     high: 5.0e-3
@@ -44,7 +44,7 @@ optuna:
 
 context:
   building_blocks: data/standard_building_blocks.csv
-  random_state: 1
+  random_state: 2
   templates_path: data/standard_reaction_templates.pickle
 
 dataset:
