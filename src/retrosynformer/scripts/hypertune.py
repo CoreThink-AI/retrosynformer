@@ -58,6 +58,7 @@ import time
 
 import optuna
 
+import retrosynformer.trainer as _trainer_mod
 from retrosynformer.runner import main as train
 from retrosynformer.runner import read_config
 
@@ -122,10 +123,13 @@ OBJECTIVE_METRICS = {
 def _validate_config(config: dict) -> None:
     """Raise ValueError for known config inconsistencies before any trial starts.
 
-    Catches the case where the optuna search space includes
-    ``structured_dropout_bottleneck`` but ``model.use_structured_dropout`` is
-    False — the parameter would be sampled every trial yet never used.
-    Also validates ``optuna.objective_metric`` when present.
+    Checks:
+    - optuna.structured_dropout_bottleneck requires model.use_structured_dropout
+    - optuna.objective_metric must be a known metric name
+    - optuna.layer_shared_resid_dropout list-of-lists:
+        (a) non-jagged: all inner lists have the same length
+        (b) each list length >= the largest n_layers value in the search space
+        (c) all inner values are bools
     """
     optuna_cfg = config.get("optuna", {})
     optuna_keys = set(optuna_cfg)
@@ -144,6 +148,45 @@ def _validate_config(config: dict) -> None:
             f"Valid choices: {sorted(OBJECTIVE_METRICS)}"
         )
 
+    lsrd_spec = optuna_cfg.get("layer_shared_resid_dropout")
+    if lsrd_spec is not None and isinstance(lsrd_spec, list) and lsrd_spec and isinstance(lsrd_spec[0], list):
+        # (a) Non-jagged: all inner lists must have equal length
+        lengths = {len(lst) for lst in lsrd_spec}
+        if len(lengths) > 1:
+            raise ValueError(
+                f"optuna.layer_shared_resid_dropout list-of-lists is jagged: "
+                f"found inner lists of lengths {sorted(lengths)}. "
+                f"All lists must have the same length."
+            )
+        list_len = next(iter(lengths))
+
+        # (b) Length >= max n_layers in the optuna search space (or model default)
+        n_layers_spec = optuna_cfg.get("n_layers")
+        if n_layers_spec is None:
+            max_n_layers = config.get("model", {}).get("n_layers", 0)
+        elif isinstance(n_layers_spec, list):
+            max_n_layers = max(int(v) for v in n_layers_spec)
+        elif isinstance(n_layers_spec, dict):
+            max_n_layers = int(n_layers_spec.get("high", list_len))
+        else:
+            max_n_layers = int(n_layers_spec)
+        if list_len < max_n_layers:
+            raise ValueError(
+                f"optuna.layer_shared_resid_dropout inner lists have length {list_len} "
+                f"but the maximum n_layers in the search space is {max_n_layers}. "
+                f"Each list must be at least as long as the largest n_layers value "
+                f"(extra entries beyond the actual n_layers are truncated at runtime)."
+            )
+
+        # (c) All inner values must be bool or 0/1
+        for i, lst in enumerate(lsrd_spec):
+            invalid = [(j, v) for j, v in enumerate(lst) if v not in (True, False, 0, 1)]
+            if invalid:
+                raise ValueError(
+                    f"optuna.layer_shared_resid_dropout[{i}] contains values that are "
+                    f"not bool or 0/1: {invalid}"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Search-space dispatcher
@@ -152,16 +195,23 @@ def _validate_config(config: dict) -> None:
 def _suggest(trial: optuna.Trial, name: str, spec) -> object:
     """Dispatch to the appropriate trial.suggest_* based on the YAML spec.
 
-    Three forms are supported:
+    Four forms are supported:
 
-    1. List  →  suggest_categorical
+    1. Flat list  →  suggest_categorical
          n_heads: [1, 2, 4, 8]
 
-    2. Dict with choices key  →  suggest_categorical
+    2. List-of-lists  →  suggest_categorical over list choices
+       Each inner list is one complete choice; Optuna picks one per trial.
+       Inner lists are serialised to JSON strings for storage compatibility.
+         layer_shared_resid_dropout:
+           - [true, false, true, ...]
+           - [false, false, false, ...]
+
+    3. Dict with choices key  →  suggest_categorical
          n_heads:
            choices: [1, 2, 4, 8]
 
-    3. Dict with low/high  →  suggest_int or suggest_float
+    4. Dict with low/high  →  suggest_int or suggest_float
        Type is inferred: both int → suggest_int, otherwise suggest_float.
        Optional keys: log (bool), step (number).
          lr:
@@ -178,6 +228,15 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
            step: 0.01
     """
     if isinstance(spec, list):
+        # List-of-lists → categorical over list choices.
+        # Each inner list is serialised to a JSON string because Optuna's
+        # categorical storage requires hashable (scalar) choices.  The result
+        # is deserialised back to a Python list before being passed to runner.
+        if spec and isinstance(spec[0], list):
+            import json as _json
+            choices = [_json.dumps(lst, separators=(",", ":")) for lst in spec]
+            result = trial.suggest_categorical(name, choices)
+            return _json.loads(result)
         return trial.suggest_categorical(name, spec)
     if "choices" in spec:
         return trial.suggest_categorical(name, spec["choices"])
@@ -212,11 +271,6 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     trial_dir = os.path.join(results_base, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
 
-    _write({
-        "event": "trial_start",
-        "trial": {"number": trial.number, "dir": trial_dir},
-        "params": dict(trial.params),
-    }, run_jsonl)
     print(f"\n### Trial {trial.number} params")
     for k, v in trial.params.items():
         print(f"  {k}: {v}")
@@ -232,6 +286,18 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     if eval_n_batches is not None:
         model_params["eval_n_batches"] = eval_n_batches
     model_params.update(params)
+    # Keys that are control/path metadata — exclude from the all_params snapshot
+    # written to run.jsonl so that rs-plot-learning-curves can display fixed
+    # architecture params alongside Optuna-suggested ones.
+    _META_KEYS = {"config_path", "results_path", "eval_routes_at_end",
+                  "trial_number", "study_name", "eval_n_batches"}
+    _write({
+        "event": "trial_start",
+        "trial": {"number": trial.number, "dir": trial_dir},
+        "params": dict(trial.params),
+        "all_params": {k: v for k, v in model_params.items() if k not in _META_KEYS},
+        "optuna_keys": list(params.keys()),
+    }, run_jsonl)
     print("\n#### Model params")
     for k, v in model_params.items():
         print(f"    {k}: {v}")
@@ -346,9 +412,18 @@ def main():
             },
         }, run_jsonl)
 
+    def _objective_with_interrupt(trial):
+        # Register study.stop as the interrupt callback so a Ctrl-C stops the
+        # study after the current trial completes and its result is recorded.
+        _trainer_mod.set_interrupt_callback(study.stop)
+        try:
+            return objective(trial, args.config_path, args.n_epochs, args.dataset,
+                             results_base, run_jsonl, args.eval_n_batches, args.study_name)
+        finally:
+            _trainer_mod.clear_interrupt_callback()
+
     study.optimize(
-        lambda trial: objective(trial, args.config_path, args.n_epochs, args.dataset,
-                                results_base, run_jsonl, args.eval_n_batches, args.study_name),
+        _objective_with_interrupt,
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )
@@ -367,6 +442,9 @@ def main():
     print(f"  fraction_targets_solved: {best.value:.4f}")
     print(f"  params: {best.params}")
     print(f"  results: {os.path.join(results_base, f'trial_{best.number:03d}')}")
+
+    if _trainer_mod.is_interrupted():
+        raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

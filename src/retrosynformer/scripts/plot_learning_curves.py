@@ -9,6 +9,7 @@ Usage
 -----
     rs-plot-learning-curves
     rs-plot-learning-curves --top 5 --metric valid_action_accuracy
+    rs-plot-learning-curves --metric valid_route_accuracy --metric train_route_accuracy --metric valid_action_accuracy
     rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
 """
 import argparse
@@ -16,9 +17,8 @@ import glob
 import json
 import os
 import sys
-from typing import Optional
-
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import pandas as pd
 import seaborn as sns
 
@@ -108,6 +108,28 @@ def _jsonl_path(trial_base_dir: str, trial_number: int) -> str:
     return os.path.join(trial_base_dir, f"trial_{int(trial_number):03d}", "train_progress.jsonl")
 
 
+def _load_run_params(trial_base_dir: str) -> dict[int, tuple[dict, list[str]]]:
+    """Read run.jsonl and return {trial_num: (all_params, optuna_keys)} for trial_start events."""
+    path = os.path.join(trial_base_dir, "run.jsonl")
+    result: dict[int, tuple[dict, list[str]]] = {}
+    if not os.path.exists(path):
+        return result
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("event") == "trial_start" and "all_params" in rec:
+                n = rec.get("trial", {}).get("number")
+                if n is not None:
+                    result[int(n)] = (rec["all_params"], rec.get("optuna_keys", []))
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -119,10 +141,12 @@ def main() -> None:
     )
     parser.add_argument("--top", type=int, default=10,
                         help="Number of top trials to plot (default: 10)")
-    parser.add_argument("--metric", default="valid_action_accuracy", choices=METRICS,
-                        help="Metric to rank by and plot on y-axis (default: valid_action_accuracy)")
+    parser.add_argument("--metric", action="append", dest="metrics",
+                        metavar="METRIC", choices=METRICS,
+                        help="Metric(s) to plot (repeat for multiple); trials are ranked by "
+                             "the first metric (default: valid_action_accuracy)")
     parser.add_argument("--also-train", action="store_true",
-                        help="Overlay the corresponding train_* metric as a dashed line")
+                        help="For each valid_* metric, also overlay the corresponding train_* metric")
     parser.add_argument("--xscale", default="linear", choices=["linear", "log", "symlog", "logit"],
                         help="X-axis scale (default: linear)")
     parser.add_argument("--yscale", default="log", choices=["linear", "log", "symlog", "logit"],
@@ -138,6 +162,16 @@ def main() -> None:
     parser.add_argument("--root", default=".",
                         help="Root directory for glob resolution (default: .)")
     args = parser.parse_args()
+
+    metrics: list[str] = args.metrics or ["valid_action_accuracy"]
+    if args.also_train:
+        extras = [
+            m.replace("valid_", "train_") for m in metrics
+            if m.startswith("valid_") and m.replace("valid_", "train_") not in metrics
+        ]
+        if not extras:
+            print("WARNING: --also-train has no effect (no valid_* metrics without a train counterpart already listed).")
+        metrics = metrics + extras
 
     paths = sorted(glob.glob(os.path.join(args.root, args.pattern), recursive=True))
     if not paths:
@@ -208,7 +242,7 @@ def main() -> None:
     # Rank by the selected --metric from the last contiguous training run.
     # Loss metrics: lower is better (min, sort ascending).
     # Accuracy metrics: higher is better (max, sort descending).
-    rank_metric = args.metric
+    rank_metric = metrics[0]
     rank_lower_is_better = "loss" in rank_metric
     # Default threshold of 0.2 only for valid_action_accuracy; other metrics have no default filter.
     min_score = args.min_score if args.min_score is not None else (0.2 if rank_metric == "valid_action_accuracy" else None)
@@ -241,6 +275,26 @@ def main() -> None:
             sys.exit(f"No completed trials with {filter_desc}.")
     top = all_trials.head(args.top)
 
+    # Supplement Optuna trial params with fixed architecture params from run.jsonl.
+    _run_cache: dict[str, dict[int, tuple[dict, list[str]]]] = {}
+    for tbd in top["trial_base_dir"].unique():
+        _run_cache[str(tbd)] = _load_run_params(str(tbd))
+
+    optuna_col_set: set[str] = set()
+    new_cols: set[str] = set()
+    for _, row in top.iterrows():
+        all_p, okeys = _run_cache.get(str(row["trial_base_dir"]), {}).get(int(row["original_trial"]), ({}, []))
+        new_cols.update(all_p.keys())
+        optuna_col_set.update(okeys)
+
+    for col in new_cols:
+        if col not in top.columns:
+            top[col] = top.apply(
+                lambda r, c=col: _run_cache.get(str(r["trial_base_dir"]), {})
+                    .get(int(r["original_trial"]), ({}, []))[0].get(c),
+                axis=1,
+            )
+
     # Param columns present across the top trials (exclude bookkeeping columns).
     _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
                   "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial", "jsonl_path"}
@@ -250,9 +304,25 @@ def main() -> None:
     extra_params = [c for c in top.columns if c not in _non_param and c not in present_params]
     param_cols = present_params + extra_params
 
+    def _hdr(c: str) -> str:
+        return c + "*" if c in optuna_col_set else c
+
     def _fmt(col: str, val) -> str:
-        if pd.isna(val):
-            return "-"
+        # Check for lists before pd.isna — isna raises ValueError on list inputs.
+        if isinstance(val, list):
+            return f"[{val[0]} ... {val[-1]}]" if len(val) > 3 else str(val)
+        if isinstance(val, str) and val.startswith("["):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list) and len(parsed) > 3:
+                    return f"[{parsed[0]} ... {parsed[-1]}]"
+            except (ValueError, json.JSONDecodeError):
+                pass
+        try:
+            if pd.isna(val):
+                return "-"
+        except (TypeError, ValueError):
+            pass
         if col == "lr":
             return f"{val:.2e}"
         if isinstance(val, float) and val == int(val):
@@ -266,11 +336,11 @@ def main() -> None:
     col_w = max(len(metric_hdr), 9)
     direction = "↑" if not rank_lower_is_better else "↓"
     fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'ep':>4}  {'trial':>5}  {'study':<40}"
-    param_hdr = "  ".join(f"{c:<{max(len(c),6)}}" for c in param_cols)
+    param_hdr = "  ".join(f"{_hdr(c):<{max(len(_hdr(c)),6)}}" for c in param_cols)
     print(f"Top {len(top)} completed trials by {rank_metric}:")
     print(f"{fixed_hdr}  {param_hdr}")
     print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'----':>4}  {'-----':>5}  {'-'*40}  " +
-          "  ".join("-" * max(len(c), 6) for c in param_cols))
+          "  ".join("-" * max(len(_hdr(c)), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
         study_short = str(row["study_name"])[:40]
@@ -280,18 +350,12 @@ def main() -> None:
                       f"{optuna_score}  {n_ep:>4}  "
                       f"{int(row['original_trial']):>5}  {study_short:<40}")
         param_part = "  ".join(
-            f"{_fmt(c, row[c]):<{max(len(c),6)}}" for c in param_cols
+            f"{_fmt(c, row[c]):<{max(len(_hdr(c)),6)}}" for c in param_cols
         )
         print(f"{fixed_part}  {param_part}")
     print()
 
-    # Derive the matching train_* metric for --also-train.
-    train_metric: Optional[str] = None
-    if args.also_train:
-        train_metric = args.metric.replace("valid_", "train_")
-        if train_metric == args.metric:
-            print("WARNING: --also-train has no effect for train_* metrics.")
-            train_metric = None
+    LINESTYLES = ["solid", "dashed", "dotted", "dashdot"]
 
     sns.set_theme(style="darkgrid", palette="tab10", font_scale=1.6)
     fig, ax = plt.subplots(figsize=(13, 6))
@@ -310,38 +374,53 @@ def main() -> None:
             print(f"  SKIP #{rank}: could not read {jsonl}: {exc}")
             continue
 
-        if args.metric not in progress.columns:
-            print(f"  SKIP #{rank}: column '{args.metric}' missing in {jsonl}")
+        if not any(m in progress.columns for m in metrics):
+            print(f"  SKIP #{rank}: none of {metrics} found in {jsonl}")
             continue
 
         color = palette[plotted % len(palette)]
         study_short = str(row["study_name"])
         if len(study_short) > 28:
             study_short = study_short[:25] + "..."
-        label = f"#{rank} t{int(row['original_trial'])} {study_short} ({metric_hdr}={row['rank_val']:.4f})"
 
-        ax.plot(progress["epoch"], progress[args.metric],
-                label=label, color=color, linewidth=5.0, alpha=0.5)
-
-        if train_metric and train_metric in progress.columns:
-            ax.plot(progress["epoch"], progress[train_metric],
-                    color=color, linewidth=2.8, linestyle="--", alpha=0.5)
+        for m_idx, metric in enumerate(metrics):
+            if metric not in progress.columns:
+                print(f"  SKIP #{rank} {metric}: column missing in {jsonl}")
+                continue
+            ls = LINESTYLES[m_idx % len(LINESTYLES)]
+            lw = 4.0 if m_idx == 0 else 2.5
+            # Only the first metric line per trial gets a legend entry.
+            label = (f"#{rank} t{int(row['original_trial'])} {study_short} ({metric_hdr}={row['rank_val']:.4f})"
+                     if m_idx == 0 else "_nolegend_")
+            ax.plot(progress["epoch"], progress[metric],
+                    label=label, color=color, linewidth=lw, linestyle=ls, alpha=0.5)
 
         plotted += 1
 
     if plotted == 0:
         sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
 
-    y_label = args.metric.replace("_", " ")
+    y_label = metrics[0].replace("_", " ") if len(metrics) == 1 else "metric value"
     ax.set_xlabel("Epoch")
     ax.set_ylabel(y_label)
     ax.set_xscale(args.xscale)
     ax.set_yscale(args.yscale)
-    title = f"Learning curves — top {plotted} trials by Optuna score  ({y_label})"
-    if train_metric:
-        title += f"\nsolid={args.metric}  dashed={train_metric}"
-    ax.set_title(title)
-    ax.legend(fontsize=9, loc="best", framealpha=0.8)
+    ax.set_title(f"Learning curves — top {plotted} trials by {rank_metric.replace('_', ' ')}")
+
+    if len(metrics) > 1:
+        # Two-part legend: trial colors (upper-left) + metric linestyles (lower-right).
+        trial_legend = ax.legend(fontsize=9, loc="upper left", framealpha=0.8)
+        ax.add_artist(trial_legend)
+        metric_handles = [
+            Line2D([0], [0], color="gray", linestyle=LINESTYLES[i % len(LINESTYLES)],
+                   linewidth=2.5, label=m.replace("_", " "))
+            for i, m in enumerate(metrics)
+        ]
+        ax.legend(handles=metric_handles, fontsize=9, loc="lower right",
+                  framealpha=0.8, title="metrics")
+    else:
+        ax.legend(fontsize=9, loc="best", framealpha=0.8)
+
     plt.tight_layout()
 
     if args.out:

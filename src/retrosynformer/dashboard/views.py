@@ -14,7 +14,7 @@ from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .extensions import limiter
-from .models import Study, Trial, db
+from .models import EpochRecord, Study, Trial, TrialHyperparams, db
 from .sync import sync_all, sync_study
 
 # Used as the comparison target when the submitted username doesn't match,
@@ -109,6 +109,67 @@ class TrialAdmin(ModelView):
         "optuna_score", "valid_loss", "valid_action_accuracy",
         "valid_route_accuracy", "fraction_targets_solved", "duration_min",
     ]
+
+
+class EpochRecordAdmin(ModelView):
+    """Per-epoch learning curve rows from train_progress.jsonl."""
+    column_list = [
+        "trial_id", "epoch", "train_loss", "train_action_accuracy",
+        "valid_loss", "valid_action_accuracy", "valid_route_accuracy",
+        "seconds_per_epoch", "lr",
+    ]
+    column_sortable_list = [
+        "trial_id", "epoch", "train_loss", "valid_loss",
+        "valid_action_accuracy", "valid_route_accuracy",
+    ]
+    column_filters = ["trial_id", "epoch", "valid_action_accuracy"]
+    column_default_sort = [("trial_id", False), ("epoch", False)]
+    can_create = False
+    can_delete = False
+    can_edit = False
+    column_formatters = {
+        k: (lambda v, c, m, n, _k=k: f"{getattr(m, _k):.4f}" if getattr(m, _k) is not None else "—")
+        for k in ("train_loss", "train_action_accuracy", "valid_loss",
+                  "valid_action_accuracy", "valid_route_accuracy", "lr")
+    }
+
+
+class TrialHyperparamsAdmin(ModelView):
+    """Flat hyperparameter table with completeness flags (mirrors all_hyperparams.csv)."""
+    column_list = [
+        "trial_id",
+        "incomplete_reason", "is_incomplete", "is_early_stopped", "is_jsonl_unreliable",
+        "cfg_dataset", "cfg_n_heads", "cfg_n_layers", "cfg_head_dim",
+        "cfg_attn_pdrop", "cfg_embd_pdrop", "cfg_resid_pdrop",
+        "cfg_lr", "cfg_n_epochs",
+        "jsonl_last_epoch", "total_jsonl_epochs", "epoch_ran_fraction",
+        "max_complete_epoch_in_study",
+        "estimated_valid_action_accuracy", "estimated_valid_route_accuracy",
+        "git_hash_short", "git_message",
+        "synced_at",
+    ]
+    column_sortable_list = [
+        "trial_id", "incomplete_reason", "cfg_dataset",
+        "cfg_n_heads", "cfg_n_layers", "cfg_head_dim",
+        "cfg_attn_pdrop", "cfg_lr", "cfg_n_epochs",
+        "jsonl_last_epoch", "epoch_ran_fraction",
+        "estimated_valid_action_accuracy",
+    ]
+    column_filters = [
+        "incomplete_reason", "is_incomplete", "is_jsonl_unreliable",
+        "cfg_dataset", "cfg_n_heads", "cfg_n_layers",
+    ]
+    column_default_sort = ("trial_id", False)
+    can_create = False
+    can_delete = False
+    can_edit = False
+    can_view_details = True
+    column_formatters = {
+        k: (lambda v, c, m, n, _k=k: f"{getattr(m, _k):.4f}" if getattr(m, _k) is not None else "—")
+        for k in ("cfg_lr", "cfg_attn_pdrop", "cfg_embd_pdrop", "cfg_resid_pdrop",
+                  "epoch_ran_fraction",
+                  "estimated_valid_action_accuracy", "estimated_valid_route_accuracy")
+    }
 
 
 # ---------------------------------------------------------------------------

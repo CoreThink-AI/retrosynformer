@@ -5,6 +5,72 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.13] — 2026-06-17
+
+**`rs-plot-learning-curves`: multiple `--metric` flags; fixed params in trial table; Optuna params marked with `*`.**
+
+- `--metric` now accepts multiple values (repeat the flag); trials ranked by first metric; each metric drawn with a distinct linestyle; two-part legend (trial colors + metric linestyles) when multiple metrics are active.
+- `--also-train` extended: inserts `train_*` counterparts for each `valid_*` metric not already listed.
+- `hypertune.py`: `trial_start` record in `run.jsonl` now includes `all_params` (full resolved config minus path/control metadata) and `optuna_keys` (params actually suggested by Optuna).
+- Plot script reads `run.jsonl` to supplement Optuna trial params with fixed architecture values (`n_heads`, `n_layers`, `head_dim`, `lr`, etc.); Optuna-searched column headers are suffixed with `*`.
+- Long list params (e.g. `layer_shared_resid_dropout`) summarised as `[first ... last]` in the trial table.
+
+[Full notes](docs/release-notes-0.1.13.md)
+
+---
+
+## [0.1.12] — 2026-06-17
+
+**Removed rs-bump command and anthropic API dependency.**
+
+- Deleted `scripts/bump.py` and `src/retrosynformer/scripts/bump.py`.
+- Removed `rs-bump` and `bump` entry points from `[project.scripts]`.
+- Removed `anthropic>=0.25` from the `[dev]` extra.
+
+---
+
+## [0.1.11] — 2026-06-17
+
+**Fixed verbose training column alignment; header reprints every 10 epochs.**
+
+- `study_name` was prepended to each row (before `epoch`) but the header printed it as a suffix (after `note`) — both now use suffix position.
+- Replaced tab-separated columns with fixed-width space-aligned format (`>5` epoch/trial, `>7` loss/accuracy, `>6` s/ep, `<4` note).
+- Header row reprints automatically every 10 epochs relative to `start_epoch`, keeping labels visible during long runs.
+- Extracted header print into a `_print_header()` closure so the format is defined once.
+
+[Full notes](docs/release-notes-0.1.11.md)
+
+---
+
+## [0.1.10] — 2026-06-17
+
+**Graceful Ctrl-C: route eval and study.db write before stopping.**
+
+- First Ctrl-C finishes the current epoch, runs route evaluation, returns normally so Optuna records the trial result to `study.db`, then raises `KeyboardInterrupt`.
+- Second Ctrl-C within 1 second raises `KeyboardInterrupt` immediately.
+- `trainer.py`: `_handle_sigint`, `set/clear_interrupt_callback`, `is_interrupted`; handler installed/restored in `train()` via `try/finally`; interrupt flag checked at end of epoch loop, forces `eval_routes_at_end=True`.
+- `hypertune.py`: `_objective_with_interrupt` wrapper registers `study.stop` as callback; raises `KeyboardInterrupt` after `study.optimize()` if interrupted.
+- `runner.py`: raises `KeyboardInterrupt` after `train()` if interrupted (`rs-train`).
+
+[Full notes](docs/release-notes-0.1.10.md)
+
+---
+
+## [0.1.9] — 2026-06-17
+
+**Layer-shared residual dropout; atomic per-epoch checkpointing.**
+
+- New `src/retrosynformer/dropout.py`: `SharedResidMaskDropout` + `apply_layer_shared_resid_dropout` — ties the attention and MLP residual masks within each transformer block via a forward pre-hook; no new parameters, `load_state_dict` unaffected.
+- Config key `model.layer_shared_resid_dropout`: scalar `bool` for uniform application or `list[bool]` for per-layer control; `0`/`1` accepted as aliases throughout.
+- Optuna list-of-lists support: specify multiple `layer_shared_resid_dropout` patterns as discrete categorical choices; inner lists JSON-serialised for Optuna storage compatibility.
+- Pre-flight validation in `runner` and `hypertune`: non-jagged check, length ≥ max `n_layers`, valid-value check.
+- New `results/config/small_nonuniform_dropout.yaml`: fixed best-trial architecture, four dropout-pattern choices, small dataset, 50 epochs.
+- Trainer: `model.last.pth` written atomically after every epoch; `model.pth` copied from it (not re-serialised) when a new best-loss is achieved; eliminates partial-read risk during concurrent rsync.
+
+[Full notes](docs/release-notes-0.1.9.md)
+
+---
+
 ## [0.1.8] — 2026-06-16
 
 **Training dashboard, trial status CLI, ntfy.sh alerter, ROCm pin fixes.**

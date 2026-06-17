@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
 
 from .data import RouteDatasetTorch, collate_fn
+from . import trainer as _trainer_mod
 from .trainer import RetroTrainer
 from .utils import evaluation, reward_functions, utils
 
@@ -184,6 +185,38 @@ def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
     return train_dataloader, valid_dataloader, test_dataloader
 
 
+def _validate_layer_shared_resid_dropout(config: dict) -> None:
+    """Validate model.layer_shared_resid_dropout before any training run.
+
+    Rules:
+    - Must be a list of bools (not a bare bool — use a list for clarity).
+    - Length must be >= model.n_layers (extra entries are truncated at runtime).
+    """
+    lsrd = config.get("model", {}).get("layer_shared_resid_dropout")
+    if lsrd is None:
+        return
+    n_layers = config.get("model", {}).get("n_layers", 0)
+    if not isinstance(lsrd, list):
+        raise ValueError(
+            f"model.layer_shared_resid_dropout must be a list of bools "
+            f"(got {type(lsrd).__name__!r}). "
+            f"Use e.g. layer_shared_resid_dropout: [true, false, true, ...]"
+        )
+    # Accept True/False or 0/1 — YAML parses bare integers as int, not bool.
+    invalid = [i for i, x in enumerate(lsrd) if x not in (True, False, 0, 1)]
+    if invalid:
+        raise ValueError(
+            f"model.layer_shared_resid_dropout contains values that are not "
+            f"bool or 0/1 at indices {invalid}: {[lsrd[i] for i in invalid]}"
+        )
+    if len(lsrd) < n_layers:
+        raise ValueError(
+            f"model.layer_shared_resid_dropout has {len(lsrd)} entries but "
+            f"model.n_layers={n_layers}. The list must be at least as long as "
+            f"n_layers (extra entries beyond n_layers are silently truncated)."
+        )
+
+
 def init_model(config, model_path=None):
 
     dt_config = DecisionTransformerConfig(bos_token_id=None, eos_token_id=None)
@@ -209,8 +242,23 @@ def init_model(config, model_path=None):
         print(f"Using StructuredDropoutDecisionTransformer (fp_dim={fp_dim}, bottleneck={bottleneck}, rate={rate})")
     else:
         model = DecisionTransformerModel(dt_config)
+
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=torch.device(DEVICE)))
+
+    lsrd = config["model"].get("layer_shared_resid_dropout")
+    if lsrd:
+        _validate_layer_shared_resid_dropout(config)
+        from .dropout import apply_layer_shared_resid_dropout
+        p = config["model"].get("resid_pdrop", 0.0)
+        n_layers = config["model"]["n_layers"]
+        # Truncate list to actual layer count (list may be longer by design)
+        flags = lsrd[:n_layers]
+        if len(lsrd) > n_layers:
+            print(f"layer_shared_resid_dropout: truncating list from {len(lsrd)} → {n_layers} entries")
+        n = apply_layer_shared_resid_dropout(model, p, flags=flags)
+        print(f"layer_shared_resid_dropout: tied resid masks in {n}/{n_layers} blocks (p={p})")
+
     return model
 
 
@@ -221,7 +269,7 @@ DATASET_CONFIGS = {
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, attn_pdrop=None, embd_pdrop=None, resid_pdrop=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, eval_routes_at_end=False, trial_number=None, study_name=None):
+def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, attn_pdrop=None, embd_pdrop=None, resid_pdrop=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, layer_shared_resid_dropout=None, eval_routes_at_end=False, trial_number=None, study_name=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -273,6 +321,13 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if resid_pdrop is not None:
         config["model"]["resid_pdrop"] = resid_pdrop
         print(f"resid_pdrop override: {resid_pdrop}")
+    if layer_shared_resid_dropout is not None:
+        # May be a list (from Optuna categorical) or a bool (from CLI flag)
+        if isinstance(layer_shared_resid_dropout, list):
+            config["model"]["layer_shared_resid_dropout"] = layer_shared_resid_dropout
+        else:
+            config["model"]["layer_shared_resid_dropout"] = bool(layer_shared_resid_dropout)
+        print(f"layer_shared_resid_dropout override: {layer_shared_resid_dropout}")
     if eval_n_batches is not None:
         config["evaluation"]["eval_n_batches"] = eval_n_batches
         print(f"eval_n_batches override: {eval_n_batches}")
@@ -349,6 +404,9 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
             evaluation.main(result_dir=result_dir)
         except Exception as exc:
             logger.error("Post-training evaluation failed (non-fatal): %s", exc)
+
+    if _trainer_mod.is_interrupted():
+        raise KeyboardInterrupt
 
     return (
         validation_loss,
@@ -450,6 +508,13 @@ if __name__ == "__main__":
         help="Global multiplier on learned structured-dropout probabilities (0=off, 1=default, >1=amplify)",
     )
     parser.add_argument(
+        "--layer-shared-resid-dropout",
+        action="store_true",
+        default=None,
+        dest="layer_shared_resid_dropout",
+        help="Tie the two resid_dropout masks within each layer (same mask for attention and MLP residuals)",
+    )
+    parser.add_argument(
         "--momentum",
         type=float,
         default=None,
@@ -473,4 +538,5 @@ if __name__ == "__main__":
         dropout=args.dropout,
         momentum=args.momentum,
         structured_dropout_rate=args.structured_dropout_rate,
+        layer_shared_resid_dropout=args.layer_shared_resid_dropout,
     )

@@ -1,5 +1,8 @@
 import json
 import os
+import shutil
+import signal
+import tempfile
 import time
 from datetime import datetime
 
@@ -9,6 +12,60 @@ from sklearn.metrics import accuracy_score
 
 from .inference import RoutePredictor
 from .utils import utils
+
+# ---------------------------------------------------------------------------
+# Graceful Ctrl-C handling
+#
+# On the first SIGINT the handler sets _interrupted and (optionally) calls
+# _stop_study_callback so Optuna does not start another trial.  The training
+# loop detects the flag at the end of each epoch, breaks, runs route eval,
+# and returns normally — allowing Optuna to record the trial result.
+#
+# A second SIGINT arriving within 1 second of the first restores the original
+# handler and re-raises immediately (no waiting for the epoch to finish).
+# ---------------------------------------------------------------------------
+
+_interrupted: bool = False
+_last_interrupt_time: float = 0.0
+_stop_study_callback = None   # optional callable, e.g. study.stop
+_original_sigint = signal.SIG_DFL
+
+
+def set_interrupt_callback(fn) -> None:
+    """Register a zero-argument callable invoked on the first Ctrl-C (e.g. study.stop)."""
+    global _stop_study_callback
+    _stop_study_callback = fn
+
+
+def clear_interrupt_callback() -> None:
+    global _stop_study_callback
+    _stop_study_callback = None
+
+
+def is_interrupted() -> bool:
+    """True if training was stopped by Ctrl-C (check after train() returns)."""
+    return _interrupted
+
+
+def _handle_sigint(signum, frame):
+    global _interrupted, _last_interrupt_time, _original_sigint
+    now = time.time()
+    if now - _last_interrupt_time < 1.0:
+        # Second Ctrl-C within 1 s — restore original handler and raise immediately.
+        signal.signal(signal.SIGINT, _original_sigint)
+        raise KeyboardInterrupt
+    _last_interrupt_time = now
+    _interrupted = True
+    print(
+        "\n[trainer] Ctrl-C caught — finishing current epoch and running route "
+        "evaluation before stopping. Hit Ctrl-C again within 1 s to abort immediately.",
+        flush=True,
+    )
+    if _stop_study_callback is not None:
+        try:
+            _stop_study_callback()
+        except Exception:
+            pass
 
 
 class RetroTrainer:
@@ -202,6 +259,24 @@ class RetroTrainer:
 
     def train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
               trial_number=None, study_name=None):
+        global _interrupted, _last_interrupt_time, _original_sigint
+        _interrupted = False
+        _last_interrupt_time = 0.0
+        _original_sigint = signal.signal(signal.SIGINT, _handle_sigint)
+
+        try:
+            return self._train(
+                verbose=verbose,
+                start_epoch=start_epoch,
+                eval_routes_at_end=eval_routes_at_end,
+                trial_number=trial_number,
+                study_name=study_name,
+            )
+        finally:
+            signal.signal(signal.SIGINT, _original_sigint)
+
+    def _train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
+               trial_number=None, study_name=None):
         time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
@@ -258,13 +333,16 @@ class RetroTrainer:
 
         print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
         if verbose:
-            _hdr_prefix = []
-            if trial_number is not None:
-                _hdr_prefix.append("trial")
+            _hdr_prefix = [f"{'trial':>5}"] if trial_number is not None else []
             _hdr_suffix = ["study"] if study_name is not None else []
-            print("\t".join(_hdr_prefix + ["epoch", "t_loss", "t_acc", "t_racc",
-                                           "v_loss", "v_acc", "v_racc", "s/ep", "note"] + _hdr_suffix),
-                  flush=True)
+
+            def _print_header():
+                print("  ".join(_hdr_prefix + [
+                    f"{'epoch':>5}", f"{'t_loss':>7}", f"{'t_acc':>7}", f"{'t_racc':>7}",
+                    f"{'v_loss':>7}", f"{'v_acc':>7}", f"{'v_racc':>7}", f"{'s/ep':>6}", f"{'note':<4}",
+                ] + _hdr_suffix), flush=True)
+
+            _print_header()
 
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
@@ -284,11 +362,31 @@ class RetroTrainer:
 
             seconds_this_epoch = time.time() - epoch_start
 
-            # Save model before printing so the note column reflects this epoch's outcome.
+            # Always write model.last.pth at the end of every epoch so the
+            # final weights are available regardless of which epoch was best.
+            last_path = save_folder + "/model.last.pth"
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+            try:
+                os.close(tmp_fd)
+                torch.save(self.model.state_dict(), tmp_path)
+                os.replace(tmp_path, last_path)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
+
+            # When this epoch is the new best, copy model.last.pth → model.pth
+            # atomically — avoids serialising state_dict a second time.
             if valid_loss < lowest_valid_loss:
                 model_path = save_folder + "/model.pth"
                 lowest_valid_loss = valid_loss
-                torch.save(self.model.state_dict(), model_path)
+                tmp_fd2, tmp_path2 = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+                try:
+                    os.close(tmp_fd2)
+                    shutil.copyfile(last_path, tmp_path2)
+                    os.replace(tmp_path2, model_path)
+                except Exception:
+                    os.unlink(tmp_path2)
+                    raise
                 epochs_no_improve = 0
                 note = "*"
             else:
@@ -332,22 +430,23 @@ class RetroTrainer:
             )
 
             if verbose:
+                if epoch != start_epoch and (epoch - start_epoch) % 10 == 0:
+                    _print_header()
                 _row_prefix = []
                 if trial_number is not None:
-                    _row_prefix.append(str(trial_number))
-                if study_name is not None:
-                    _row_prefix.append(str(study_name))
-                print("\t".join(_row_prefix + [
-                    str(epoch),
-                    f"{train_loss:.5f}",
-                    f"{train_action_accuracy:.5f}",
-                    f"{train_route_accuracy:.5f}",
-                    f"{valid_loss:.5f}",
-                    f"{valid_action_accuracy:.5f}",
-                    f"{valid_route_accuracy:.5f}",
-                    f"{seconds_this_epoch:.1f}",
-                    note,
-                ]), flush=True)
+                    _row_prefix.append(f"{trial_number:>5}")
+                _row_suffix = [str(study_name)] if study_name is not None else []
+                print("  ".join(_row_prefix + [
+                    f"{epoch:>5}",
+                    f"{train_loss:>7.5f}",
+                    f"{train_action_accuracy:>7.5f}",
+                    f"{train_route_accuracy:>7.5f}",
+                    f"{valid_loss:>7.5f}",
+                    f"{valid_action_accuracy:>7.5f}",
+                    f"{valid_route_accuracy:>7.5f}",
+                    f"{seconds_this_epoch:>6.1f}",
+                    f"{note:<4}",
+                ] + _row_suffix), flush=True)
 
             with open(progress_path, "a") as f:
                 f.write(json.dumps(record) + "\n")
@@ -356,6 +455,11 @@ class RetroTrainer:
 
             if patience > 0 and epochs_no_improve >= patience:
                 print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
+                break
+
+            if _interrupted:
+                print(f"[trainer] Stopped after epoch {epoch} (Ctrl-C). Running final route eval before exit.")
+                eval_routes_at_end = True
                 break
 
         # Run final route evaluation when explicitly requested (hypertune) or
