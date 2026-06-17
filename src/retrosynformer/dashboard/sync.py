@@ -5,10 +5,13 @@ derived cache rebuilt by sync_all() / sync_study().
 """
 import json
 import os
-from datetime import datetime
+import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .models import Study, Trial, db
+import yaml
+
+from .models import EpochRecord, Study, Trial, TrialHyperparams, db
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +90,114 @@ def _final_metrics_from_jsonl(trial_dir: str) -> dict:
         "valid_route_accuracy": last.get("valid_route_accuracy"),
         "epoch_count": last.get("epoch", 0) + 1,
     }
+
+
+def _read_jsonl_full(jsonl_path: str) -> tuple[list[dict], int]:
+    """Return (last_run_records, total_line_count) from train_progress.jsonl.
+
+    last_run_records is the last contiguous epoch sequence (restart detection:
+    if epoch numbers go backwards we discard all prior records).
+    total_line_count is the raw count of all valid JSON lines in the file.
+    """
+    if not os.path.exists(jsonl_path):
+        return [], 0
+    records = []
+    with open(jsonl_path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    total = len(records)
+    if not records:
+        return [], 0
+    last_reset = 0
+    for i in range(1, len(records)):
+        if records[i].get("epoch", i) <= records[i - 1].get("epoch", i - 1):
+            last_reset = i
+    return records[last_reset:], total
+
+
+def _load_config_flat(trial_dir: str) -> dict:
+    """Load model.config.yaml for a trial and extract the hyperparameter fields."""
+    cfg_path = os.path.join(trial_dir, "model.config.yaml")
+    if not os.path.exists(cfg_path):
+        return {}
+    try:
+        cfg = yaml.safe_load(Path(cfg_path).read_text()) or {}
+    except Exception:
+        return {}
+    m = cfg.get("model", {})
+    t = cfg.get("train", {})
+    d = cfg.get("dataset", {})
+    o = cfg.get("optimizer", {})
+    r = cfg.get("reward", {})
+    ev = cfg.get("evaluation", {})
+    ctx = cfg.get("context", {})
+    action_dim = d.get("action_dim")
+    dataset_label = {589: "small", 1573: "standard", 2957: "large"}.get(action_dim, str(action_dim))
+    return {
+        "cfg_n_heads": m.get("n_heads"),
+        "cfg_n_layers": m.get("n_layers"),
+        "cfg_head_dim": m.get("head_dim"),
+        "cfg_hidden_size": m.get("hidden_size"),
+        "cfg_max_ep_len": m.get("max_ep_len"),
+        "cfg_activation_function": m.get("activation_function"),
+        "cfg_action_tanh": m.get("action_tanh"),
+        "cfg_attn_pdrop": m.get("attn_pdrop"),
+        "cfg_embd_pdrop": m.get("embd_pdrop"),
+        "cfg_resid_pdrop": m.get("resid_pdrop"),
+        "cfg_use_structured_dropout": m.get("use_structured_dropout", False),
+        "cfg_structured_dropout_bottleneck": m.get("structured_dropout_bottleneck"),
+        "cfg_structured_dropout_rate": m.get("structured_dropout_rate"),
+        "cfg_lr": o.get("lr"),
+        "cfg_momentum": o.get("momentum"),
+        "cfg_batch_size": t.get("batch_size"),
+        "cfg_n_epochs": t.get("n_epochs"),
+        "cfg_early_stopping_patience": t.get("early_stopping_patience"),
+        "cfg_lr_scheduler_patience": t.get("lr_scheduler_patience"),
+        "cfg_loss": t.get("loss"),
+        "cfg_action_dim": action_dim,
+        "cfg_dataset": dataset_label,
+        "cfg_fp_dim": d.get("fp_dim"),
+        "cfg_n_in_state": d.get("n_in_state"),
+        "cfg_valid_set": d.get("valid_set"),
+        "cfg_random_state": ctx.get("random_state"),
+        "cfg_bb_reward": r.get("building_block_reward_factor"),
+        "cfg_dead_end_reward": r.get("dead_end_reward_factor"),
+        "cfg_intermediate_reward": r.get("intermediate_reward_factor"),
+        "cfg_beam_width": ev.get("beam_width"),
+        "cfg_eval_routes_frequency": ev.get("eval_routes_frequency"),
+    }
+
+
+def _git_hash_for_time(study_start: datetime, repo_root: str) -> tuple[str | None, str | None]:
+    """Most-recent git commit at least 1 min before study_start. Returns (hash, subject)."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--all", "--format=%aI|%H|%s"],
+            capture_output=True, text=True, cwd=repo_root, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None, None
+    if study_start.tzinfo is None:
+        study_start = study_start.replace(tzinfo=timezone.utc)
+    cutoff = study_start - timedelta(minutes=1)
+    best_hash = best_msg = None
+    best_dt = None
+    for line in result.stdout.strip().splitlines():
+        if "|" not in line:
+            continue
+        ts_str, h, msg = line.split("|", 2)
+        try:
+            dt = datetime.fromisoformat(ts_str.strip()).astimezone(timezone.utc)
+        except ValueError:
+            continue
+        if dt <= cutoff and (best_dt is None or dt > best_dt):
+            best_dt, best_hash, best_msg = dt, h.strip(), msg.strip()
+    return best_hash, best_msg
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +359,36 @@ def sync_study(db_path: str, root: str, force: bool = False) -> bool:
             existing.config_path = cpath
             break
 
+    # Compute git hash once per study using the earliest trial start time
+    starts = [t["datetime_start"] for t in info["trials"] if t["datetime_start"] is not None]
+    study_start = min(
+        (datetime.fromisoformat(str(s)) if not isinstance(s, datetime) else s)
+        for s in starts
+    ) if starts else None
+    git_hash = git_message = None
+    if study_start:
+        repo_root = os.path.abspath(os.path.join(root, ".."))
+        git_hash, git_message = _git_hash_for_time(study_start, repo_root)
+
     # Sync trials
     _sync_trials(existing, info["trials"], study_dir, root)
+    # Sync epoch records and hyperparams for each trial
+    db.session.flush()   # ensure trial PKs are assigned
+    trial_map = {
+        t["trial_number"]: t for t in info["trials"]
+    }
+    for trial_row in Trial.query.filter_by(study_id=existing.id).all():
+        if trial_row.trial_dir and os.path.isdir(trial_row.trial_dir):
+            _sync_epoch_records(trial_row, trial_row.trial_dir)
+            opt_params = {}
+            ot = trial_map.get(trial_row.trial_number, {})
+            if ot:
+                opt_params = ot.get("params", {})
+            _sync_trial_hyperparams(trial_row, trial_row.trial_dir,
+                                    git_hash, git_message, opt_params)
+    # Completeness analysis requires all hyperparams rows to exist first
+    db.session.flush()
+    _compute_completeness_for_study(existing)
 
     # Recompute aggregates
     complete = [t for t in info["trials"] if t["state"] == "COMPLETE"]
@@ -338,3 +477,142 @@ def _sync_trials(study_row: Study, optuna_trials: list[dict],
             t.fraction_targets_solved = _best_fraction_solved(
                 os.path.join(t.trial_dir, "pred_routes_train_progress.json")
             )
+
+
+def _sync_epoch_records(trial_row: Trial, trial_dir: str) -> None:
+    """Upsert per-epoch metrics from train_progress.jsonl into EpochRecord rows.
+
+    Replaces any existing records from previous runs with the last contiguous run.
+    Old-run epochs (from before the last restart) are deleted so the table always
+    reflects the most recent training trajectory.
+    """
+    jsonl_path = os.path.join(trial_dir, "train_progress.jsonl")
+    last_run_records, _ = _read_jsonl_full(jsonl_path)
+    if not last_run_records:
+        return
+
+    valid_epochs = {r["epoch"] for r in last_run_records if "epoch" in r}
+    existing = {er.epoch: er
+                for er in EpochRecord.query.filter_by(trial_id=trial_row.id).all()}
+
+    # Delete records from previous runs
+    for ep, er in existing.items():
+        if ep not in valid_epochs:
+            db.session.delete(er)
+
+    for rec in last_run_records:
+        ep = rec.get("epoch")
+        if ep is None:
+            continue
+        er = existing.get(ep)
+        if er is None:
+            er = EpochRecord(trial_id=trial_row.id, epoch=ep)
+            db.session.add(er)
+        er.train_loss = rec.get("train_loss")
+        er.train_action_accuracy = rec.get("train_action_accuracy")
+        er.valid_loss = rec.get("valid_loss")
+        er.valid_action_accuracy = rec.get("valid_action_accuracy")
+        er.valid_route_accuracy = rec.get("valid_route_accuracy")
+        er.seconds_per_epoch = rec.get("seconds_per_epoch")
+        er.lr = rec.get("lr")
+
+
+def _sync_trial_hyperparams(
+    trial_row: Trial,
+    trial_dir: str,
+    git_hash: str | None,
+    git_message: str | None,
+    optuna_params: dict,
+) -> None:
+    """Upsert TrialHyperparams for one trial (cfg_* and raw epoch stats)."""
+    hp = trial_row.hyperparams
+    if hp is None:
+        hp = TrialHyperparams(trial_id=trial_row.id)
+        db.session.add(hp)
+
+    cfg = _load_config_flat(trial_dir)
+    for key, val in cfg.items():
+        setattr(hp, key, val)
+
+    # Epoch stats from JSONL
+    jsonl_path = os.path.join(trial_dir, "train_progress.jsonl")
+    last_run, total = _read_jsonl_full(jsonl_path)
+    if last_run:
+        last_ep = last_run[-1].get("epoch", 0)
+        hp.jsonl_last_epoch = last_ep
+        hp.total_jsonl_epochs = total
+        n_epochs = cfg.get("cfg_n_epochs")
+        epoch_count = last_ep + 1
+        hp.epoch_ran_fraction = (
+            round(epoch_count / n_epochs, 4) if n_epochs else None
+        )
+    else:
+        hp.jsonl_last_epoch = 0
+        hp.total_jsonl_epochs = None
+        hp.epoch_ran_fraction = None
+
+    hp.git_hash = git_hash
+    hp.git_hash_short = git_hash[:8] if git_hash else None
+    hp.git_message = git_message
+    hp.optuna_searched = "|".join(sorted(optuna_params.keys())) if optuna_params else None
+    hp.synced_at = datetime.utcnow()
+
+
+_INCOMPLETE_THRESHOLD = 0.80
+
+
+def _compute_completeness_for_study(study_row: Study) -> None:
+    """Recompute completeness columns on all TrialHyperparams for a study.
+
+    Must be called after all _sync_trial_hyperparams calls for the study are
+    flushed, so that epoch_count and state are up-to-date in the DB.
+    """
+    trials = Trial.query.filter_by(study_id=study_row.id).all()
+    complete_epochs = [
+        t.epoch_count for t in trials
+        if t.state == "COMPLETE" and t.epoch_count is not None
+    ]
+    max_ep = max(complete_epochs) if complete_epochs else None
+
+    for t in trials:
+        hp = t.hyperparams
+        if hp is None:
+            continue
+
+        hp.max_complete_epoch_in_study = max_ep
+        epoch_count = t.epoch_count
+        total_jsonl = hp.total_jsonl_epochs
+        state = t.state
+
+        has_restart = (
+            total_jsonl is not None and epoch_count is not None
+            and total_jsonl > epoch_count * 1.5
+        )
+
+        hp.is_incomplete = False
+        hp.is_early_stopped = False
+        hp.is_jsonl_unreliable = False
+
+        if epoch_count is None:
+            hp.incomplete_reason = "no_jsonl"
+        elif max_ep is None:
+            hp.incomplete_reason = "no_complete_ref"
+        elif state == "COMPLETE":
+            if has_restart and total_jsonl >= max_ep:
+                hp.incomplete_reason = "complete_restarted"
+                hp.is_jsonl_unreliable = True
+            elif epoch_count < max_ep * _INCOMPLETE_THRESHOLD:
+                hp.incomplete_reason = "early_stopped"
+                hp.is_early_stopped = True
+            else:
+                hp.incomplete_reason = "complete"
+        else:
+            frac = epoch_count / max_ep
+            if frac >= _INCOMPLETE_THRESHOLD:
+                hp.incomplete_reason = "nearly_complete"
+            elif state == "RUNNING":
+                hp.incomplete_reason = "running"
+                hp.is_incomplete = True
+            else:
+                hp.incomplete_reason = "killed"
+                hp.is_incomplete = True

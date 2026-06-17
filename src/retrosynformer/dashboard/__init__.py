@@ -10,8 +10,9 @@ from flask import Flask, redirect, request, session, url_for
 from flask_admin import Admin
 
 from .extensions import limiter
-from .models import Study, Trial, db
-from .views import DashboardIndexView, StudyAdmin, TrialAdmin
+from .models import EpochRecord, Study, Trial, TrialHyperparams, db
+from .views import (DashboardIndexView, EpochRecordAdmin, StudyAdmin,
+                    TrialAdmin, TrialHyperparamsAdmin)
 from .views import bp as dashboard_bp
 
 _INSECURE_DEFAULT_KEY = "dev-key-change-in-prod"
@@ -110,6 +111,12 @@ def create_app(
     )
     admin.add_view(StudyAdmin(Study, db.session, name="Studies", endpoint="study_admin"))
     admin.add_view(TrialAdmin(Trial, db.session, name="Trials", endpoint="trial_admin"))
+    admin.add_view(TrialHyperparamsAdmin(
+        TrialHyperparams, db.session, name="Hyperparams", endpoint="hyperparams_admin",
+    ))
+    admin.add_view(EpochRecordAdmin(
+        EpochRecord, db.session, name="Epoch Records", endpoint="epoch_admin",
+    ))
 
     app.register_blueprint(dashboard_bp)
 
