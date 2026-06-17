@@ -47,8 +47,18 @@ Config-driven search space (results/config/*.yaml under the "optuna" key):
         high: 0.3
         step: 0.01
 
+      # random_seed — list of ints or an int low/high range (no log scale).
+      # Maps to the seed= kwarg of runner.main() and is saved to
+      # model.config.yaml as context.random_state before training begins.
+      random_seed: [1, 2, 3, 42, 137]
+      # or:
+      random_seed:
+        low: 1
+        high: 1000
+
 Any key in the optuna section must match a keyword argument accepted by
-runner.main() (n_heads, n_layers, head_dim, lr, dropout, momentum, …).
+runner.main() (n_heads, n_layers, head_dim, lr, dropout, momentum, …),
+with the exception of random_seed which is remapped to seed=.
 """
 import argparse
 import json
@@ -165,6 +175,8 @@ def _validate_config(config: dict, n_trials: int | None = None) -> None:
         (b) each list length >= the largest n_layers value in the search space
         (c) all inner values are bools
         (d) no two lists have the same sequence of values
+    - optuna.random_seed, if present, must be a list of ints or an int low/high
+      range without log scaling (so the suggested value is always a plain int)
     - if all params are discrete, n_trials must equal total combinations exactly
     """
     optuna_cfg = config.get("optuna", {})
@@ -233,6 +245,42 @@ def _validate_config(config: dict, n_trials: int | None = None) -> None:
                     f"entry [{seen[key]}]: {list(key)}"
                 )
             seen[key] = i
+
+    # random_seed spec: must be a list of ints or an int low/high range (no log).
+    seed_spec = optuna_cfg.get("random_seed")
+    if seed_spec is not None:
+        if isinstance(seed_spec, list):
+            bad = [v for v in seed_spec if not isinstance(v, int)]
+            if bad:
+                raise ValueError(
+                    f"optuna.random_seed list must contain only integers; "
+                    f"found non-integer values: {bad}"
+                )
+        elif isinstance(seed_spec, dict):
+            if "choices" in seed_spec:
+                bad = [v for v in seed_spec["choices"] if not isinstance(v, int)]
+                if bad:
+                    raise ValueError(
+                        f"optuna.random_seed choices must all be integers; "
+                        f"found: {bad}"
+                    )
+            else:
+                low, high = seed_spec.get("low"), seed_spec.get("high")
+                if not (isinstance(low, int) and isinstance(high, int)):
+                    raise ValueError(
+                        f"optuna.random_seed low/high must both be integers, "
+                        f"got low={low!r}, high={high!r}"
+                    )
+                if seed_spec.get("log", False):
+                    raise ValueError(
+                        "optuna.random_seed does not support log=true; "
+                        "seeds must be drawn from a linear int range"
+                    )
+        else:
+            raise ValueError(
+                f"optuna.random_seed must be a list of ints or a dict with "
+                f"low/high int keys; got {type(seed_spec).__name__}"
+            )
 
     # Discrete-space exact-coverage check: if every parameter is categorical or
     # a stepped-integer range, n_trials must equal the total combinations exactly.
@@ -325,6 +373,10 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     params = {name: _suggest(trial, name, spec) for name, spec in optuna_config.items()
               if name not in _RESERVED_OPTUNA_KEYS}
 
+    # random_seed is an optuna search param but maps to seed= in runner.main().
+    if "random_seed" in params:
+        params["seed"] = params.pop("random_seed")
+
     trial_dir = os.path.join(results_base, f"trial_{trial.number:03d}")
     os.makedirs(trial_dir, exist_ok=True)
 
@@ -359,8 +411,32 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     for k, v in model_params.items():
         print(f"    {k}: {v}")
 
+    # Pre-trial seed check: if random_seed was in the search space, the
+    # resolved integer must be present in model_params before training begins
+    # so that runner.main() saves it to model.config.yaml.
+    if "seed" in model_params and not isinstance(model_params["seed"], int):
+        raise RuntimeError(
+            f"Trial {trial.number}: random_seed resolved to "
+            f"{model_params['seed']!r} which is not an integer. "
+            "Check the optuna.random_seed spec in the config."
+        )
+
     t0 = time.time()
     val_loss, val_acc, val_route_acc, fraction_solved = train(**model_params)
+
+    # Post-save verification: confirm the seed was written to model.config.yaml.
+    if "seed" in model_params:
+        import yaml as _yaml
+        saved_cfg_path = os.path.join(trial_dir, "model.config.yaml")
+        with open(saved_cfg_path) as _f:
+            saved_cfg = _yaml.safe_load(_f)
+        saved_seed = saved_cfg.get("context", {}).get("random_state")
+        if saved_seed != model_params["seed"]:
+            raise RuntimeError(
+                f"Trial {trial.number}: seed mismatch after save — "
+                f"expected {model_params['seed']} in model.config.yaml "
+                f"context.random_state but found {saved_seed!r}."
+            )
 
     # Compute the Optuna objective from whichever metric is configured.
     # val_route_acc avoids a spurious 0.0 when early stopping fires before
