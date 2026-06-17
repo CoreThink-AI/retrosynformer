@@ -5,6 +5,21 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.9] — 2026-06-17
+
+**Layer-shared residual dropout; atomic per-epoch checkpointing.**
+
+- New `src/retrosynformer/dropout.py`: `SharedResidMaskDropout` + `apply_layer_shared_resid_dropout` — ties the attention and MLP residual masks within each transformer block via a forward pre-hook; no new parameters, `load_state_dict` unaffected.
+- Config key `model.layer_shared_resid_dropout`: scalar `bool` for uniform application or `list[bool]` for per-layer control; `0`/`1` accepted as aliases throughout.
+- Optuna list-of-lists support: specify multiple `layer_shared_resid_dropout` patterns as discrete categorical choices; inner lists JSON-serialised for Optuna storage compatibility.
+- Pre-flight validation in `runner` and `hypertune`: non-jagged check, length ≥ max `n_layers`, valid-value check.
+- New `results/config/small_nonuniform_dropout.yaml`: fixed best-trial architecture, four dropout-pattern choices, small dataset, 50 epochs.
+- Trainer: `model.last.pth` written atomically after every epoch; `model.pth` copied from it (not re-serialised) when a new best-loss is achieved; eliminates partial-read risk during concurrent rsync.
+
+[Full notes](docs/release-notes-0.1.9.md)
+
+---
+
 ## [0.1.8] — 2026-06-16
 
 **Training dashboard, trial status CLI, ntfy.sh alerter, ROCm pin fixes.**
