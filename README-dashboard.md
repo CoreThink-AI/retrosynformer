@@ -4,6 +4,13 @@ Flask-Admin web UI + REST API for monitoring Optuna hyper-tuning studies and
 training trials.  Reads directly from `results/` — no extra setup beyond
 `uv sync --extra dashboard`.
 
+## Live on taco
+
+**<https://taco.tail9f615d.ts.net/>** — HTTPS, browser-trusted Let's Encrypt
+certificate via Tailscale Serve (tailnet only; connect to Tailscale first).
+
+Login: `admin` / see `.env.dashboard` on taco for the password.
+
 ## Install
 
 ```bash
