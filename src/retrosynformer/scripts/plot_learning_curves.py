@@ -298,10 +298,10 @@ def main() -> None:
     # Param columns present across the top trials (exclude bookkeeping columns).
     _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
                   "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial", "jsonl_path"}
-    PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr",
-                   "structured_dropout_bottleneck"]
+    PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr"]
+    _HIDDEN_PARAMS = {"structured_dropout_bottleneck"}
     present_params = [c for c in PARAM_ORDER if c in top.columns]
-    extra_params = [c for c in top.columns if c not in _non_param and c not in present_params]
+    extra_params = [c for c in top.columns if c not in _non_param and c not in present_params and c not in _HIDDEN_PARAMS]
     param_cols = present_params + extra_params
 
     def _hdr(c: str) -> str:
