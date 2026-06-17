@@ -177,13 +177,13 @@ def _validate_config(config: dict) -> None:
                 f"(extra entries beyond the actual n_layers are truncated at runtime)."
             )
 
-        # (c) All inner values must be bool
+        # (c) All inner values must be bool or 0/1
         for i, lst in enumerate(lsrd_spec):
-            non_bool = [(j, v) for j, v in enumerate(lst) if not isinstance(v, bool)]
-            if non_bool:
+            invalid = [(j, v) for j, v in enumerate(lst) if v not in (True, False, 0, 1)]
+            if invalid:
                 raise ValueError(
-                    f"optuna.layer_shared_resid_dropout[{i}] contains non-bool values: "
-                    f"{non_bool}"
+                    f"optuna.layer_shared_resid_dropout[{i}] contains values that are "
+                    f"not bool or 0/1: {invalid}"
                 )
 
 

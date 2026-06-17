@@ -201,11 +201,12 @@ def _validate_layer_shared_resid_dropout(config: dict) -> None:
             f"(got {type(lsrd).__name__!r}). "
             f"Use e.g. layer_shared_resid_dropout: [true, false, true, ...]"
         )
-    non_bool = [i for i, x in enumerate(lsrd) if not isinstance(x, bool)]
-    if non_bool:
+    # Accept True/False or 0/1 — YAML parses bare integers as int, not bool.
+    invalid = [i for i, x in enumerate(lsrd) if x not in (True, False, 0, 1)]
+    if invalid:
         raise ValueError(
-            f"model.layer_shared_resid_dropout contains non-bool values at "
-            f"indices {non_bool}: {[lsrd[i] for i in non_bool]}"
+            f"model.layer_shared_resid_dropout contains values that are not "
+            f"bool or 0/1 at indices {invalid}: {[lsrd[i] for i in invalid]}"
         )
     if len(lsrd) < n_layers:
         raise ValueError(
