@@ -84,6 +84,7 @@ cuda = [
 dev = [
     "pytest>=8",
     "httpx>=0.27",   # required by FastAPI TestClient
+    "anthropic>=0.25",  # used by scripts/bump.py (rs-bump) for release note generation
 ]
 
 [project.scripts]
@@ -99,6 +100,8 @@ rs-mark-stopped         = "retrosynformer.scripts.mark_stopped:main"
 rs-serve                = "retrosynformer.scripts.serve:main"
 rs-status               = "retrosynformer.scripts.status:main"
 rs-dashboard            = "retrosynformer.scripts.dashboard:main"
+rs-bump                 = "retrosynformer.scripts.bump:main"
+bump                    = "retrosynformer.scripts.bump:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
