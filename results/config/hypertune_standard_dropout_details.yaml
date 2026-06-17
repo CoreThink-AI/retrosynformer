@@ -1,27 +1,46 @@
-# Optuna hyperparameter search config for the standard dataset.
+# Optuna hyperparameter search for the standard dataset, searching individual
+# dropout rates (attn / embedding / residual) independently.
 #
-# Background: rs-train with lr=0.211 (paper value) went unstable on the
-# standard dataset — valid_loss spiked at epoch 2 and valid_action_accuracy
-# froze at 0.030. The best small-dataset model used lr~0.002 (found by Optuna).
-# This config searches a LR range anchored around that finding.
+# Architecture ranges are tightened around the best performers from
+# hypertune-standard-v2-lr0005 (trials 4 and 5):
+#
+#   Trial 4 (best,  v_action_acc=0.304): n_heads=2, n_layers=8,  head_dim=128, dropout=0.047, lr=9.79e-4
+#   Trial 5 (abort, v_action_acc=0.265): n_heads=4, n_layers=2,  head_dim=64,  dropout=0.266, lr=3.39e-3
+#
+# Key changes from hypertune_standard.yaml:
+#   - n_heads:    [1,2,4] → [2,4]        (n_heads=1 only in bottom-2 trials)
+#   - n_layers:   [2..32] → [2,3,4,6,8,12]
+#   - head_dim:   [64,128,256] → [64,128] (neither trial 4 nor 5 used 256)
+#   - lr low:     5e-5 → 2e-4            (6e-5 was the worst trial's LR)
+#   - dropout:    replaced by three independent params below
+#
+# Dropout note: the paper's default values (attn=0.02, embd=0.20, resid=0.08) are
+# very unequal. The previous study searched a single scalar applied uniformly to all
+# three; this study lets Optuna find the best ratio between them.
 #
 # Usage:
-#   rs-hypertune -c results/config/hypertune_standard.yaml \
+#   rs-hypertune -c results/config/hypertune_standard_dropout_details.yaml \
 #       --n-trials 20 --n-epochs 100 --dataset standard \
-#       --study-name standard_lr_search
+#       --study-name standard-v2-dropout-details
 
 optuna:
   objective_metric: valid_route_accuracy
-  n_heads: [2, 3, 4, 5]
-  n_layers: [6, 7, 8, 9, 10, 11, 12, 14, 16, 17, 18, 23, 24]
-  head_dim: [64, 72, 96, 128, 192, 256]
+  n_heads: [2, 4]
+  n_layers: [2, 3, 4, 6, 8, 12]
+  head_dim: [64, 128]
   lr:
-    low: 5.0e-5
+    low: 2.0e-4
     high: 5.0e-3
     log: true
-  dropout:
+  attn_pdrop:
     low: 0.0
-    high: 0.25
+    high: 0.20
+  embd_pdrop:
+    low: 0.0
+    high: 0.40
+  resid_pdrop:
+    low: 0.0
+    high: 0.30
 
 context:
   building_blocks: data/standard_building_blocks.csv
@@ -52,15 +71,15 @@ model:
   action_tanh: false
   activation_function: relu
   attn_pdrop: 0.02
-  embd_pdrop: 0.2
-  head_dim: 256
-  max_ep_len: 20
-  n_heads: 4
-  n_layers: 3
+  embd_pdrop: 0.20
   resid_pdrop: 0.08
+  head_dim: 128
+  max_ep_len: 20
+  n_heads: 2
+  n_layers: 8
 
 optimizer:
-  lr: 0.002
+  lr: 0.001
   momentum: 0.98
 
 reward:
@@ -77,4 +96,4 @@ train:
   n_epochs: 100
   early_stopping_patience: 15
   lr_scheduler_patience: 10
-  results_path: results/hypertune-standard-lr-search/
+  results_path: results/hypertune-standard-v2-dropout-details/
