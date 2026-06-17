@@ -219,8 +219,20 @@ def sync_study(db_path: str, root: str, force: bool = False) -> bool:
     run_jsonl = os.path.join(study_dir, "run.jsonl")
 
     if existing is None:
-        existing = Study(study_name=study_name, db_path=db_path)
-        db.session.add(existing)
+        # Another db_path may already own this study_name (e.g. rsync'd copy).
+        # Prefer the path that's actually a child of root (canonical location).
+        name_match = Study.query.filter_by(study_name=study_name).first()
+        if name_match is not None:
+            root_abs = os.path.abspath(root)
+            current_is_canonical = os.path.abspath(db_path).startswith(root_abs + os.sep)
+            existing_is_canonical = os.path.abspath(name_match.db_path).startswith(root_abs + os.sep)
+            if current_is_canonical and not existing_is_canonical:
+                # Takeover: re-point the row to the canonical path
+                name_match.db_path = db_path
+            existing = name_match
+        else:
+            existing = Study(study_name=study_name, db_path=db_path)
+            db.session.add(existing)
 
     existing.study_name = study_name
     existing.db_path = db_path

@@ -70,7 +70,7 @@ serve = [
 # Training dashboard (Flask-Admin):  uv sync --extra dashboard
 dashboard = [
     "flask>=3.0,<4",
-    "flask-admin>=1.6,<2",
+    "flask-admin>=2.0,<3",
     "flask-sqlalchemy>=3.1,<4",
     "wtforms>=3.1,<4",
 ]

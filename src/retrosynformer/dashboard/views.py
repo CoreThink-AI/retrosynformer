@@ -1,10 +1,13 @@
 """Flask-Admin ModelViews and custom Blueprint for the dashboard."""
 import json
 import os
+from urllib.parse import urljoin, urlparse
 
-from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
+from flask import (Blueprint, current_app, jsonify, redirect, render_template,
+                   request, session, url_for)
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
+from werkzeug.security import check_password_hash
 
 from .models import Study, Trial, db
 from .sync import sync_all, sync_study
@@ -96,6 +99,38 @@ def index():
         active=active,
         cloud_run_url=cloud_run_url,
     )
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("logged_in"):
+        return redirect(url_for("dashboard.index"))
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        expected = current_app.config.get("DASHBOARD_USERNAME", "admin")
+        pw_hash = current_app.config.get("DASHBOARD_PASSWORD_HASH", "")
+        if username == expected and pw_hash and check_password_hash(pw_hash, password):
+            session["logged_in"] = True
+            next_url = request.args.get("next", "")
+            if next_url and _is_safe_url(next_url):
+                return redirect(next_url)
+            return redirect(url_for("dashboard.index"))
+        error = "Invalid credentials"
+    return render_template("dashboard/login.html", error=error)
+
+
+@bp.get("/logout")
+def logout():
+    session.pop("logged_in", None)
+    return redirect(url_for("dashboard.login"))
+
+
+def _is_safe_url(target: str) -> bool:
+    ref = urlparse(request.host_url)
+    test = urlparse(urljoin(request.host_url, target))
+    return test.scheme in ("http", "https") and ref.netloc == test.netloc
 
 
 @bp.get("/trial/<study_name>/<int:trial_num>/curves")

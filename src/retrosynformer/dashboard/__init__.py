@@ -5,7 +5,7 @@ Run:      rs-dashboard --port 5050
 """
 import os
 
-from flask import Flask
+from flask import Flask, redirect, request, session, url_for
 from flask_admin import Admin
 
 from .models import Study, Trial, db
@@ -35,6 +35,28 @@ def create_app(
         CLOUD_RUN_URL=cloud_run_url,
         DEBUG=debug,
     )
+
+    # --- Auth setup ---------------------------------------------------------
+    _pw = os.environ.get("DASHBOARD_PASSWORD", "")
+    if _pw:
+        from werkzeug.security import generate_password_hash
+        app.config["DASHBOARD_USERNAME"] = os.environ.get("DASHBOARD_USERNAME", "admin")
+        app.config["DASHBOARD_PASSWORD_HASH"] = generate_password_hash(_pw)
+        app.config["AUTH_REQUIRED"] = True
+    else:
+        app.config["AUTH_REQUIRED"] = False
+
+    @app.before_request
+    def _require_login():
+        if not app.config.get("AUTH_REQUIRED"):
+            return
+        if request.path in ("/login", "/logout"):
+            return
+        if request.path.startswith(("/static/", "/admin/static/")):
+            return
+        if not session.get("logged_in"):
+            return redirect(url_for("dashboard.login", next=request.url))
+    # ------------------------------------------------------------------------
 
     db.init_app(app)
 
