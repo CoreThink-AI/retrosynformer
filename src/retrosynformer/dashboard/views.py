@@ -1,4 +1,5 @@
 """Flask-Admin ModelViews and custom Blueprint for the dashboard."""
+import hmac
 import json
 import os
 from datetime import datetime, timedelta
@@ -9,10 +10,15 @@ from flask import (Blueprint, current_app, jsonify, redirect, render_template,
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
 from markupsafe import Markup
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
+from .extensions import limiter
 from .models import Study, Trial, db
 from .sync import sync_all, sync_study
+
+# Used as the comparison target when the submitted username doesn't match,
+# so check_password_hash always runs and response time is constant.
+_DUMMY_HASH = generate_password_hash("dummy-timing-safety")
 
 STALE_TRIAL_HOURS = 2  # RUNNING trials not synced within this window are shown as stopped
 
@@ -137,6 +143,8 @@ def index():
 
 
 @bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute", methods=["POST"], error_message="Too many login attempts — try again in a minute.")
+@limiter.limit("20 per hour", methods=["POST"], error_message="Too many login attempts — try again later.")
 def login():
     if session.get("logged_in"):
         return redirect(url_for("dashboard.index"))
@@ -145,8 +153,13 @@ def login():
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         expected = current_app.config.get("DASHBOARD_USERNAME", "admin")
-        pw_hash = current_app.config.get("DASHBOARD_PASSWORD_HASH", "")
-        if username == expected and pw_hash and check_password_hash(pw_hash, password):
+        pw_hash = current_app.config.get("DASHBOARD_PASSWORD_HASH", _DUMMY_HASH)
+        # Always run check_password_hash (constant time) and compare username
+        # with hmac.compare_digest to prevent timing-based username enumeration.
+        username_ok = hmac.compare_digest(username, expected)
+        password_ok = check_password_hash(pw_hash, password)
+        if username_ok and password_ok and current_app.config.get("AUTH_REQUIRED"):
+            session.permanent = True
             session["logged_in"] = True
             next_url = request.args.get("next", "")
             if next_url and _is_safe_url(next_url):
@@ -158,14 +171,18 @@ def login():
 
 @bp.get("/logout")
 def logout():
-    session.pop("logged_in", None)
+    session.clear()
     return redirect(url_for("dashboard.login"))
 
 
 def _is_safe_url(target: str) -> bool:
     ref = urlparse(request.host_url)
     test = urlparse(urljoin(request.host_url, target))
-    return test.scheme in ("http", "https") and ref.netloc == test.netloc
+    return (
+        test.scheme in ("http", "https")
+        and ref.netloc == test.netloc
+        and not test.fragment  # block #-based open-redirect bypasses
+    )
 
 
 @bp.get("/trial/<study_name>/<int:trial_num>/curves")

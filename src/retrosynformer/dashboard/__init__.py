@@ -4,13 +4,17 @@ Install:  uv sync --extra dashboard
 Run:      rs-dashboard --port 5050
 """
 import os
+from datetime import timedelta
 
 from flask import Flask, redirect, request, session, url_for
 from flask_admin import Admin
 
+from .extensions import limiter
 from .models import Study, Trial, db
 from .views import DashboardIndexView, StudyAdmin, TrialAdmin
 from .views import bp as dashboard_bp
+
+_INSECURE_DEFAULT_KEY = "dev-key-change-in-prod"
 
 
 def create_app(
@@ -27,19 +31,37 @@ def create_app(
 
     os.makedirs(results_root, exist_ok=True)
     app = Flask(__name__, template_folder="templates")
+
+    secret_key = os.environ.get("SECRET_KEY", _INSECURE_DEFAULT_KEY)
+
     app.config.update(
-        SECRET_KEY=os.environ.get("SECRET_KEY", "dev-key-change-in-prod"),
+        SECRET_KEY=secret_key,
         SQLALCHEMY_DATABASE_URI=db_url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         RESULTS_ROOT=results_root,
         CLOUD_RUN_URL=cloud_run_url,
         DEBUG=debug,
+        # --- Session cookie hardening ---
+        SESSION_COOKIE_SECURE=True,      # only sent over HTTPS
+        SESSION_COOKIE_HTTPONLY=True,    # inaccessible to JavaScript
+        SESSION_COOKIE_SAMESITE="Lax",  # blocks cross-site POST forgery
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+        SESSION_REFRESH_EACH_REQUEST=True,
+        # --- Rate-limiter defaults (overridden per-route as needed) ---
+        RATELIMIT_DEFAULT="200 per day;50 per hour",
+        RATELIMIT_HEADERS_ENABLED=True,
     )
 
     # --- Auth setup ---------------------------------------------------------
     _pw = os.environ.get("DASHBOARD_PASSWORD", "")
     if _pw:
         from werkzeug.security import generate_password_hash
+        if secret_key == _INSECURE_DEFAULT_KEY:
+            raise ValueError(
+                "FATAL: Set a strong SECRET_KEY in .env.dashboard before enabling "
+                "authentication. Generate one with:\n"
+                "  python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
         app.config["DASHBOARD_USERNAME"] = os.environ.get("DASHBOARD_USERNAME", "admin")
         app.config["DASHBOARD_PASSWORD_HASH"] = generate_password_hash(_pw)
         app.config["AUTH_REQUIRED"] = True
@@ -56,8 +78,26 @@ def create_app(
             return
         if not session.get("logged_in"):
             return redirect(url_for("dashboard.login", next=request.url))
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # HSTS: tell browsers to always use HTTPS for this host for 1 year
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # CSP: allow Bootstrap CDN for the login page; everything else same-origin
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "script-src 'self' https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; "
+            "font-src 'self' https://cdn.jsdelivr.net"
+        )
+        return response
     # ------------------------------------------------------------------------
 
+    limiter.init_app(app)
     db.init_app(app)
 
     with app.app_context():
