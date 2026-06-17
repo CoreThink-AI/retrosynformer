@@ -165,7 +165,7 @@ def _validate_config(config: dict, n_trials: int | None = None) -> None:
         (b) each list length >= the largest n_layers value in the search space
         (c) all inner values are bools
         (d) no two lists have the same sequence of values
-    - if all params are discrete, n_trials <= total combinations
+    - if all params are discrete, n_trials must equal total combinations exactly
     """
     optuna_cfg = config.get("optuna", {})
     optuna_keys = set(optuna_cfg)
@@ -234,15 +234,15 @@ def _validate_config(config: dict, n_trials: int | None = None) -> None:
                 )
             seen[key] = i
 
-    # Discrete-space saturation check: if every parameter is categorical or a
-    # stepped-integer range, warn when n_trials exceeds the total combinations.
+    # Discrete-space exact-coverage check: if every parameter is categorical or
+    # a stepped-integer range, n_trials must equal the total combinations exactly.
     if n_trials is not None:
         combos = _count_discrete_combinations(optuna_cfg)
-        if combos is not None and n_trials > combos:
+        if combos is not None and n_trials != combos:
             raise ValueError(
-                f"n_trials={n_trials} exceeds the total number of discrete "
-                f"parameter combinations ({combos}). Reduce --n-trials to at "
-                f"most {combos}, or add a continuous parameter to the search space."
+                f"n_trials={n_trials} must equal the total number of discrete "
+                f"parameter combinations ({combos}). Set --n-trials {combos}, "
+                f"or add a continuous parameter to the search space."
             )
 
 

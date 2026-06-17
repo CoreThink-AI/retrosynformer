@@ -212,10 +212,16 @@ def test_count_discrete_skips_reserved_keys():
 # _validate_config — discrete saturation check
 # ---------------------------------------------------------------------------
 
-def test_validate_config_discrete_saturation_raises():
+def test_validate_config_discrete_saturation_raises_too_many():
     cfg = {"optuna": {"n_heads": [1, 2], "n_layers": [2, 4]}}  # 4 combinations
-    with pytest.raises(ValueError, match="n_trials=5 exceeds.*4"):
+    with pytest.raises(ValueError, match="n_trials=5 must equal.*4"):
         ht._validate_config(cfg, n_trials=5)
+
+
+def test_validate_config_discrete_saturation_raises_too_few():
+    cfg = {"optuna": {"n_heads": [1, 2], "n_layers": [2, 4]}}  # 4 combinations
+    with pytest.raises(ValueError, match="n_trials=3 must equal.*4"):
+        ht._validate_config(cfg, n_trials=3)
 
 
 def test_validate_config_discrete_saturation_exact_passes():
