@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import time
 from datetime import datetime
@@ -285,19 +286,30 @@ class RetroTrainer:
 
             seconds_this_epoch = time.time() - epoch_start
 
-            # Save model before printing so the note column reflects this epoch's outcome.
+            # Always write model.last.pth at the end of every epoch so the
+            # final weights are available regardless of which epoch was best.
+            last_path = save_folder + "/model.last.pth"
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+            try:
+                os.close(tmp_fd)
+                torch.save(self.model.state_dict(), tmp_path)
+                os.replace(tmp_path, last_path)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
+
+            # When this epoch is the new best, copy model.last.pth → model.pth
+            # atomically — avoids serialising state_dict a second time.
             if valid_loss < lowest_valid_loss:
                 model_path = save_folder + "/model.pth"
                 lowest_valid_loss = valid_loss
-                # Atomic save: write to a temp file then rename so rsync or
-                # any reader always sees a complete checkpoint, never a partial write.
-                tmp_fd, tmp_path = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+                tmp_fd2, tmp_path2 = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
                 try:
-                    os.close(tmp_fd)
-                    torch.save(self.model.state_dict(), tmp_path)
-                    os.replace(tmp_path, model_path)
+                    os.close(tmp_fd2)
+                    shutil.copyfile(last_path, tmp_path2)
+                    os.replace(tmp_path2, model_path)
                 except Exception:
-                    os.unlink(tmp_path)
+                    os.unlink(tmp_path2)
                     raise
                 epochs_no_improve = 0
                 note = "*"
@@ -383,17 +395,6 @@ class RetroTrainer:
             print(f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
                   f"({sum(solved_routes)}/{len(solved_routes)}) "
                   f"in {(time.time() - eval_start_time) / 60:.1f} min")
-
-        # Save the final checkpoint regardless of whether it is the best.
-        last_path = save_folder + "/model.last.pth"
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
-        try:
-            os.close(tmp_fd)
-            torch.save(self.model.state_dict(), tmp_path)
-            os.replace(tmp_path, last_path)
-        except Exception:
-            os.unlink(tmp_path)
-            raise
 
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(
