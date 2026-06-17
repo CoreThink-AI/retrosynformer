@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 dashboard.db
 
+results.large*
+
 # retrosynformer Optuna trials
 .*ntfy*
 results/hypertune*/
