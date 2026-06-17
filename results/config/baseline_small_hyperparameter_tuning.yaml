@@ -28,9 +28,10 @@
 # Optuna search space (rs-hypertune reads this section)
 # ---------------------------------------------------------------------------
 optuna:
-  # Metric to maximize across trials.
-  # valid_route_accuracy is the most meaningful single metric; it corresponds
-  # to top-1 accuracy (Section 3.6) — fraction of routes where every step matches.
+  # Metric maximised by Optuna across trials:
+  #   valid_route_accuracy  — fraction of validation routes where every step matches (top-1, Section 3.6)
+  #   valid_action_accuracy — per-step template prediction accuracy on validation set
+  #   fraction_solved       — fraction of targets solved during route evaluation
   objective_metric: valid_route_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
 
   # --- Architecture ---
