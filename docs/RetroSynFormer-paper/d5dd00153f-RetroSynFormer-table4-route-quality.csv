@@ -1,0 +1,9 @@
+Metric,Direction,RetroSynFormer50_N1,RetroSynFormer50_N5,AiZynthFinder_N1,AiZynthFinder_N5,Targets_N1,Targets_N5
+Number of total reactions,,,3047,3189,3234,3556,4093,4567
+Number of unique templates,,,669,650,712,706,795,812
+Number of unique reaction classes,,,63,61,62,63,62,61
+Action accuracy,higher_better,0.266,0.223,0.312,0.239,,
+Class accuracy,higher_better,0.374,0.321,0.415,0.333,,
+Route accuracy,higher_better,0.127,0.084,0.163,0.096,,
+Unordered route accuracy,higher_better,0.177,0.125,0.216,0.147,,
+DeepSet route score,lower_better,3.139,3.313,3.336,3.531,3.137,3.411
