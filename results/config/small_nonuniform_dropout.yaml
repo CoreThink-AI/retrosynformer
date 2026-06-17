@@ -24,7 +24,7 @@ optuna:
   #   valid_route_accuracy  — fraction of validation routes where every step matches
   #   valid_action_accuracy — per-step template prediction accuracy on validation set
   #   fraction_solved       — fraction of targets solved during route evaluation
-  objective_metric: valid_route_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
+  objective_metric: valid_action_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
   layer_shared_resid_dropout:
     - [true,   true,  true,  true,  true,  true,  true,  true, false, false]
     - [false,  false, false, false, false, false, false, false, false, true]
