@@ -8,7 +8,7 @@ Type=simple
 User=hobs
 WorkingDirectory=/home/hobs/code/corethink/retrosynformer
 EnvironmentFile=/home/hobs/code/corethink/retrosynformer/.env.dashboard
-ExecStart=/home/hobs/code/corethink/retrosynformer/.venv/bin/rs-dashboard \
+ExecStart=/home/hobs/code/corethink/retrosynformer/.venv-rocm/bin/rs-dashboard \
     --host 0.0.0.0 \
     --port 5050 \
     --results /home/hobs/code/corethink/retrosynformer/results/
