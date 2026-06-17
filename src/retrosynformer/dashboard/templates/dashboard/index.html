@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>RetroSynFormer Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+  <style>
+    body { font-size: 0.875rem; }
+    .badge-active   { background: #28a745; color: #fff; }
+    .badge-complete { background: #007bff; color: #fff; }
+    .badge-failed   { background: #dc3545; color: #fff; }
+    .badge-unknown  { background: #6c757d; color: #fff; }
+    .metric { font-family: monospace; }
+    .cloud-panel { border-left: 4px solid #007bff; }
+    .status-ok    { color: #28a745; font-weight: bold; }
+    .status-error { color: #dc3545; font-weight: bold; }
+    th { white-space: nowrap; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <a class="navbar-brand" href="/">RetroSynFormer</a>
+  <div class="navbar-nav ml-auto">
+    <a class="nav-link" href="/admin/study_admin/">Studies</a>
+    <a class="nav-link" href="/admin/trial_admin/">Trials</a>
+    <a class="nav-link" href="/api/v1/studies">API</a>
+    <button class="btn btn-sm btn-outline-light ml-2" onclick="triggerSync()">&#x21bb; Sync</button>
+    <a class="btn btn-sm btn-outline-secondary ml-2" href="/logout">Sign out</a>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+
+  {% if cloud_run_url %}
+  <div class="card mb-3 cloud-panel">
+    <div class="card-body py-2">
+      <strong>Cloud Run</strong>
+      <span class="ml-2 text-muted small">{{ cloud_run_url }}</span>
+      <span id="cr-status" class="ml-3 small">checking…</span>
+      <a href="{{ cloud_run_url }}/health" target="_blank" class="btn btn-sm btn-outline-secondary ml-2">Health</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="row mb-3">
+    <div class="col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h4 mb-0">{{ studies|length }}</div>
+          <div class="text-muted small">Studies</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h4 mb-0 text-success">{{ active|length }}</div>
+          <div class="text-muted small">Active</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h4 mb-0">{{ studies|sum(attribute='n_complete') }}</div>
+          <div class="text-muted small">Trials Complete</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h4 mb-0 text-primary">
+            {% set best = namespace(score=None, study='—') %}
+            {% for s in studies %}
+              {% if s.best_score is not none %}
+                {% if best.score is none or s.best_score > best.score %}
+                  {% set best.score = s.best_score %}
+                  {% set best.study = s.study_name %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ "%.4f"|format(best.score) if best.score is not none else "—" }}
+          </div>
+          <div class="text-muted small">Best Score</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active studies first -->
+  <h5>Studies <span class="text-muted small" id="sync-msg"></span></h5>
+  <div class="table-responsive">
+  <table class="table table-sm table-hover table-bordered">
+    <thead class="thead-light">
+      <tr>
+        <th>Study</th>
+        <th>Status</th>
+        <th>Trials</th>
+        <th>Complete</th>
+        <th>Running</th>
+        <th>Best Score</th>
+        <th>Best Trial</th>
+        <th>Metric</th>
+        <th>Last Synced</th>
+        <th>Curves</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in studies %}
+      <tr>
+        <td>{{ s.study_name }}</td>
+        <td>
+          <span class="badge badge-{{ s.status }}">{{ s.status }}</span>
+        </td>
+        <td class="metric">{{ s.n_trials }}</td>
+        <td class="metric">{{ s.n_complete }}</td>
+        <td class="metric {% if s.n_running > 0 %}text-success{% endif %}">{{ s.n_running }}</td>
+        <td class="metric">{{ "%.4f"|format(s.best_score) if s.best_score is not none else "—" }}</td>
+        <td class="metric">{{ s.best_trial_number if s.best_trial_number is not none else "—" }}</td>
+        <td class="small">{{ s.objective_metric or "—" }}</td>
+        <td class="small">{{ s.last_synced_at.strftime("%H:%M:%S") if s.last_synced_at else "—" }}</td>
+        <td>
+          {% if s.best_trial_number is not none %}
+          <a href="{{ url_for('dashboard.trial_curves', study_name=s.study_name, trial_num=s.best_trial_number) }}">
+            best
+          </a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="text-center text-muted">No studies synced yet. <button class="btn btn-sm btn-primary" onclick="triggerSync()">Sync now</button></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {% if active %}
+  <h5 class="mt-3">Active Trials</h5>
+  <div class="table-responsive">
+  <table class="table table-sm table-hover table-bordered">
+    <thead class="thead-light">
+      <tr>
+        <th>Study</th>
+        <th>Trial</th>
+        <th>Epochs</th>
+        <th>Loss</th>
+        <th>ActAcc</th>
+        <th>RouteAcc</th>
+        <th>FracSolved</th>
+        <th>Score</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in active %}
+        {% for t in s.trials.filter_by(state="RUNNING").all() %}
+        <tr>
+          <td>{{ s.study_name }}</td>
+          <td class="metric">{{ t.trial_number }}</td>
+          <td class="metric">{{ t.epoch_count }}</td>
+          <td class="metric">{{ "%.4f"|format(t.valid_loss) if t.valid_loss is not none else "—" }}</td>
+          <td class="metric">{{ "%.4f"|format(t.valid_action_accuracy) if t.valid_action_accuracy is not none else "—" }}</td>
+          <td class="metric">{{ "%.4f"|format(t.valid_route_accuracy) if t.valid_route_accuracy is not none else "—" }}</td>
+          <td class="metric">{{ "%.4f"|format(t.fraction_targets_solved) if t.fraction_targets_solved is not none else "—" }}</td>
+          <td class="metric">{{ "%.4f"|format(t.optuna_score) if t.optuna_score is not none else "—" }}</td>
+          <td><a href="{{ url_for('dashboard.trial_curves', study_name=s.study_name, trial_num=t.trial_number) }}">📈</a></td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function triggerSync() {
+  document.getElementById('sync-msg').textContent = ' syncing…';
+  fetch('/api/v1/sync', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      const r = d.data;
+      document.getElementById('sync-msg').textContent =
+        ` synced ${r.synced}, skipped ${r.skipped}, errors ${r.errors}`;
+      setTimeout(() => location.reload(), 800);
+    })
+    .catch(() => { document.getElementById('sync-msg').textContent = ' sync failed'; });
+}
+
+{% if cloud_run_url %}
+fetch('{{ cloud_run_url }}/health')
+  .then(r => r.json())
+  .then(d => {
+    const el = document.getElementById('cr-status');
+    if (d.model_loaded) {
+      el.innerHTML = '<span class="status-ok">&#x2714; model loaded</span>'
+        + ' &nbsp; action_dim=' + d.action_dim
+        + ' &nbsp; device=' + d.device;
+    } else {
+      el.innerHTML = '<span class="status-error">loading…</span> ' + d.status;
+    }
+  })
+  .catch(() => {
+    document.getElementById('cr-status').innerHTML =
+      '<span class="status-error">&#x2718; unreachable</span>';
+  });
+{% endif %}
+</script>
+</body>
+</html>

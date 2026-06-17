@@ -67,6 +67,14 @@ serve = [
     "uvicorn[standard]>=0.30,<1",
 ]
 
+# Training dashboard (Flask-Admin):  uv sync --extra dashboard
+dashboard = [
+    "flask>=3.0,<4",
+    "flask-admin>=2.0,<3",
+    "flask-sqlalchemy>=3.1,<4",
+    "wtforms>=3.1,<4",
+]
+
 # NVIDIA CUDA GPU:  uv sync --extra cuda
 cuda = [
     "torch>=2.0.0",
@@ -88,6 +96,8 @@ rs-monitor-progress  = "retrosynformer.scripts.monitor_progress:main"
 rs-plot-learning-curves = "retrosynformer.scripts.plot_learning_curves:main"
 rs-sync-results         = "retrosynformer.scripts.sync_results:main"
 rs-serve                = "retrosynformer.scripts.serve:main"
+rs-status               = "retrosynformer.scripts.status:main"
+rs-dashboard            = "retrosynformer.scripts.dashboard:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — RetroSynFormer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+  <style>
+    body { background: #f8f9fa; }
+    .login-box { max-width: 360px; margin: 12vh auto; }
+  </style>
+</head>
+<body>
+<div class="login-box">
+  <div class="card shadow-sm">
+    <div class="card-body p-4">
+      <h5 class="card-title mb-4 text-center">RetroSynFormer Dashboard</h5>
+      {% if error %}
+      <div class="alert alert-danger py-2 small">{{ error }}</div>
+      {% endif %}
+      <form method="post">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" class="form-control"
+                 autocomplete="username" autofocus required>
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" class="form-control"
+                 autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block mt-3">Sign in</button>
+      </form>
+    </div>
+  </div>
+  <p class="text-center text-muted small mt-3">
+    Access via Tailscale VPN only
+  </p>
+</div>
+</body>
+</html>

@@ -1,17 +1,37 @@
+# Python / build artifacts
 .venv/
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+dist/
+build/
+
+# Model weights and training output (downloaded at runtime from GCS)
 *.pth
 *.db
 *.jsonl
-.git/
-.github/
-tests/
-docs/
 results/
 data/
-create_routes_dataset.ipynb
+
+# Git and CI
+.git/
+.github/
+.gitignore
+
+# Dev / docs
+tests/
+docs/
+*.md
+*.ipynb
+*.sh
+uv.lock
+
+# Root-level scripts not needed in the image
 predict.py
 process_routes.py
 test_aspirin.py
+train.py
+runner.py
+monitor_training.py
+clouddeploy.sh
