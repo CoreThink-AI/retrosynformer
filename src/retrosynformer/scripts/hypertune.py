@@ -130,6 +130,7 @@ def _validate_config(config: dict) -> None:
         (a) non-jagged: all inner lists have the same length
         (b) each list length >= the largest n_layers value in the search space
         (c) all inner values are bools
+        (d) no two lists have the same sequence of values
     """
     optuna_cfg = config.get("optuna", {})
     optuna_keys = set(optuna_cfg)
@@ -186,6 +187,17 @@ def _validate_config(config: dict) -> None:
                     f"optuna.layer_shared_resid_dropout[{i}] contains values that are "
                     f"not bool or 0/1: {invalid}"
                 )
+
+        # (d) No duplicate lists (same sequence of values)
+        seen: dict[tuple, int] = {}
+        for i, lst in enumerate(lsrd_spec):
+            key = tuple(bool(v) for v in lst)
+            if key in seen:
+                raise ValueError(
+                    f"optuna.layer_shared_resid_dropout[{i}] is a duplicate of "
+                    f"entry [{seen[key]}]: {list(key)}"
+                )
+            seen[key] = i
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +273,6 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
               results_base: str, run_jsonl: str, eval_n_batches: int | None = None,
               study_name: str | None = None) -> float:
     config = read_config(config_path)
-    _validate_config(config)
     optuna_config = config.get("optuna", {})
     # Reserved keys configure the study itself and must not be passed to _suggest.
     objective_metric = optuna_config.get("objective_metric", "valid_route_accuracy")
@@ -373,6 +384,9 @@ def main():
         help="Optuna storage URL (default: sqlite:///results/hypertune-{study_name}/study.db)",
     )
     args = parser.parse_args()
+
+    # Validate config eagerly so bad configs fail before any study setup.
+    _validate_config(read_config(args.config_path))
 
     results_base = f"results/hypertune-{args.study_name}"
     run_jsonl = os.path.join(results_base, "run.jsonl")

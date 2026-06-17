@@ -119,3 +119,44 @@ def test_validate_config_error_message_mentions_remedy():
     }
     with pytest.raises(ValueError, match="use_structured_dropout"):
         ht._validate_config(cfg)
+
+
+def test_validate_config_lsrd_duplicate_raises():
+    cfg = {
+        "optuna": {
+            "layer_shared_resid_dropout": [
+                [True, False, True],
+                [False, True, False],
+                [True, False, True],  # duplicate of index 0
+            ]
+        }
+    }
+    with pytest.raises(ValueError, match="duplicate.*\\[0\\]"):
+        ht._validate_config(cfg)
+
+
+def test_validate_config_lsrd_duplicate_01_and_bool_raises():
+    """0/1 and True/False with same sequence must be caught as duplicates."""
+    cfg = {
+        "optuna": {
+            "layer_shared_resid_dropout": [
+                [True, False],
+                [1, 0],  # same as index 0 after bool normalisation
+            ]
+        }
+    }
+    with pytest.raises(ValueError, match="duplicate"):
+        ht._validate_config(cfg)
+
+
+def test_validate_config_lsrd_no_duplicates_passes():
+    cfg = {
+        "optuna": {
+            "layer_shared_resid_dropout": [
+                [True, False, True],
+                [False, True, False],
+                [True, True, False],
+            ]
+        }
+    }
+    ht._validate_config(cfg)  # must not raise
