@@ -184,6 +184,37 @@ def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
     return train_dataloader, valid_dataloader, test_dataloader
 
 
+def _validate_layer_shared_resid_dropout(config: dict) -> None:
+    """Validate model.layer_shared_resid_dropout before any training run.
+
+    Rules:
+    - Must be a list of bools (not a bare bool — use a list for clarity).
+    - Length must be >= model.n_layers (extra entries are truncated at runtime).
+    """
+    lsrd = config.get("model", {}).get("layer_shared_resid_dropout")
+    if lsrd is None:
+        return
+    n_layers = config.get("model", {}).get("n_layers", 0)
+    if not isinstance(lsrd, list):
+        raise ValueError(
+            f"model.layer_shared_resid_dropout must be a list of bools "
+            f"(got {type(lsrd).__name__!r}). "
+            f"Use e.g. layer_shared_resid_dropout: [true, false, true, ...]"
+        )
+    non_bool = [i for i, x in enumerate(lsrd) if not isinstance(x, bool)]
+    if non_bool:
+        raise ValueError(
+            f"model.layer_shared_resid_dropout contains non-bool values at "
+            f"indices {non_bool}: {[lsrd[i] for i in non_bool]}"
+        )
+    if len(lsrd) < n_layers:
+        raise ValueError(
+            f"model.layer_shared_resid_dropout has {len(lsrd)} entries but "
+            f"model.n_layers={n_layers}. The list must be at least as long as "
+            f"n_layers (extra entries beyond n_layers are silently truncated)."
+        )
+
+
 def init_model(config, model_path=None):
 
     dt_config = DecisionTransformerConfig(bos_token_id=None, eos_token_id=None)
@@ -213,14 +244,18 @@ def init_model(config, model_path=None):
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=torch.device(DEVICE)))
 
-    lsrd = config["model"].get("layer_shared_resid_dropout", False)
+    lsrd = config["model"].get("layer_shared_resid_dropout")
     if lsrd:
+        _validate_layer_shared_resid_dropout(config)
         from .dropout import apply_layer_shared_resid_dropout
         p = config["model"].get("resid_pdrop", 0.0)
-        # lsrd may be True (all layers) or a list[bool] (per-layer)
-        flags = lsrd if isinstance(lsrd, list) else True
+        n_layers = config["model"]["n_layers"]
+        # Truncate list to actual layer count (list may be longer by design)
+        flags = lsrd[:n_layers]
+        if len(lsrd) > n_layers:
+            print(f"layer_shared_resid_dropout: truncating list from {len(lsrd)} → {n_layers} entries")
         n = apply_layer_shared_resid_dropout(model, p, flags=flags)
-        print(f"layer_shared_resid_dropout: tied resid masks in {n}/{config['model']['n_layers']} blocks (p={p}, flags={flags})")
+        print(f"layer_shared_resid_dropout: tied resid masks in {n}/{n_layers} blocks (p={p})")
 
     return model
 
@@ -285,7 +320,11 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
         config["model"]["resid_pdrop"] = resid_pdrop
         print(f"resid_pdrop override: {resid_pdrop}")
     if layer_shared_resid_dropout is not None:
-        config["model"]["layer_shared_resid_dropout"] = bool(layer_shared_resid_dropout)
+        # May be a list (from Optuna categorical) or a bool (from CLI flag)
+        if isinstance(layer_shared_resid_dropout, list):
+            config["model"]["layer_shared_resid_dropout"] = layer_shared_resid_dropout
+        else:
+            config["model"]["layer_shared_resid_dropout"] = bool(layer_shared_resid_dropout)
         print(f"layer_shared_resid_dropout override: {layer_shared_resid_dropout}")
     if eval_n_batches is not None:
         config["evaluation"]["eval_n_batches"] = eval_n_batches

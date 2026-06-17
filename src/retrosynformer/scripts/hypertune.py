@@ -122,10 +122,13 @@ OBJECTIVE_METRICS = {
 def _validate_config(config: dict) -> None:
     """Raise ValueError for known config inconsistencies before any trial starts.
 
-    Catches the case where the optuna search space includes
-    ``structured_dropout_bottleneck`` but ``model.use_structured_dropout`` is
-    False — the parameter would be sampled every trial yet never used.
-    Also validates ``optuna.objective_metric`` when present.
+    Checks:
+    - optuna.structured_dropout_bottleneck requires model.use_structured_dropout
+    - optuna.objective_metric must be a known metric name
+    - optuna.layer_shared_resid_dropout list-of-lists:
+        (a) non-jagged: all inner lists have the same length
+        (b) each list length >= the largest n_layers value in the search space
+        (c) all inner values are bools
     """
     optuna_cfg = config.get("optuna", {})
     optuna_keys = set(optuna_cfg)
@@ -144,6 +147,45 @@ def _validate_config(config: dict) -> None:
             f"Valid choices: {sorted(OBJECTIVE_METRICS)}"
         )
 
+    lsrd_spec = optuna_cfg.get("layer_shared_resid_dropout")
+    if lsrd_spec is not None and isinstance(lsrd_spec, list) and lsrd_spec and isinstance(lsrd_spec[0], list):
+        # (a) Non-jagged: all inner lists must have equal length
+        lengths = {len(lst) for lst in lsrd_spec}
+        if len(lengths) > 1:
+            raise ValueError(
+                f"optuna.layer_shared_resid_dropout list-of-lists is jagged: "
+                f"found inner lists of lengths {sorted(lengths)}. "
+                f"All lists must have the same length."
+            )
+        list_len = next(iter(lengths))
+
+        # (b) Length >= max n_layers in the optuna search space (or model default)
+        n_layers_spec = optuna_cfg.get("n_layers")
+        if n_layers_spec is None:
+            max_n_layers = config.get("model", {}).get("n_layers", 0)
+        elif isinstance(n_layers_spec, list):
+            max_n_layers = max(int(v) for v in n_layers_spec)
+        elif isinstance(n_layers_spec, dict):
+            max_n_layers = int(n_layers_spec.get("high", list_len))
+        else:
+            max_n_layers = int(n_layers_spec)
+        if list_len < max_n_layers:
+            raise ValueError(
+                f"optuna.layer_shared_resid_dropout inner lists have length {list_len} "
+                f"but the maximum n_layers in the search space is {max_n_layers}. "
+                f"Each list must be at least as long as the largest n_layers value "
+                f"(extra entries beyond the actual n_layers are truncated at runtime)."
+            )
+
+        # (c) All inner values must be bool
+        for i, lst in enumerate(lsrd_spec):
+            non_bool = [(j, v) for j, v in enumerate(lst) if not isinstance(v, bool)]
+            if non_bool:
+                raise ValueError(
+                    f"optuna.layer_shared_resid_dropout[{i}] contains non-bool values: "
+                    f"{non_bool}"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Search-space dispatcher
@@ -152,16 +194,23 @@ def _validate_config(config: dict) -> None:
 def _suggest(trial: optuna.Trial, name: str, spec) -> object:
     """Dispatch to the appropriate trial.suggest_* based on the YAML spec.
 
-    Three forms are supported:
+    Four forms are supported:
 
-    1. List  →  suggest_categorical
+    1. Flat list  →  suggest_categorical
          n_heads: [1, 2, 4, 8]
 
-    2. Dict with choices key  →  suggest_categorical
+    2. List-of-lists  →  suggest_categorical over list choices
+       Each inner list is one complete choice; Optuna picks one per trial.
+       Inner lists are serialised to JSON strings for storage compatibility.
+         layer_shared_resid_dropout:
+           - [true, false, true, ...]
+           - [false, false, false, ...]
+
+    3. Dict with choices key  →  suggest_categorical
          n_heads:
            choices: [1, 2, 4, 8]
 
-    3. Dict with low/high  →  suggest_int or suggest_float
+    4. Dict with low/high  →  suggest_int or suggest_float
        Type is inferred: both int → suggest_int, otherwise suggest_float.
        Optional keys: log (bool), step (number).
          lr:
@@ -178,6 +227,15 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
            step: 0.01
     """
     if isinstance(spec, list):
+        # List-of-lists → categorical over list choices.
+        # Each inner list is serialised to a JSON string because Optuna's
+        # categorical storage requires hashable (scalar) choices.  The result
+        # is deserialised back to a Python list before being passed to runner.
+        if spec and isinstance(spec[0], list):
+            import json as _json
+            choices = [_json.dumps(lst, separators=(",", ":")) for lst in spec]
+            result = trial.suggest_categorical(name, choices)
+            return _json.loads(result)
         return trial.suggest_categorical(name, spec)
     if "choices" in spec:
         return trial.suggest_categorical(name, spec["choices"])
