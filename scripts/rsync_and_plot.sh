@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-export STUDY_NAME=standard-v2-dropout-details \
-  && rsync -av \
+export STUDY_NAME=standard-v2-dropout-details
+if [[ -n $1 ]] ; then
+   STUDY_NAME=$1
+fi
+rsync -av \
     --include='*/' \
       --include='study.db' \
       --include='*.yaml' \
@@ -11,6 +14,6 @@ export STUDY_NAME=standard-v2-dropout-details \
     --exclude='*' \
     taco:code/corethink/retrosynformer/results/ \
     results/  \
-  && rs-plot-learning-curves \
+&& rs-plot-learning-curves \
     --study standard-v2-dropout-details \
     --yscale linear

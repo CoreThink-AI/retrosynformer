@@ -18,11 +18,7 @@
 #   python -m retrosynformer.runner -c results/config/baseline_small.yaml
 #   rs-train -c results/config/baseline_small.yaml
 optuna:
-  # Metric maximised by Optuna across trials:
-  #   valid_route_accuracy  — fraction of validation routes where every step matches
-  #   valid_action_accuracy — per-step template prediction accuracy on validation set
-  #   fraction_solved       — fraction of targets solved during route evaluation
-  objective_metric: valid_route_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
+  objective_metric: valid_route_accuracy  # valid_action_accuracy | valid_route_accuracy | fraction_solved
   n_heads: [1, 2, 3, 4]
   n_layers: [1, 2, 3, 4, 5, 6]
   head_dim: [64, 128, 256]
