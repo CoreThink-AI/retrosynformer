@@ -120,7 +120,41 @@ OBJECTIVE_METRICS = {
 }
 
 
-def _validate_config(config: dict) -> None:
+def _count_discrete_combinations(optuna_cfg: dict) -> int | None:
+    """Return the product of all parameter cardinalities if every search param
+    is categorical or a stepped integer range; return None if any param is
+    continuous (float range without a step, or int range with log=True).
+
+    Reserved keys (objective_metric, etc.) are excluded from the product.
+    """
+    product = 1
+    for name, spec in optuna_cfg.items():
+        if name in _RESERVED_OPTUNA_KEYS:
+            continue
+        if isinstance(spec, list):
+            # Flat list or list-of-lists → categorical; cardinality = len(spec).
+            product *= len(spec)
+        elif isinstance(spec, dict):
+            if "choices" in spec:
+                product *= len(spec["choices"])
+            else:
+                low, high = spec["low"], spec["high"]
+                log = spec.get("log", False)
+                step = spec.get("step")
+                is_int = isinstance(low, int) and isinstance(high, int)
+                if is_int and not log:
+                    s = int(step) if step is not None else 1
+                    product *= (high - low) // s + 1
+                else:
+                    # Continuous or log-scaled range → unbounded.
+                    return None
+        else:
+            # Unknown scalar spec — treat as continuous to be conservative.
+            return None
+    return product
+
+
+def _validate_config(config: dict, n_trials: int | None = None) -> None:
     """Raise ValueError for known config inconsistencies before any trial starts.
 
     Checks:
@@ -130,6 +164,8 @@ def _validate_config(config: dict) -> None:
         (a) non-jagged: all inner lists have the same length
         (b) each list length >= the largest n_layers value in the search space
         (c) all inner values are bools
+        (d) no two lists have the same sequence of values
+    - if all params are discrete, n_trials <= total combinations
     """
     optuna_cfg = config.get("optuna", {})
     optuna_keys = set(optuna_cfg)
@@ -186,6 +222,28 @@ def _validate_config(config: dict) -> None:
                     f"optuna.layer_shared_resid_dropout[{i}] contains values that are "
                     f"not bool or 0/1: {invalid}"
                 )
+
+        # (d) No duplicate lists (same sequence of values)
+        seen: dict[tuple, int] = {}
+        for i, lst in enumerate(lsrd_spec):
+            key = tuple(bool(v) for v in lst)
+            if key in seen:
+                raise ValueError(
+                    f"optuna.layer_shared_resid_dropout[{i}] is a duplicate of "
+                    f"entry [{seen[key]}]: {list(key)}"
+                )
+            seen[key] = i
+
+    # Discrete-space saturation check: if every parameter is categorical or a
+    # stepped-integer range, warn when n_trials exceeds the total combinations.
+    if n_trials is not None:
+        combos = _count_discrete_combinations(optuna_cfg)
+        if combos is not None and n_trials > combos:
+            raise ValueError(
+                f"n_trials={n_trials} exceeds the total number of discrete "
+                f"parameter combinations ({combos}). Reduce --n-trials to at "
+                f"most {combos}, or add a continuous parameter to the search space."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +319,6 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
               results_base: str, run_jsonl: str, eval_n_batches: int | None = None,
               study_name: str | None = None) -> float:
     config = read_config(config_path)
-    _validate_config(config)
     optuna_config = config.get("optuna", {})
     # Reserved keys configure the study itself and must not be passed to _suggest.
     objective_metric = optuna_config.get("objective_metric", "valid_route_accuracy")
@@ -373,6 +430,9 @@ def main():
         help="Optuna storage URL (default: sqlite:///results/hypertune-{study_name}/study.db)",
     )
     args = parser.parse_args()
+
+    # Validate config eagerly so bad configs fail before any study setup.
+    _validate_config(read_config(args.config_path), n_trials=args.n_trials)
 
     results_base = f"results/hypertune-{args.study_name}"
     run_jsonl = os.path.join(results_base, "run.jsonl")
