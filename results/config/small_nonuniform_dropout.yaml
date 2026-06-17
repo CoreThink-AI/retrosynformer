@@ -22,14 +22,17 @@
 optuna:
   objective_metric: valid_route_accuracy
   layer_shared_resid_dropout:
-    - [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
-    - [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]
-    - [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]
-    - [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true]
+    - [true,   true,  true,  true,  true,  true,  true,  true, false, false]
+    - [false,  false, false, false, false, false, false, false, false, true]
+    - [false, false, false, false, false, false, false, false, false, false]
+    - [false, false, false, false, false, false, false, false, false, false]
+    - [true,   true,  true,  true,  true,  true,  true,  true,  true, false]
+    - [true,   true,  true,  true,  true,  true,  true,  true,  true,  true]
+    - [true,   true, true,  false, false, false, false, false, false, false]
 
 context:
   building_blocks: data/small_building_blocks.csv
-  random_state: 2
+  random_state: 1
   templates_path: data/small_reaction_templates.pickle
 
 dataset:
@@ -81,5 +84,5 @@ train:
   early_stopping_patience: 15
   loss: crossEntropyLoss
   lr_scheduler_patience: 10
-  n_epochs: 50
+  n_epochs: 30
   results_path: results/hypertune-small-nonuniform-dropout/
