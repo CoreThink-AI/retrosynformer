@@ -1,6 +1,7 @@
 """Flask-Admin ModelViews and custom Blueprint for the dashboard."""
 import json
 import os
+from datetime import datetime, timedelta
 from urllib.parse import urljoin, urlparse
 
 from flask import (Blueprint, current_app, jsonify, redirect, render_template,
@@ -12,6 +13,16 @@ from werkzeug.security import check_password_hash
 
 from .models import Study, Trial, db
 from .sync import sync_all, sync_study
+
+STALE_TRIAL_HOURS = 2  # RUNNING trials not synced within this window are shown as stopped
+
+
+def _is_stale(trial) -> bool:
+    return (
+        trial.state == "RUNNING"
+        and trial.synced_at is not None
+        and (datetime.utcnow() - trial.synced_at) > timedelta(hours=STALE_TRIAL_HOURS)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -45,11 +56,13 @@ class TrialAdmin(ModelView):
         "study", "trial_number", "state", "epoch_count",
         "optuna_score", "valid_loss", "valid_action_accuracy",
         "valid_route_accuracy", "fraction_targets_solved", "duration_min",
+        "synced_at",
     ]
     column_sortable_list = [
         ("study", "study.study_name"), "trial_number", "state", "epoch_count",
         "optuna_score", "valid_loss", "valid_action_accuracy",
         "valid_route_accuracy", "fraction_targets_solved", "duration_min",
+        "synced_at",
     ]
     column_searchable_list = []
     column_filters = ["state", "optuna_score", "fraction_targets_solved", "epoch_count"]
@@ -62,6 +75,12 @@ class TrialAdmin(ModelView):
             f'<a href="{url_for("study_admin.details_view", id=m.study.id)}">'
             f'{m.study.study_name}</a>'
         ) if m.study else "?",
+        "state": lambda v, c, m, n: Markup(
+            f'<span class="badge badge-stopped">stopped</span>'
+            if _is_stale(m) else
+            f'<span class="badge badge-{m.state.lower()}">{m.state}</span>'
+        ),
+        "synced_at": lambda v, c, m, n: m.synced_at.strftime("%Y-%m-%d %H:%M") if m.synced_at else "—",
         "optuna_score": lambda v, c, m, n: f"{m.optuna_score:.4f}" if m.optuna_score is not None else "—",
         "valid_loss": lambda v, c, m, n: f"{m.valid_loss:.4f}" if m.valid_loss is not None else "—",
         "valid_action_accuracy": lambda v, c, m, n: f"{m.valid_action_accuracy:.4f}" if m.valid_action_accuracy is not None else "—",
@@ -112,6 +131,8 @@ def index():
         studies=studies,
         active=active,
         cloud_run_url=cloud_run_url,
+        now=datetime.utcnow(),
+        stale_hours=STALE_TRIAL_HOURS,
     )
 
 

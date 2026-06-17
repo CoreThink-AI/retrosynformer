@@ -12,6 +12,8 @@
     .badge-complete { background: #007bff; color: #fff; }
     .badge-failed   { background: #dc3545; color: #fff; }
     .badge-unknown  { background: #6c757d; color: #fff; }
+    .badge-stopped  { background: #fd7e14; color: #fff; }
+    .badge-running  { background: #28a745; color: #fff; }
     .metric { font-family: monospace; }
     .cloud-panel { border-left: 4px solid #007bff; }
     .status-ok    { color: #28a745; font-weight: bold; }
@@ -104,7 +106,6 @@
         <th>Best Score</th>
         <th>Best Trial</th>
         <th>Metric</th>
-        <th>Last Synced</th>
         <th>Curves</th>
       </tr>
     </thead>
@@ -121,7 +122,6 @@
         <td class="metric">{{ "%.4f"|format(s.best_score) if s.best_score is not none else "—" }}</td>
         <td class="metric">{{ s.best_trial_number if s.best_trial_number is not none else "—" }}</td>
         <td class="small">{{ s.objective_metric or "—" }}</td>
-        <td class="small">{{ s.last_synced_at.strftime("%H:%M:%S") if s.last_synced_at else "—" }}</td>
         <td>
           {% if s.best_trial_number is not none %}
           <a href="{{ url_for('dashboard.trial_curves', study_name=s.study_name, trial_num=s.best_trial_number) }}">
@@ -131,7 +131,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="text-center text-muted">No studies synced yet. <button class="btn btn-sm btn-primary" onclick="triggerSync()">Sync now</button></td></tr>
+      <tr><td colspan="9" class="text-center text-muted">No studies synced yet. <button class="btn btn-sm btn-primary" onclick="triggerSync()">Sync now</button></td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -145,27 +145,38 @@
       <tr>
         <th>Study</th>
         <th>Trial</th>
+        <th>State</th>
         <th>Epochs</th>
         <th>Loss</th>
         <th>ActAcc</th>
         <th>RouteAcc</th>
         <th>FracSolved</th>
         <th>Score</th>
+        <th>Last Updated</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
       {% for s in active %}
         {% for t in s.trials.filter_by(state="RUNNING").all() %}
+        {% set stale = t.synced_at and (now - t.synced_at).total_seconds() > stale_hours * 3600 %}
         <tr>
           <td>{{ s.study_name }}</td>
           <td class="metric">{{ t.trial_number }}</td>
+          <td>
+            {% if stale %}
+              <span class="badge badge-stopped">stopped</span>
+            {% else %}
+              <span class="badge badge-running">running</span>
+            {% endif %}
+          </td>
           <td class="metric">{{ t.epoch_count }}</td>
           <td class="metric">{{ "%.4f"|format(t.valid_loss) if t.valid_loss is not none else "—" }}</td>
           <td class="metric">{{ "%.4f"|format(t.valid_action_accuracy) if t.valid_action_accuracy is not none else "—" }}</td>
           <td class="metric">{{ "%.4f"|format(t.valid_route_accuracy) if t.valid_route_accuracy is not none else "—" }}</td>
           <td class="metric">{{ "%.4f"|format(t.fraction_targets_solved) if t.fraction_targets_solved is not none else "—" }}</td>
           <td class="metric">{{ "%.4f"|format(t.optuna_score) if t.optuna_score is not none else "—" }}</td>
+          <td class="small text-muted">{{ t.synced_at.strftime("%H:%M") if t.synced_at else "—" }}</td>
           <td><a href="{{ url_for('dashboard.trial_curves', study_name=s.study_name, trial_num=t.trial_number) }}">📈</a></td>
         </tr>
         {% endfor %}
