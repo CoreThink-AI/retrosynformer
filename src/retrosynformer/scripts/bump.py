@@ -8,6 +8,7 @@ then writes the files, commits, and tags — all in one command.
 Usage:
     python scripts/bump.py              # bump patch, write notes, commit, tag
     python scripts/bump.py --dry-run    # preview without writing anything
+    python scripts/bump.py --editable   # pause for hand-editing before tagging
     python scripts/bump.py --push       # also push branch + tag after committing
     rs-bump / bump                      # same via installed CLI entry point
 
@@ -37,7 +38,7 @@ def _run(cmd: list[str], **kwargs) -> str:
 def _git_log_since(tag: str) -> str:
     """Commit subject + stat lines since tag; falls back to last 30 commits."""
     try:
-        _run(["git", "rev-parse", "--verify", tag])  # check tag exists
+        _run(["git", "rev-parse", "--verify", tag])
         return _run(["git", "log", f"{tag}..HEAD", "--oneline", "--stat"])
     except subprocess.CalledProcessError:
         return _run(["git", "log", "--oneline", "--stat", "-30"])
@@ -45,6 +46,27 @@ def _git_log_since(tag: str) -> str:
 
 def _git_branch() -> str:
     return _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+
+
+def _git_commit(new_version: str) -> None:
+    files = [
+        "pyproject.toml",
+        f"docs/release-notes-{new_version}.md",
+        "CHANGELOG.md",
+    ]
+    subprocess.run(["git", "add"] + files, cwd=ROOT, check=True)
+    commit_msg = (
+        f"chore: bump to {new_version}; release notes and changelog\n\n"
+        "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    )
+    subprocess.run(["git", "commit", "-m", commit_msg], cwd=ROOT, check=True)
+
+
+def _git_tag(new_version: str, tag_message: str) -> None:
+    subprocess.run(
+        ["git", "tag", "-a", f"v{new_version}", "-m", tag_message],
+        cwd=ROOT, check=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +88,7 @@ def _bump_patch(version: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Anthropic API call
+# Anthropic API helpers
 # ---------------------------------------------------------------------------
 
 def _load_api_key() -> str:
@@ -81,8 +103,7 @@ def _load_api_key() -> str:
     return ""
 
 
-def _call_api(commits: str, old_version: str, new_version: str,
-              branch: str, today: str, model: str) -> dict:
+def _make_client():
     try:
         import anthropic
     except ImportError:
@@ -92,7 +113,6 @@ def _call_api(commits: str, old_version: str, new_version: str,
             file=sys.stderr,
         )
         sys.exit(1)
-
     api_key = _load_api_key()
     if not api_key:
         print(
@@ -100,10 +120,25 @@ def _call_api(commits: str, old_version: str, new_version: str,
             file=sys.stderr,
         )
         sys.exit(1)
+    import anthropic
+    return anthropic.Anthropic(api_key=api_key)
 
-    client = anthropic.Anthropic(api_key=api_key)
 
-    # Pull the two most recent changelog entries as style examples.
+def _parse_json(raw: str) -> dict:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]+\}", raw)
+        if m:
+            return json.loads(m.group(0))
+        raise ValueError(f"Could not parse JSON from API response:\n{raw}")
+
+
+def _call_api(commits: str, old_version: str, new_version: str,
+              branch: str, today: str, model: str) -> dict:
+    """Full first-pass API call: generate all release artefacts from commit log."""
+    client = _make_client()
+
     changelog_text = (ROOT / "CHANGELOG.md").read_text()
     examples = "\n---\n".join(
         re.findall(r"## \[[\s\S]*?(?=\n---)", changelog_text)[:2]
@@ -155,14 +190,31 @@ Rules:
         system=system,
         messages=[{"role": "user", "content": prompt}],
     )
-    raw = msg.content[0].text.strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r"\{[\s\S]+\}", raw)
-        if m:
-            return json.loads(m.group(0))
-        raise ValueError(f"Could not parse JSON from API response:\n{raw}")
+    return _parse_json(msg.content[0].text.strip())
+
+
+def _call_api_for_tag(entry_text: str, model: str) -> dict:
+    """Second-pass API call: derive tag_line1 + tag_body from a (edited) changelog entry."""
+    client = _make_client()
+
+    prompt = f"""Summarise this RetroSynFormer changelog entry into a concise annotated git tag message.
+
+{entry_text}
+
+Return a JSON object with exactly these keys:
+{{
+  "tag_line1": "One-line headline (≤72 chars, terse imperative, no trailing period)",
+  "tag_body": "2-3 sentences expanding on the headline, capturing the key changes"
+}}
+
+Respond with valid JSON only — no markdown fences, no extra text."""
+
+    msg = client.messages.create(
+        model=model,
+        max_tokens=256,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return _parse_json(msg.content[0].text.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -207,16 +259,15 @@ def _build_tag_message(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# File / git mutations
+# File mutations
 # ---------------------------------------------------------------------------
 
 def _write_version(new_version: str) -> None:
     path = ROOT / "pyproject.toml"
-    text = path.read_text()
     text = re.sub(
         r'^(version\s*=\s*)"[^"]+"',
         f'\\1"{new_version}"',
-        text,
+        path.read_text(),
         flags=re.MULTILINE,
     )
     path.write_text(text)
@@ -225,28 +276,19 @@ def _write_version(new_version: str) -> None:
 def _prepend_changelog(entry: str) -> None:
     path = ROOT / "CHANGELOG.md"
     text = path.read_text()
-    # Insert after the header separator (first "---\n\n")
     marker = "---\n\n"
     idx = text.index(marker) + len(marker)
     path.write_text(text[:idx] + entry + "\n---\n\n" + text[idx:])
 
 
-def _git_commit_and_tag(new_version: str, tag_message: str) -> None:
-    files = [
-        "pyproject.toml",
-        f"docs/release-notes-{new_version}.md",
-        "CHANGELOG.md",
-    ]
-    subprocess.run(["git", "add"] + files, cwd=ROOT, check=True)
-    commit_msg = (
-        f"chore: bump to {new_version}; release notes and changelog\n\n"
-        "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+def _extract_changelog_entry(new_version: str) -> str:
+    """Return the (possibly edited) changelog entry for new_version."""
+    text = (ROOT / "CHANGELOG.md").read_text()
+    m = re.search(
+        rf"(## \[{re.escape(new_version)}\][\s\S]*?)(?=\n---)",
+        text,
     )
-    subprocess.run(["git", "commit", "-m", commit_msg], cwd=ROOT, check=True)
-    subprocess.run(
-        ["git", "tag", "-a", f"v{new_version}", "-m", tag_message],
-        cwd=ROOT, check=True,
-    )
+    return m.group(1).strip() if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +305,16 @@ def main() -> None:
         help="Print generated content without writing files or committing",
     )
     parser.add_argument(
+        "--editable", action="store_true",
+        help=(
+            "After writing and committing the draft, pause for hand-editing. "
+            "Commits edits as a second commit, then generates the tag message "
+            "from the revised changelog entry."
+        ),
+    )
+    parser.add_argument(
         "--push", action="store_true",
-        help="Run 'git push && git push origin vX.Y.Z' after committing",
+        help="Run 'git push && git push origin vX.Y.Z' after tagging",
     )
     parser.add_argument(
         "--model", default="claude-haiku-4-5-20251001",
@@ -293,13 +343,12 @@ def main() -> None:
 
     release_notes = _build_release_notes(data, new_version, branch, month_year)
     changelog_entry = _build_changelog_entry(data, new_version, today)
-    tag_message = _build_tag_message(data)
 
     if args.dry_run:
         sep = "\n" + "─" * 60 + "\n"
         print(sep + "RELEASE NOTES" + sep + release_notes)
         print(sep + "CHANGELOG ENTRY" + sep + changelog_entry)
-        print(sep + "TAG MESSAGE" + sep + tag_message + "\n")
+        print(sep + "TAG MESSAGE" + sep + _build_tag_message(data) + "\n")
         return
 
     notes_path = ROOT / f"docs/release-notes-{new_version}.md"
@@ -312,8 +361,67 @@ def main() -> None:
     _prepend_changelog(changelog_entry)
     print(f"  updated CHANGELOG.md")
 
-    _git_commit_and_tag(new_version, tag_message)
-    print(f"  committed + tagged v{new_version}")
+    _git_commit(new_version)
+    print(f"  committed draft")
+
+    if args.editable:
+        # ----------------------------------------------------------------
+        # Pause for the user to edit the two doc files in any editor.
+        # If $EDITOR is set, open both files in it automatically.
+        # ----------------------------------------------------------------
+        notes_rel = notes_path.relative_to(ROOT)
+        print(f"\n{'─'*60}")
+        print("Edit the draft files, then return here and press Enter.")
+        print(f"  {notes_rel}")
+        print(f"  CHANGELOG.md")
+        print(f"{'─'*60}")
+
+        editor = os.environ.get("EDITOR", "")
+        if editor:
+            subprocess.run(
+                [editor, str(notes_path), str(ROOT / "CHANGELOG.md")],
+                cwd=ROOT,
+            )
+
+        try:
+            input("\nPress Enter when you have finished editing … ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted — draft commit is in place but no tag was created.")
+            sys.exit(1)
+
+        # Stage edited files and commit only if something changed.
+        subprocess.run(
+            ["git", "add",
+             str(notes_rel),
+             "CHANGELOG.md"],
+            cwd=ROOT, check=True,
+        )
+        diff = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"], cwd=ROOT,
+        )
+        if diff.returncode != 0:
+            refine_msg = (
+                f"docs: refine release notes and changelog for v{new_version}\n\n"
+                "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+            )
+            subprocess.run(
+                ["git", "commit", "-m", refine_msg], cwd=ROOT, check=True,
+            )
+            print("  committed edits")
+        else:
+            print("  no edits detected — skipping refinement commit")
+
+        # Re-read the (possibly revised) changelog entry and generate tag message.
+        revised_entry = _extract_changelog_entry(new_version)
+        print(f"  generating tag message from revised changelog …")
+        tag_data = _call_api_for_tag(revised_entry, args.model)
+        tag_message = _build_tag_message(tag_data)
+    else:
+        tag_message = _build_tag_message(data)
+
+    _git_tag(new_version, tag_message)
+    print(f"  tagged v{new_version}")
+    print(f"\nTag message:\n{tag_message}")
 
     if args.push:
         subprocess.run(["git", "push"], cwd=ROOT, check=True)
