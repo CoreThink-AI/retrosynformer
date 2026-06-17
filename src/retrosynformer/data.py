@@ -204,8 +204,7 @@ class RouteDataset:
                     None,
                     process_routes=True,  # defaults to False
                 )
-                # because target, reward_function=None) self.process_routes used instead of reward_function arg
-                env.set_target_compound(target)  # reward_function=None defaults to self.process_routes to chose [specific] or [general]
+                env.set_target_compound(target)  # reward_function=None causes self.process_routes to choose specific or general reward
 
                 route_done, route_done, _ = env._check_if_done()
 
