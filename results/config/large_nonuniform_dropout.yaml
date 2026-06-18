@@ -13,11 +13,11 @@
 #   none-tied  [False]*24 — standard independent masks (baseline)
 #   first-only [True] + [False]*23 — only the first layer is tied
 #   last-only  [False]*23 + [True] — only the last layer is tied
-#
-# Usage:
-#   rs-hypertune -c results/config/small_nonuniform_dropout.yaml \
-#       --n-trials 4 --n-epochs 50 --dataset small \
-#       --study-name small-nonuniform-dropout
+
+# This file intended to be run with:
+  # rs-hypertune -c results/config/small_nonuniform_dropout.yaml \
+  #     --n-trials 7 --n-epochs 100 --dataset large \
+  #     --study-name large-nonuniform-dropout-12-layers
 
 optuna:
   # Metric maximised by Optuna across trials:
@@ -31,15 +31,18 @@ optuna:
   attn_pdrop:
     low: 0.13
     high: 0.2
+    log: true
   embd_pdrop:
     low: 0.0
     high: 0.07
   resid_pdrop:
-    low: 0.0
+    low: 0.02
     high: 0.1
+    log: true
   lr:
     high: .004
     low: .0009
+    log: true
 
 
 context:
