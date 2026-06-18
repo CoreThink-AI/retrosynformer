@@ -1,2 +1,4 @@
 source .venv-rocm/bin/activate || source .venv/bin/activate
 git status
+rsync -av --include='*/' --include='study.db' --include='pred_routes_train_progress.json' --include='train_progress.jsonl' --include '*.log' --include='model.config.yaml' --include='run.jsonl' --exclude='*' taco:code/corethink/retrosynformer/results/ results/
+

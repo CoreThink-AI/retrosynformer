@@ -79,6 +79,5 @@ train:
   loss: crossEntropyLoss
   n_epochs: 300               # best trial still improving at epoch 199; extend budget
   early_stopping_patience: 30  # stop after this many epochs with no valid_loss improvement
-  lr_scheduler_patience: 10   # ReduceLROnPlateau: epochs with no val_loss improvement before reducing lr
-  lr_scheduler_factor: 0.1   # ReduceLROnPlateau: multiply lr by this factor on each reduction
+  lr_scheduler_patience: 15    # ReduceLROnPlateau patience before halving lr
   results_path: results/
