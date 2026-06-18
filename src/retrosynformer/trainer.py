@@ -1,10 +1,11 @@
+import hashlib
 import json
 import os
 import shutil
 import signal
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 import torch
@@ -93,6 +94,8 @@ class RetroTrainer:
             self.optimizer, "min", patience=lr_scheduler_patience, factor=lr_scheduler_factor
         )
         self.loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
+        self._n_lr_reductions = 0
+        self._best_valid_route_accuracy = 0.0
 
     def unpack_data(self, data):
 
@@ -144,6 +147,7 @@ class RetroTrainer:
 
     def train_one_epoch(self):
         total_loss = 0
+        total_grad_norm = 0.0
         actions_id_batch, actions_id_pred_batch, _action_preds_batch = [], [], []
 
         for i, data in enumerate(self.train_dataloader):
@@ -175,6 +179,11 @@ class RetroTrainer:
 
             loss = self.loss_fn(action_preds, actions) / attention_mask.sum()
             loss.backward()
+            # Compute gradient norm before the optimizer step clears the graph.
+            # clip_grad_norm_ with inf max_norm returns the norm without clipping.
+            total_grad_norm += torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=float("inf")
+            ).item()
             self.optimizer.step()
             total_loss += loss.item()
 
@@ -197,7 +206,12 @@ class RetroTrainer:
             flat_actions_id_batch, flat_actions_id_pred_batch
         )
 
-        return total_loss / len(self.train_dataloader), action_accuracy, route_accuracy
+        return (
+            total_loss / len(self.train_dataloader),
+            action_accuracy,
+            route_accuracy,
+            total_grad_norm / len(self.train_dataloader),
+        )
 
     def eval(self, dataloader=None):
         if not dataloader:
@@ -278,7 +292,6 @@ class RetroTrainer:
 
     def _train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
                trial_number=None, study_name=None):
-        time.time()
         route_predictor = RoutePredictor(
             self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
         )
@@ -332,6 +345,12 @@ class RetroTrainer:
             with open(eval_path) as f:
                 self.results_eval = json.load(f)
 
+        config_hash = hashlib.sha256(
+            json.dumps(self.config, sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
+
+        train_start_time = time.time()
+
         print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
         if verbose:
             _hdr_prefix = [f"{'trial':>5}"] if trial_number is not None else []
@@ -348,7 +367,7 @@ class RetroTrainer:
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
 
-            train_loss, train_action_accuracy, train_route_accuracy = (
+            train_loss, train_action_accuracy, train_route_accuracy, mean_grad_norm = (
                 self.train_one_epoch()
             )
             training_loss.append(train_loss)
@@ -356,7 +375,11 @@ class RetroTrainer:
             training_route_accuracy.append(train_route_accuracy)
 
             valid_loss, valid_action_accuracy, valid_route_accuracy, _, _ = self.eval()
+            lr_before_step = self.optimizer.param_groups[0]["lr"]
             self.scheduler.step(valid_loss)
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            if current_lr < lr_before_step:
+                self._n_lr_reductions += 1
             validation_loss.append(valid_loss)
             validation_accuracy.append(valid_action_accuracy)
             validation_route_accuracy.append(valid_route_accuracy)
@@ -377,7 +400,8 @@ class RetroTrainer:
 
             # When this epoch is the new best, copy model.last.pth → model.pth
             # atomically — avoids serialising state_dict a second time.
-            if valid_loss < lowest_valid_loss:
+            is_best = valid_loss < lowest_valid_loss
+            if is_best:
                 model_path = save_folder + "/model.pth"
                 lowest_valid_loss = valid_loss
                 tmp_fd2, tmp_path2 = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
@@ -393,6 +417,9 @@ class RetroTrainer:
             else:
                 epochs_no_improve += 1
                 note = ""
+
+            if valid_route_accuracy > self._best_valid_route_accuracy:
+                self._best_valid_route_accuracy = valid_route_accuracy
 
             eval_routes_frequency = self.config["evaluation"]["eval_routes_frequency"]
             if (
@@ -425,6 +452,18 @@ class RetroTrainer:
                 "valid_action_accuracy": valid_action_accuracy,
                 "valid_route_accuracy": valid_route_accuracy,
                 "seconds_per_epoch": seconds_this_epoch,
+                # --- new fields ---
+                "learning_rate": current_lr,
+                "elapsed_seconds": time.time() - train_start_time,
+                "is_best": is_best,
+                "epochs_without_improvement": epochs_no_improve,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "gradient_norm": mean_grad_norm,
+                "n_lr_reductions": self._n_lr_reductions,
+                "best_valid_route_accuracy": self._best_valid_route_accuracy,
+                "study_name": study_name,
+                "trial_number": trial_number,
+                "config_hash": config_hash,
             }
             self.result_df = pd.concat(
                 [self.result_df, pd.DataFrame([record])], ignore_index=True
