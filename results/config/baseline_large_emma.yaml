@@ -32,7 +32,7 @@ optuna:
   # n_layers: 26   # 12
   n_layers: [12, 16, 21, 26]
   # head_dim: 256  # 128  
-  head_dim: [64, 128, 256]
+  # head_dim: [64, 128, 256]
   # lr: .211  # 0.0009685260076984002
   lr:
     low: 1.0e-4  # 0.004
@@ -46,8 +46,8 @@ optuna:
   #   - [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
   #   - [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
   # activation_function: relu
-  hidden_size: 640
-  max_ep_len: 20
+  # hidden_size: 640
+  # max_ep_len: 20
   
   # attn_pdrop: 0.02  # 0.166
   attn_pdrop:
