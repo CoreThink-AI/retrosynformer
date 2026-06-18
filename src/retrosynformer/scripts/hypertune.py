@@ -359,7 +359,11 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
          n_heads:
            choices: [1, 2, 4, 8]
 
-    4. Dict with low/high  →  suggest_int or suggest_float
+    4. Scalar (int, float, bool, str)  →  fixed value, returned as-is every trial
+         hidden_size: 640
+         max_ep_len: 20
+
+    5. Dict with low/high  →  suggest_int or suggest_float
        Type is inferred: both int → suggest_int, otherwise suggest_float.
        Optional keys: log (bool), step (number).
          lr:
@@ -375,6 +379,9 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
            high: 0.3
            step: 0.01
     """
+    if not isinstance(spec, (list, dict)):
+        # Plain scalar — fixed value, not a search dimension; return as-is.
+        return spec
     if isinstance(spec, list):
         # List-of-lists → categorical over list choices.
         # Each inner list is serialised to a JSON string because Optuna's

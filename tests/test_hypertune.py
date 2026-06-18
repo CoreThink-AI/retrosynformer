@@ -78,6 +78,21 @@ def test_suggest_float_inferred_from_python_float_types(trial):
     trial.suggest_int.assert_not_called()
 
 
+def test_suggest_scalar_int_returns_fixed_value(trial):
+    assert ht._suggest(trial, "hidden_size", 640) == 640
+    trial.suggest_int.assert_not_called()
+    trial.suggest_float.assert_not_called()
+    trial.suggest_categorical.assert_not_called()
+
+
+def test_suggest_scalar_float_returns_fixed_value(trial):
+    assert ht._suggest(trial, "dropout", 0.1) == 0.1
+
+
+def test_suggest_scalar_bool_returns_fixed_value(trial):
+    assert ht._suggest(trial, "use_feature", True) is True
+
+
 # ---------------------------------------------------------------------------
 # _enumerate_ordered_params
 # ---------------------------------------------------------------------------
