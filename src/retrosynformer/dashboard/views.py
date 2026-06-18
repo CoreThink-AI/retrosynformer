@@ -69,7 +69,7 @@ class TrialAdmin(ModelView):
         "epoch_count",
         "optuna_score", "valid_loss", "valid_action_accuracy",
         "valid_route_accuracy", "fraction_targets_solved",
-        "synced_at",
+        "synced_at", "curves",
     ]
     column_sortable_list = [
         ("study", "study.study_name"), "trial_number", "state",
@@ -110,6 +110,9 @@ class TrialAdmin(ModelView):
         "valid_route_accuracy":      lambda v, c, m, n: f"{m.valid_route_accuracy:.4f}"      if m.valid_route_accuracy      is not None else "—",
         "fraction_targets_solved":   lambda v, c, m, n: f"{m.fraction_targets_solved:.4f}"   if m.fraction_targets_solved   is not None else "—",
         "duration_min":              lambda v, c, m, n: f"{m.duration_min:.1f}"              if m.duration_min              is not None else "—",
+        "curves": lambda v, c, m, n: Markup(
+            f'<a href="{url_for("dashboard.trial_curves", study_name=m.study.study_name, trial_num=m.trial_number)}">curves</a>'
+        ) if m.trial_dir and m.study else "—",
     }
 
 
