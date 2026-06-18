@@ -26,8 +26,6 @@ optuna:
   #   fraction_solved       — fraction of targets solved during route evaluation
   objective_metric: valid_action_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
   layer_shared_resid_dropout:
-    - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    - [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     - [1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
     - [0, 0, 0, 0, 0, 0, 0, 1, 1, 1]
     - [1, 1, 1, 0, 0, 0, 0, 0, 0, 0]
