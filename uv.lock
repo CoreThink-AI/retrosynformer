@@ -2356,6 +2356,20 @@ wheels = [
 ]
 
 [[package]]
+name = "optuna-dashboard"
+version = "0.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bottle" },
+    { name = "optuna" },
+    { name = "tomli", marker = "python_full_version < '3.11' or (extra == 'extra-14-retrosynformer-cpu' and extra == 'extra-14-retrosynformer-cuda') or (extra == 'extra-14-retrosynformer-cpu' and extra == 'extra-14-retrosynformer-rocm') or (extra == 'extra-14-retrosynformer-cuda' and extra == 'extra-14-retrosynformer-rocm')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a6/c5/5fc8e8327f40c1406dbe4a1ac052e05751a5bd4f594d9a517f1ca905c03b/optuna_dashboard-0.20.0.tar.gz", hash = "sha256:52a6da480a2500b6993c8fa61c81063b0dbe730edbd9f651c81b318393cca71d", size = 8378143, upload-time = "2025-11-10T05:27:18.908Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/5a/90ffcd3e6ad99863a18cf3d4aa8289ce997ccf6f2b9d0f8f291af4075729/optuna_dashboard-0.20.0-py3-none-any.whl", hash = "sha256:7fe92a6b1ba8f1f77d29ff8a86fa09a01cd736e411e354d0c96c05cd4a86c289", size = 8400813, upload-time = "2025-11-10T05:27:16.666Z" },
+]
+
+[[package]]
 name = "ordered-set"
 version = "4.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2561,6 +2575,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d7/47/e4501f49c178ae1d9f4a75073fda4204f52647993f075a9db4d14930e0c5/platformdirs-4.10.0.tar.gz", hash = "sha256:31e761a6a0ca04faf7353ea759bdba55652be214725111e5aac52dfa29d4bef7", size = 31224, upload-time = "2026-05-28T03:32:53.587Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/e6/cd9575ac904136b3cbf7aa7ee819ef86eedb7274e46f230e94ea4342e729/platformdirs-4.10.0-py3-none-any.whl", hash = "sha256:fb516cdb12eb0d857d0cd85a7c57cea4d060bee4578d6cf5a14dfdf8cbf8784a", size = 22743, upload-time = "2026-05-28T03:32:52.175Z" },
+]
+
+[[package]]
+name = "plotly"
+version = "6.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "narwhals" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/fd/d72c292d78aadb93d1a9bcd76bf3c678271040c7cf10abe5788b33040a39/plotly-6.8.0.tar.gz", hash = "sha256:e088e7ddc68d4f70e3d66659224727a45296d71d2b8284181862d3d8f1f0d88f", size = 6915161, upload-time = "2026-06-03T18:33:40.226Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/14/abe5ce876ab5b66ee3c691bf537fcd43d037aea55d447aacf74630a8f31e/plotly-6.8.0-py3-none-any.whl", hash = "sha256:13c5c4a0f70b74cab1913eda0de49b826df5931708eb6f9c3010040614700ec8", size = 9902055, upload-time = "2026-06-03T18:33:34.26Z" },
 ]
 
 [[package]]
@@ -3401,8 +3428,10 @@ dependencies = [
     { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-14-retrosynformer-cpu' and extra == 'extra-14-retrosynformer-cuda') or (extra == 'extra-14-retrosynformer-cpu' and extra == 'extra-14-retrosynformer-rocm') or (extra == 'extra-14-retrosynformer-cuda' and extra == 'extra-14-retrosynformer-rocm')" },
     { name = "numpy" },
     { name = "optuna" },
+    { name = "optuna-dashboard" },
     { name = "pandas" },
     { name = "partd" },
+    { name = "plotly" },
     { name = "pydantic" },
     { name = "rdchiral" },
     { name = "rdkit" },
@@ -3475,8 +3504,10 @@ requires-dist = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "optuna" },
+    { name = "optuna-dashboard", specifier = ">=0.20.0" },
     { name = "pandas" },
     { name = "partd" },
+    { name = "plotly", specifier = ">=5.0" },
     { name = "pydantic" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytorch-triton-rocm", marker = "extra == 'rocm'", specifier = ">=3.1.0", index = "https://download.pytorch.org/whl/rocm6.2" },

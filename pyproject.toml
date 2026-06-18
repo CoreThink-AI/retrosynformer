@@ -35,12 +35,14 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "matplotlib",
+    "plotly>=5.0",
     "seaborn",
     "markupsafe",
     "huggingface-hub",
     "filelock",
     # "sympy>=1.13.3",
     "transformers",
+    "optuna-dashboard>=0.20.0",
 ]
 
 [project.optional-dependencies]

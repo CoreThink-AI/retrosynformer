@@ -5,18 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ study.study_name }} / trial_{{ "%03d"|format(trial.trial_number) }}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
   <style>
     .param-badge { font-family: monospace; font-size: 0.8rem; }
-    canvas { max-height: 300px; }
   </style>
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
   <a class="navbar-brand" href="/">RetroSynFormer</a>
-  <div class="navbar-nav">
+  <div class="navbar-nav ml-auto">
     <a class="nav-link" href="/">Dashboard</a>
+    <a class="nav-link" href="/admin/study_admin/">Studies</a>
     <a class="nav-link" href="/admin/trial_admin/">Trials</a>
+    <li class="nav-item dropdown">
+      <a class="nav-link dropdown-toggle" href="#" role="button" data-toggle="dropdown">Plots</a>
+      <div class="dropdown-menu dropdown-menu-right" style="max-height:70vh;overflow-y:auto;min-width:22rem;">
+        {% set _active = nav_studies | selectattr("status", "equalto", "active") | list %}
+        {% set _other  = nav_studies | rejectattr("status", "equalto", "active") | list %}
+        {% if _active %}<h6 class="dropdown-header">Active</h6>{% endif %}
+        {% for s in _active %}
+        <a class="dropdown-item d-flex justify-content-between align-items-center {% if s.study_name == study.study_name %}active{% endif %}"
+           href="{{ url_for('dashboard.study_parcoords', study_name=s.study_name) }}">
+          <span style="max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.study_name }}</span>
+          <span class="badge badge-success ml-2">{{ s.n_complete }}</span>
+        </a>
+        {% endfor %}
+        {% if _active %}<div class="dropdown-divider"></div>{% endif %}
+        <h6 class="dropdown-header">All studies</h6>
+        {% for s in _other %}
+        <a class="dropdown-item d-flex justify-content-between align-items-center {% if s.study_name == study.study_name %}active{% endif %}"
+           href="{{ url_for('dashboard.study_parcoords', study_name=s.study_name) }}">
+          <span style="max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.study_name }}</span>
+          <span class="badge badge-secondary ml-2">{{ s.n_complete }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </li>
   </div>
 </nav>
 
@@ -57,89 +83,12 @@
     {% endfor %}
   </div>
 
-  <div class="row">
-    <div class="col-md-6 mb-3">
-      <div class="card">
-        <div class="card-header py-1">Loss</div>
-        <div class="card-body py-2">
-          <canvas id="lossChart"></canvas>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-6 mb-3">
-      <div class="card">
-        <div class="card-header py-1">Action Accuracy</div>
-        <div class="card-body py-2">
-          <canvas id="accChart"></canvas>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-6 mb-3">
-      <div class="card">
-        <div class="card-header py-1">Route Accuracy (teacher-forced)</div>
-        <div class="card-body py-2">
-          <canvas id="routeAccChart"></canvas>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-6 mb-3">
-      <div class="card">
-        <div class="card-header py-1">Seconds / Epoch</div>
-        <div class="card-body py-2">
-          <canvas id="spdChart"></canvas>
-        </div>
-      </div>
-    </div>
-  </div>
+  <div id="curves-plot"></div>
 </div>
 
 <script>
-const rawData = {{ epochs_data | safe }};
-
-if (rawData.length === 0) {
-  document.querySelector('.container-fluid').insertAdjacentHTML('beforeend',
-    '<div class="alert alert-warning">No epoch data yet.</div>');
-} else {
-  const epochs      = rawData.map(r => r.epoch);
-  const trainLoss   = rawData.map(r => r.train_loss);
-  const validLoss   = rawData.map(r => r.valid_loss);
-  const trainAcc    = rawData.map(r => r.train_action_accuracy);
-  const validAcc    = rawData.map(r => r.valid_action_accuracy);
-  const trainRoute  = rawData.map(r => r.train_route_accuracy);
-  const validRoute  = rawData.map(r => r.valid_route_accuracy);
-  const spd         = rawData.map(r => r.seconds_per_epoch);
-
-  function makeChart(id, labels, datasets) {
-    new Chart(document.getElementById(id), {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: true,
-        animation: false,
-        plugins: { legend: { position: 'bottom' } },
-        elements: { point: { radius: 0 }, line: { borderWidth: 1.5 } },
-        scales: { x: { title: { display: true, text: 'Epoch' } } }
-      }
-    });
-  }
-
-  makeChart('lossChart', epochs, [
-    { label: 'train_loss',  data: trainLoss,  borderColor: '#fd7e14', fill: false },
-    { label: 'valid_loss',  data: validLoss,  borderColor: '#007bff', fill: false },
-  ]);
-  makeChart('accChart', epochs, [
-    { label: 'train_acc',  data: trainAcc,  borderColor: '#fd7e14', fill: false },
-    { label: 'valid_acc',  data: validAcc,  borderColor: '#007bff', fill: false },
-  ]);
-  makeChart('routeAccChart', epochs, [
-    { label: 'train_route_acc',  data: trainRoute,  borderColor: '#fd7e14', fill: false },
-    { label: 'valid_route_acc',  data: validRoute,  borderColor: '#007bff', fill: false },
-  ]);
-  makeChart('spdChart', epochs, [
-    { label: 'sec/epoch',  data: spd,  borderColor: '#6c757d', fill: false },
-  ]);
-}
+const figData = {{ fig_json | safe }};
+Plotly.newPlot('curves-plot', figData.data, figData.layout, {responsive: true});
 </script>
 </body>
 </html>

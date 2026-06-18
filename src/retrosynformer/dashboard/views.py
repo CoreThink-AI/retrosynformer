@@ -189,6 +189,16 @@ class DashboardIndexView(AdminIndexView):
 bp = Blueprint("dashboard", __name__, template_folder="templates")
 
 
+@bp.app_context_processor
+def _inject_studies_for_nav():
+    """Make all studies available in every template for the Plots dropdown."""
+    try:
+        studies = Study.query.order_by(Study.last_synced_at.desc()).all()
+    except Exception:
+        studies = []
+    return {"nav_studies": studies}
+
+
 @bp.get("/")
 def index():
     studies = Study.query.order_by(Study.last_synced_at.desc()).all()
@@ -253,25 +263,55 @@ def _is_safe_url(target: str) -> bool:
     )
 
 
+@bp.get("/study/<study_name>/parcoords")
+def study_parcoords(study_name: str):
+    from .plots import (build_parcoords_figure, build_optimization_history_figure,
+                        build_param_importances_figure, load_optuna_study)
+
+    study = Study.query.filter_by(study_name=study_name).first_or_404()
+    if not study.db_path or not os.path.exists(study.db_path):
+        return "study.db not found", 404
+
+    try:
+        optuna_study = load_optuna_study(study.db_path, study.study_name)
+    except Exception as exc:
+        return f"Could not load Optuna study: {exc}", 500
+
+    parcoords_fig = build_parcoords_figure(optuna_study)
+    history_fig = build_optimization_history_figure(optuna_study)
+    importance_fig = build_param_importances_figure(optuna_study)
+
+    n_complete = sum(1 for t in optuna_study.trials if t.state.name == "COMPLETE")
+
+    return render_template(
+        "dashboard/parcoords.html",
+        study=study,
+        n_complete=n_complete,
+        parcoords_json=parcoords_fig.to_json(),
+        history_json=history_fig.to_json(),
+        importance_json=importance_fig.to_json() if importance_fig else None,
+    )
+
+
 @bp.get("/trial/<study_name>/<int:trial_num>/curves")
 def trial_curves(study_name: str, trial_num: int):
+    from .plots import build_trial_figure
+
     study = Study.query.filter_by(study_name=study_name).first_or_404()
     trial = Trial.query.filter_by(study_id=study.id, trial_number=trial_num).first_or_404()
     epochs_data = []
     if trial.trial_dir:
         jsonl_path = os.path.join(trial.trial_dir, "train_progress.jsonl")
         if os.path.exists(jsonl_path):
-            import json as _json
             rows = []
             with open(jsonl_path) as f:
                 for line in f:
                     line = line.strip()
                     if line:
                         try:
-                            rows.append(_json.loads(line))
-                        except _json.JSONDecodeError:
+                            rows.append(json.loads(line))
+                        except json.JSONDecodeError:
                             pass
-            # Reset detection: keep only the last contiguous run
             if rows:
                 last_reset = 0
                 for i in range(1, len(rows)):
@@ -286,12 +326,15 @@ def trial_curves(study_name: str, trial_num: int):
         except json.JSONDecodeError:
             pass
 
+    title = f"{study.study_name} / trial_{trial.trial_number:03d}"
+    fig = build_trial_figure(epochs_data, title=title)
+
     return render_template(
         "dashboard/trial_curves.html",
         study=study,
         trial=trial,
         params=params,
-        epochs_data=json.dumps(epochs_data),
+        fig_json=fig.to_json(),
     )
 
 

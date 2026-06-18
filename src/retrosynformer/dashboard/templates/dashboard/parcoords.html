@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ study.study_name }} — Hyperparameter Analysis</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
+  <style>
+    .metric { font-family: monospace; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <a class="navbar-brand" href="/">RetroSynFormer</a>
+  <div class="navbar-nav ml-auto">
+    <a class="nav-link" href="/">Dashboard</a>
+    <a class="nav-link" href="/admin/study_admin/">Studies</a>
+    <a class="nav-link" href="/admin/trial_admin/">Trials</a>
+    <li class="nav-item dropdown">
+      <a class="nav-link dropdown-toggle" href="#" role="button" data-toggle="dropdown">Plots</a>
+      <div class="dropdown-menu dropdown-menu-right" style="max-height:70vh;overflow-y:auto;min-width:22rem;">
+        {% set _active = nav_studies | selectattr("status", "equalto", "active") | list %}
+        {% set _other  = nav_studies | rejectattr("status", "equalto", "active") | list %}
+        {% if _active %}<h6 class="dropdown-header">Active</h6>{% endif %}
+        {% for s in _active %}
+        <a class="dropdown-item d-flex justify-content-between align-items-center {% if s.study_name == study.study_name %}active{% endif %}"
+           href="{{ url_for('dashboard.study_parcoords', study_name=s.study_name) }}">
+          <span style="max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.study_name }}</span>
+          <span class="badge badge-success ml-2">{{ s.n_complete }}</span>
+        </a>
+        {% endfor %}
+        {% if _active %}<div class="dropdown-divider"></div>{% endif %}
+        <h6 class="dropdown-header">All studies</h6>
+        {% for s in _other %}
+        <a class="dropdown-item d-flex justify-content-between align-items-center {% if s.study_name == study.study_name %}active{% endif %}"
+           href="{{ url_for('dashboard.study_parcoords', study_name=s.study_name) }}">
+          <span style="max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.study_name }}</span>
+          <span class="badge badge-secondary ml-2">{{ s.n_complete }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </li>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+  <h5>
+    {{ study.study_name }}
+    <span class="text-muted small ml-2">{{ n_complete }} complete trials</span>
+    <span class="badge badge-{{ study.status }} ml-2">{{ study.status }}</span>
+  </h5>
+
+  <div class="row mb-2">
+    <div class="col-md-3 col-6 mb-2">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h5 mb-0 metric">{{ "%.4f"|format(study.best_score) if study.best_score is not none else "—" }}</div>
+          <div class="text-muted small">Best Score</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6 mb-2">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h5 mb-0 metric">{{ study.best_trial_number if study.best_trial_number is not none else "—" }}</div>
+          <div class="text-muted small">Best Trial</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6 mb-2">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h5 mb-0 metric">{{ study.objective_metric or "—" }}</div>
+          <div class="text-muted small">Objective</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6 mb-2">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="h5 mb-0 metric">
+            {% if study.best_trial_number is not none %}
+            <a href="{{ url_for('dashboard.trial_curves', study_name=study.study_name, trial_num=study.best_trial_number) }}">
+              trial {{ study.best_trial_number }}
+            </a>
+            {% else %}—{% endif %}
+          </div>
+          <div class="text-muted small">Best Curves</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-muted small mb-2">
+    Drag on any axis to filter trials. Shift-drag to add a second range.
+    Bright yellow lines = high score. Click a line to highlight it.
+  </p>
+
+  <div class="card mb-3">
+    <div class="card-body p-2">
+      <div id="parcoords-plot"></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-{{ '6' if importance_json else '12' }} mb-3">
+      <div class="card">
+        <div class="card-body p-2">
+          <div id="history-plot"></div>
+        </div>
+      </div>
+    </div>
+    {% if importance_json %}
+    <div class="col-md-6 mb-3">
+      <div class="card">
+        <div class="card-body p-2">
+          <div id="importance-plot"></div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const cfg = {responsive: true};
+const parcoords = {{ parcoords_json | safe }};
+const history   = {{ history_json   | safe }};
+Plotly.newPlot('parcoords-plot', parcoords.data, parcoords.layout, cfg);
+Plotly.newPlot('history-plot',   history.data,   history.layout,   cfg);
+{% if importance_json %}
+const importance = {{ importance_json | safe }};
+Plotly.newPlot('importance-plot', importance.data, importance.layout, cfg);
+{% endif %}
+</script>
+</body>
+</html>

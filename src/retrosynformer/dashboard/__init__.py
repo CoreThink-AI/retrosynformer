@@ -87,11 +87,12 @@ def create_app(
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         # HSTS: tell browsers to always use HTTPS for this host for 1 year
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        # CSP: allow Bootstrap CDN for the login page; everything else same-origin
+        # CSP: allow Bootstrap/Plotly CDN; 'unsafe-inline' needed for Plotly
+        # chart initialisation blocks in dashboard templates.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
+            "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
             "img-src 'self' data:; "
             "font-src 'self' https://cdn.jsdelivr.net"
         )
