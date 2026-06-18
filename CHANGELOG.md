@@ -5,6 +5,18 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.15] — 2026-06-18
+
+**EpochLogger singleton: configurable per-epoch JSONL accumulator.**
+
+- New `src/retrosynformer/epoch_logger.py`: module-level singleton (all classmethods) for accumulating training metrics from any depth of the call stack and flushing them to `train_progress.jsonl` at epoch end.
+- Three-tier state: `_persistent` (constant for the whole run), `_state` (reset each epoch), `_providers` (zero-arg callables evaluated at flush time, e.g. `elapsed_seconds`, `timestamp`).
+- Field filtering via `logging.fields` in `model.config.yaml`; omit the key to write every accumulated field (backward-compatible).
+- `trainer.py`: wired `EpochLogger.configure/set_persistent/begin_epoch/update_many/flush` into `_train`; `train_one_epoch` now calls `EpochLogger.update("gradient_norm", …)` as a side effect; removed manual `json.dumps` file write.
+- `results/config.yaml`: added `logging:` section documenting all 19 available fields in grouped comments.
+
+---
+
 ## [0.1.14] — 2026-06-18
 
 **Quadratic objective estimation for incomplete trials; large-study merge; 11 new jsonl fields per epoch.**
