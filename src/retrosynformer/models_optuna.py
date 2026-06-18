@@ -1,0 +1,725 @@
+"""SQLAlchemy ORM models for an Optuna study.db SQLite file.
+
+All models are read-only by default (``connect(readonly=True)``).
+
+Quick start
+-----------
+>>> from retrosynformer.models_optuna import connect
+>>> session = connect("results/hypertune-foo/study.db")
+>>> for study in session.query(Study).all():
+...     print(study, study.best_trial)
+
+Merge analysis
+--------------
+Merging two study.db files into one (different study name, union search
+space) is *mostly* possible but has several sharp edges.
+
+**What works cleanly**
+- Remapping auto-increment PKs (study_id, trial_id, and all the
+  per-table PKs) so there are no collisions — identical to what the
+  existing ``study.concat()`` DataFrame approach does.
+- Renumbering ``trials.number`` sequentially across both studies.
+- Appending ``trial_values``, ``trial_intermediate_values``,
+  ``trial_system_attributes``, ``trial_user_attributes`` after remapping
+  trial_id.
+- Merging FloatDistribution / IntDistribution search spaces: new bounds
+  are ``min(A.low, B.low)`` .. ``max(A.high, B.high)``; no re-encoding
+  needed because ``param_value`` IS the actual float.
+
+**What requires careful re-encoding**
+CategoricalDistribution stores ``param_value`` as an INTEGER INDEX into
+the choices list, not the value itself.  If the merged choices list is
+``sorted(set(A.choices) | set(B.choices))``, every existing
+``param_value`` must be re-mapped:
+
+    new_index = merged_choices.index(decode(old_param_value, old_dist))
+
+Failing to re-encode leaves the historical trials pointing at the wrong
+choices, which corrupts the TPE surrogate model.
+
+**Where merging is impossible**
+1. ``alembic_version.version_num`` differs — schema incompatibility.
+2. ``version_info.schema_version`` differs — ditto.
+3. ``study_directions.direction`` differs (one MAXIMIZE, one MINIMIZE) —
+   the objective is not comparable; the resulting TPE model is nonsense.
+4. Same ``param_name``, different distribution *types* across the two
+   studies (e.g., CategoricalDistribution in A, FloatDistribution in B).
+   There is no canonical union distribution for this case.
+5. Multi-objective studies (``objective > 0`` rows) add complexity:
+   directions must match for every objective index, and
+   ``trial_values.objective`` must be consistent.
+
+**Stale state to discard or convert**
+- RUNNING trials: their heartbeats refer to a process that no longer
+  exists.  Convert to FAIL (or drop) before merging.
+- WAITING trials: pre-allocated slots with no params.  Drop them.
+- ``trial_heartbeats``: all records are stale post-merge.  Drop the
+  table contents.
+
+**Using the Optuna API instead**
+The cleanest way to avoid all of the above is to use Optuna's own
+``study.add_trial()`` after decoding each historical trial to a
+``FrozenTrial`` object.  Optuna then handles distribution reconciliation
+internally and re-encodes param_values correctly.  The tradeoff is that
+you lose the original ``trial_id`` lineage.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, Session, relationship
+
+
+# ---------------------------------------------------------------------------
+# Declarative base
+# ---------------------------------------------------------------------------
+
+class Base(DeclarativeBase):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Schema / migration metadata
+# ---------------------------------------------------------------------------
+
+class VersionInfo(Base):
+    __tablename__ = "version_info"
+
+    version_info_id = Column(Integer, primary_key=True)
+    schema_version  = Column(Integer)
+    library_version = Column(String(256))
+
+    def __repr__(self) -> str:
+        return f"<VersionInfo schema={self.schema_version} lib={self.library_version}>"
+
+
+class AlembicVersion(Base):
+    __tablename__ = "alembic_version"
+
+    version_num = Column(String(32), primary_key=True)
+
+    def __repr__(self) -> str:
+        return f"<AlembicVersion {self.version_num!r}>"
+
+
+# ---------------------------------------------------------------------------
+# Study-level tables
+# ---------------------------------------------------------------------------
+
+class Study(Base):
+    __tablename__ = "studies"
+
+    study_id   = Column(Integer, primary_key=True)
+    study_name = Column(String(512), nullable=False)
+
+    directions        = relationship("StudyDirection",       back_populates="study", cascade="all, delete-orphan")
+    user_attributes   = relationship("StudyUserAttribute",   back_populates="study", cascade="all, delete-orphan")
+    system_attributes = relationship("StudySystemAttribute", back_populates="study", cascade="all, delete-orphan")
+    trials            = relationship("Trial", back_populates="study",
+                                     cascade="all, delete-orphan",
+                                     order_by="Trial.number")
+
+    # ------------------------------------------------------------------
+    # Convenience properties
+    # ------------------------------------------------------------------
+
+    @property
+    def direction(self) -> Optional[str]:
+        """Primary optimization direction (MAXIMIZE or MINIMIZE)."""
+        return self.directions[0].direction if self.directions else None
+
+    @property
+    def complete_trials(self) -> list["Trial"]:
+        return [t for t in self.trials if t.state == "COMPLETE"]
+
+    @property
+    def best_trial(self) -> Optional["Trial"]:
+        ct = self.complete_trials
+        if not ct:
+            return None
+        reverse = self.direction != "MINIMIZE"
+        return sorted(ct, key=lambda t: (t.objective_value is None, t.objective_value),
+                      reverse=reverse)[0]
+
+    @property
+    def search_space(self) -> dict[str, dict]:
+        """Union of distributions seen across all complete trials.
+
+        Returns {param_name: distribution_dict} where distribution_dict is
+        the parsed ``distribution_json`` from the most-recently-seen trial
+        for that param.  For CategoricalDistribution the choices are the
+        union across all trials.
+        """
+        space: dict[str, dict] = {}
+        for trial in self.complete_trials:
+            for p in trial.params:
+                dist = p.distribution
+                name = p.param_name
+                if name not in space:
+                    space[name] = dist
+                elif dist["name"] == "CategoricalDistribution":
+                    old_choices = set(space[name]["attributes"]["choices"])
+                    new_choices = set(dist["attributes"]["choices"])
+                    merged = sorted(old_choices | new_choices,
+                                    key=lambda x: (str(type(x).__name__), str(x)))
+                    space[name]["attributes"]["choices"] = merged
+        return space
+
+    def __repr__(self) -> str:
+        return f"<Study {self.study_name!r} ({len(self.trials)} trials)>"
+
+
+class StudyDirection(Base):
+    __tablename__ = "study_directions"
+
+    study_direction_id = Column(Integer, primary_key=True)
+    direction          = Column(String(8), nullable=False)  # MAXIMIZE | MINIMIZE
+    study_id           = Column(Integer, ForeignKey("studies.study_id"))
+    objective          = Column(Integer, nullable=False)    # 0 = primary objective
+
+    study = relationship("Study", back_populates="directions")
+
+    def __repr__(self) -> str:
+        return f"<StudyDirection obj={self.objective} {self.direction}>"
+
+
+class StudyUserAttribute(Base):
+    __tablename__ = "study_user_attributes"
+
+    study_user_attribute_id = Column(Integer, primary_key=True)
+    study_id                = Column(Integer, ForeignKey("studies.study_id"))
+    key                     = Column(String(512))
+    value_json              = Column(Text)
+
+    study = relationship("Study", back_populates="user_attributes")
+
+    @property
+    def value(self):
+        return json.loads(self.value_json) if self.value_json else None
+
+    def __repr__(self) -> str:
+        return f"<StudyUserAttribute {self.key}={self.value!r}>"
+
+
+class StudySystemAttribute(Base):
+    __tablename__ = "study_system_attributes"
+
+    study_system_attribute_id = Column(Integer, primary_key=True)
+    study_id                  = Column(Integer, ForeignKey("studies.study_id"))
+    key                       = Column(String(512))
+    value_json                = Column(Text)
+
+    study = relationship("Study", back_populates="system_attributes")
+
+    @property
+    def value(self):
+        return json.loads(self.value_json) if self.value_json else None
+
+    def __repr__(self) -> str:
+        return f"<StudySystemAttribute {self.key}={self.value!r}>"
+
+
+# ---------------------------------------------------------------------------
+# Trial-level tables
+# ---------------------------------------------------------------------------
+
+class Trial(Base):
+    __tablename__ = "trials"
+
+    trial_id          = Column(Integer, primary_key=True)
+    number            = Column(Integer)                          # 0-based within study
+    study_id          = Column(Integer, ForeignKey("studies.study_id"))
+    state             = Column(String(8), nullable=False)        # COMPLETE|RUNNING|FAIL|WAITING
+    datetime_start    = Column(DateTime)
+    datetime_complete = Column(DateTime)
+
+    study               = relationship("Study", back_populates="trials")
+    params              = relationship("TrialParam",             back_populates="trial", cascade="all, delete-orphan")
+    values              = relationship("TrialValue",             back_populates="trial", cascade="all, delete-orphan")
+    intermediate_values = relationship("TrialIntermediateValue", back_populates="trial", cascade="all, delete-orphan")
+    heartbeats          = relationship("TrialHeartbeat",         back_populates="trial", cascade="all, delete-orphan")
+    system_attributes   = relationship("TrialSystemAttribute",   back_populates="trial", cascade="all, delete-orphan")
+    user_attributes     = relationship("TrialUserAttribute",     back_populates="trial", cascade="all, delete-orphan")
+
+    # ------------------------------------------------------------------
+    # Convenience properties
+    # ------------------------------------------------------------------
+
+    @property
+    def params_dict(self) -> dict:
+        """Decoded hyperparameter values as ``{param_name: value}``."""
+        return {p.param_name: p.decoded_value for p in self.params}
+
+    @property
+    def objective_value(self) -> Optional[float]:
+        """Primary objective value (``objective == 0``), or None."""
+        primary = next((v for v in self.values if v.objective == 0), None)
+        return primary.value if primary else None
+
+    @property
+    def duration_min(self) -> Optional[float]:
+        if self.datetime_start and self.datetime_complete:
+            return (self.datetime_complete - self.datetime_start).total_seconds() / 60
+        return None
+
+    def __repr__(self) -> str:
+        score = f"{self.objective_value:.4f}" if self.objective_value is not None else "—"
+        return f"<Trial #{self.number} [{self.state}] score={score}>"
+
+
+class TrialParam(Base):
+    __tablename__ = "trial_params"
+
+    param_id          = Column(Integer, primary_key=True)
+    trial_id          = Column(Integer, ForeignKey("trials.trial_id"))
+    param_name        = Column(String(512))
+    param_value       = Column(Float)   # Optuna internal encoding (index for Categorical)
+    distribution_json = Column(Text)
+
+    trial = relationship("Trial", back_populates="params")
+
+    @property
+    def distribution(self) -> dict:
+        return json.loads(self.distribution_json)
+
+    @property
+    def decoded_value(self):
+        """Actual hyperparameter value.
+
+        CategoricalDistribution stores ``param_value`` as an integer index
+        into ``choices``; all other distributions store the value directly.
+        """
+        dist = self.distribution
+        if dist["name"] == "CategoricalDistribution":
+            return dist["attributes"]["choices"][int(self.param_value)]
+        return self.param_value
+
+    @property
+    def choices(self) -> Optional[list]:
+        """For CategoricalDistribution: the list of choices; else None."""
+        dist = self.distribution
+        if dist["name"] == "CategoricalDistribution":
+            return dist["attributes"]["choices"]
+        return None
+
+    @property
+    def bounds(self) -> Optional[tuple]:
+        """For Float/IntDistribution: ``(low, high)``; else None."""
+        dist = self.distribution
+        if dist["name"] in ("FloatDistribution", "IntDistribution"):
+            a = dist["attributes"]
+            return (a["low"], a["high"])
+        return None
+
+    def __repr__(self) -> str:
+        return f"<TrialParam {self.param_name}={self.decoded_value!r}>"
+
+
+class TrialValue(Base):
+    __tablename__ = "trial_values"
+
+    trial_value_id = Column(Integer, primary_key=True)
+    trial_id       = Column(Integer, ForeignKey("trials.trial_id"), nullable=False)
+    objective      = Column(Integer, nullable=False)          # 0 = primary
+    value          = Column(Float)
+    value_type     = Column(String(7), nullable=False)        # FINITE|INF|NEG_INF|NAN
+
+    trial = relationship("Trial", back_populates="values")
+
+    def __repr__(self) -> str:
+        return f"<TrialValue obj={self.objective} {self.value_type}={self.value}>"
+
+
+class TrialIntermediateValue(Base):
+    __tablename__ = "trial_intermediate_values"
+
+    trial_intermediate_value_id = Column(Integer, primary_key=True)
+    trial_id                    = Column(Integer, ForeignKey("trials.trial_id"), nullable=False)
+    step                        = Column(Integer, nullable=False)
+    intermediate_value          = Column(Float)
+    intermediate_value_type     = Column(String(7), nullable=False)
+
+    trial = relationship("Trial", back_populates="intermediate_values")
+
+    def __repr__(self) -> str:
+        return f"<TrialIntermediateValue step={self.step} {self.intermediate_value_type}={self.intermediate_value}>"
+
+
+class TrialHeartbeat(Base):
+    __tablename__ = "trial_heartbeats"
+
+    trial_heartbeat_id = Column(Integer, primary_key=True)
+    trial_id           = Column(Integer, ForeignKey("trials.trial_id"), nullable=False)
+    heartbeat          = Column(DateTime, nullable=False)
+
+    trial = relationship("Trial", back_populates="heartbeats")
+
+    def __repr__(self) -> str:
+        return f"<TrialHeartbeat trial={self.trial_id} {self.heartbeat}>"
+
+
+class TrialSystemAttribute(Base):
+    __tablename__ = "trial_system_attributes"
+
+    trial_system_attribute_id = Column(Integer, primary_key=True)
+    trial_id                  = Column(Integer, ForeignKey("trials.trial_id"))
+    key                       = Column(String(512))
+    value_json                = Column(Text)
+
+    trial = relationship("Trial", back_populates="system_attributes")
+
+    @property
+    def value(self):
+        return json.loads(self.value_json) if self.value_json else None
+
+    def __repr__(self) -> str:
+        return f"<TrialSystemAttribute {self.key}={self.value!r}>"
+
+
+class TrialUserAttribute(Base):
+    __tablename__ = "trial_user_attributes"
+
+    trial_user_attribute_id = Column(Integer, primary_key=True)
+    trial_id                = Column(Integer, ForeignKey("trials.trial_id"))
+    key                     = Column(String(512))
+    value_json              = Column(Text)
+
+    trial = relationship("Trial", back_populates="user_attributes")
+
+    @property
+    def value(self):
+        return json.loads(self.value_json) if self.value_json else None
+
+    def __repr__(self) -> str:
+        return f"<TrialUserAttribute {self.key}={self.value!r}>"
+
+
+# ---------------------------------------------------------------------------
+# Session factory
+# ---------------------------------------------------------------------------
+
+def connect(db_path: str | Path, readonly: bool = True) -> Session:
+    """Return a SQLAlchemy Session bound to an Optuna SQLite study.db.
+
+    Parameters
+    ----------
+    db_path:
+        Path to a study.db file.
+    readonly:
+        Open the database in read-only mode (default True).  Prevents
+        accidental writes to live study databases.
+
+    Returns
+    -------
+    sqlalchemy.orm.Session
+        Caller is responsible for calling ``session.close()``.
+    """
+    path = str(Path(db_path).resolve())
+    if readonly:
+        def _creator():
+            return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        engine = create_engine("sqlite://", creator=_creator)
+    else:
+        engine = create_engine(f"sqlite:///{path}")
+    return Session(engine)
+
+
+# ---------------------------------------------------------------------------
+# Merge compatibility check
+# ---------------------------------------------------------------------------
+
+class MergeConflict(ValueError):
+    """Raised when two studies cannot be safely merged."""
+
+
+def check_merge_compatibility(session_a: Session, session_b: Session) -> None:
+    """Raise MergeConflict if the two databases cannot be merged.
+
+    Checks schema versions, optimization directions, and parameter
+    distribution types.  Does NOT check whether the search spaces
+    overlap in a statistically useful way.
+
+    Raises
+    ------
+    MergeConflict
+        With a human-readable explanation of the first incompatibility found.
+    """
+    # --- schema version ---
+    av_a = session_a.query(AlembicVersion).first()
+    av_b = session_b.query(AlembicVersion).first()
+    if av_a and av_b and av_a.version_num != av_b.version_num:
+        raise MergeConflict(
+            f"alembic_version mismatch: {av_a.version_num!r} vs {av_b.version_num!r}. "
+            "Both databases must have been created by the same Optuna schema version."
+        )
+
+    vi_a = session_a.query(VersionInfo).first()
+    vi_b = session_b.query(VersionInfo).first()
+    if vi_a and vi_b and vi_a.schema_version != vi_b.schema_version:
+        raise MergeConflict(
+            f"schema_version mismatch: {vi_a.schema_version} vs {vi_b.schema_version}."
+        )
+
+    # --- optimization directions ---
+    studies_a = session_a.query(Study).all()
+    studies_b = session_b.query(Study).all()
+    dirs_a = {(d.objective, d.direction)
+              for s in studies_a for d in s.directions}
+    dirs_b = {(d.objective, d.direction)
+              for s in studies_b for d in s.directions}
+    if dirs_a and dirs_b:
+        for obj_idx, dir_a in dirs_a:
+            matching = {d for (o, d) in dirs_b if o == obj_idx}
+            if matching and dir_a not in matching:
+                raise MergeConflict(
+                    f"Objective {obj_idx} direction mismatch: "
+                    f"{dir_a!r} (A) vs {matching!r} (B). "
+                    "Cannot merge MAXIMIZE and MINIMIZE studies."
+                )
+
+    # --- distribution type conflicts per param_name ---
+    def _dist_types(session: Session) -> dict[str, set[str]]:
+        result: dict[str, set[str]] = {}
+        for p in session.query(TrialParam).all():
+            dist_name = p.distribution["name"]
+            result.setdefault(p.param_name, set()).add(dist_name)
+        return result
+
+    dt_a = _dist_types(session_a)
+    dt_b = _dist_types(session_b)
+    for param in set(dt_a) & set(dt_b):
+        types_a, types_b = dt_a[param], dt_b[param]
+        if types_a != types_b:
+            raise MergeConflict(
+                f"Parameter {param!r} has distribution type {types_a} in A "
+                f"but {types_b} in B. Cannot merge incompatible distribution types."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Merge planning — analyse trial_params to build a merged search space
+# ---------------------------------------------------------------------------
+
+def _collect_param_info(session: Session) -> dict[str, dict]:
+    """Return {param_name: {"dist_type": str, "choices": set | None,
+                             "low": float|None, "high": float|None,
+                             "log": bool|None, "step": float|None}}
+    by scanning every TrialParam row in *session*.
+    """
+    info: dict[str, dict] = {}
+    for p in session.query(TrialParam).all():
+        dist = p.distribution
+        name = p.param_name
+        dtype = dist["name"]
+        attrs = dist["attributes"]
+        if name not in info:
+            info[name] = {"dist_type": dtype, "choices": None, "low": None,
+                          "high": None, "log": None, "step": None}
+        rec = info[name]
+        if dtype == "CategoricalDistribution":
+            if rec["choices"] is None:
+                rec["choices"] = set()
+            rec["choices"].update(attrs["choices"])
+        else:
+            # FloatDistribution or IntDistribution — widen bounds
+            lo, hi = attrs["low"], attrs["high"]
+            rec["low"]  = lo if rec["low"]  is None else min(rec["low"],  lo)
+            rec["high"] = hi if rec["high"] is None else max(rec["high"], hi)
+            rec["log"]  = attrs.get("log")
+            rec["step"] = attrs.get("step")
+    return info
+
+
+def merge_search_space(
+    session_a: Session,
+    session_b: Session,
+) -> dict[str, dict]:
+    """Compute the merged distribution for every parameter seen in A or B.
+
+    Strategy (mirrors the user's intent of analysing the trial_params table):
+
+    * **CategoricalDistribution** — collect every distinct decoded value seen
+      across ALL trials in both databases and take the set union.  The merged
+      ``choices`` list is sorted for determinism (strings first, then numeric).
+    * **FloatDistribution / IntDistribution** — widen bounds to
+      ``min(A.low, B.low)`` .. ``max(A.high, B.high)``.  ``log`` and ``step``
+      are taken from whichever study has them set (conflict: A wins).
+    * Parameters that appear in only one study are included as-is (the
+      other study simply never sampled that dimension).
+
+    Returns
+    -------
+    dict[str, dict]
+        ``{param_name: distribution_dict}`` where each value is a dict
+        with keys ``dist_type``, and either ``choices`` (Categorical) or
+        ``low``/``high``/``log``/``step`` (Float/Int).  Suitable for
+        building a new ``distribution_json`` with
+        :func:`distribution_dict_to_json`.
+    """
+    info_a = _collect_param_info(session_a)
+    info_b = _collect_param_info(session_b)
+    merged: dict[str, dict] = {}
+
+    for name in sorted(set(info_a) | set(info_b)):
+        rec_a = info_a.get(name)
+        rec_b = info_b.get(name)
+
+        if rec_a is None:
+            merged[name] = rec_b
+            continue
+        if rec_b is None:
+            merged[name] = rec_a
+            continue
+
+        # Both studies have this param — merge.
+        dtype = rec_a["dist_type"]  # check_merge_compatibility guarantees they match
+        if dtype == "CategoricalDistribution":
+            all_choices = (rec_a["choices"] or set()) | (rec_b["choices"] or set())
+            # Sort: try numeric first, fall back to string sort.
+            try:
+                ordered = sorted(all_choices, key=lambda x: (0, float(str(x))))
+            except (ValueError, TypeError):
+                ordered = sorted(all_choices, key=str)
+            merged[name] = {"dist_type": dtype, "choices": ordered,
+                            "low": None, "high": None, "log": None, "step": None}
+        else:
+            merged[name] = {
+                "dist_type": dtype,
+                "choices": None,
+                "low":  min(rec_a["low"],  rec_b["low"]),
+                "high": max(rec_a["high"], rec_b["high"]),
+                "log":  rec_a["log"]  if rec_a["log"]  is not None else rec_b["log"],
+                "step": rec_a["step"] if rec_a["step"] is not None else rec_b["step"],
+            }
+
+    return merged
+
+
+def distribution_dict_to_json(rec: dict) -> str:
+    """Convert a :func:`merge_search_space` record back to Optuna distribution_json."""
+    dtype = rec["dist_type"]
+    if dtype == "CategoricalDistribution":
+        attrs = {"choices": rec["choices"]}
+    else:
+        attrs = {
+            "low":  rec["low"],
+            "high": rec["high"],
+            "log":  rec["log"] or False,
+            "step": rec["step"],
+        }
+    return json.dumps({"name": dtype, "attributes": attrs})
+
+
+def encode_param_value(decoded_value, merged_dist_record: dict) -> float:
+    """Re-encode a decoded hyperparameter value for a merged distribution.
+
+    For CategoricalDistribution, returns the index of *decoded_value* in the
+    merged choices list.  For Float/Int distributions, returns the value as-is
+    (no re-encoding needed).
+
+    Raises
+    ------
+    ValueError
+        If *decoded_value* is not found in the merged categorical choices.
+    """
+    if merged_dist_record["dist_type"] == "CategoricalDistribution":
+        choices = merged_dist_record["choices"]
+        try:
+            return float(choices.index(decoded_value))
+        except ValueError:
+            raise ValueError(
+                f"decoded value {decoded_value!r} not in merged choices {choices!r}"
+            )
+    return float(decoded_value)
+
+
+def plan_merge(
+    session_a: Session,
+    session_b: Session,
+    *,
+    new_study_name: Optional[str] = None,
+) -> dict:
+    """Analyse two sessions and return a human-readable merge plan.
+
+    Calls :func:`check_merge_compatibility` first (raises on hard blockers),
+    then calls :func:`merge_search_space` to compute the union distributions
+    and reports which parameter ranges changed.
+
+    Parameters
+    ----------
+    session_a, session_b:
+        Sessions returned by :func:`connect`.
+    new_study_name:
+        Name for the merged study.  Defaults to
+        ``"<name_a>+<name_b>"``.
+
+    Returns
+    -------
+    dict with keys:
+        ``new_study_name``, ``merged_space``, ``changes`` (list of dicts
+        describing widened bounds or new choices per param), ``warnings``
+        (list of strings about stale RUNNING/WAITING trials).
+    """
+    check_merge_compatibility(session_a, session_b)
+
+    name_a = session_a.query(Study).first().study_name if session_a.query(Study).first() else "A"
+    name_b = session_b.query(Study).first().study_name if session_b.query(Study).first() else "B"
+    merged_name = new_study_name or f"{name_a}+{name_b}"
+
+    merged = merge_search_space(session_a, session_b)
+    info_a = _collect_param_info(session_a)
+    info_b = _collect_param_info(session_b)
+
+    changes = []
+    for param, rec in merged.items():
+        ra = info_a.get(param)
+        rb = info_b.get(param)
+        if ra is None:
+            changes.append({"param": param, "change": "new_from_B", "merged": rec})
+        elif rb is None:
+            changes.append({"param": param, "change": "new_from_A", "merged": rec})
+        elif rec["dist_type"] == "CategoricalDistribution":
+            added = set(rec["choices"]) - (ra["choices"] or set()) - (rb["choices"] or set())
+            new_a = (ra["choices"] or set()) - (rb["choices"] or set())
+            new_b = (rb["choices"] or set()) - (ra["choices"] or set())
+            if new_a or new_b or added:
+                changes.append({
+                    "param": param, "change": "widened_choices",
+                    "only_in_A": sorted(new_a, key=str),
+                    "only_in_B": sorted(new_b, key=str),
+                    "merged_choices": rec["choices"],
+                    "requires_reencode": True,
+                })
+        else:
+            widened = (rec["low"] < ra["low"] or rec["low"] < rb["low"] or
+                       rec["high"] > ra["high"] or rec["high"] > rb["high"])
+            if widened:
+                changes.append({
+                    "param": param, "change": "widened_bounds",
+                    "A": (ra["low"], ra["high"]),
+                    "B": (rb["low"], rb["high"]),
+                    "merged": (rec["low"], rec["high"]),
+                    "requires_reencode": False,
+                })
+
+    warnings = []
+    for session, label in ((session_a, "A"), (session_b, "B")):
+        for state in ("RUNNING", "WAITING"):
+            n = session.query(Trial).filter_by(state=state).count()
+            if n:
+                warnings.append(
+                    f"Study {label} has {n} {state} trial(s). "
+                    f"Convert to FAIL or drop before merging."
+                )
+
+    return {
+        "new_study_name": merged_name,
+        "merged_space": merged,
+        "changes": changes,
+        "warnings": warnings,
+    }

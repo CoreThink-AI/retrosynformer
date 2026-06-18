@@ -1,0 +1,433 @@
+"""Tests for the Optuna study.db ORM (retrosynformer.models_optuna).
+
+Exercises the model against three real study.db files with different
+characteristics:
+  - compare_small_structured_dropout  — few trials, structured dropout params
+  - baseline_small_hyperparameter_tuning — 12 trials, FAIL + RUNNING states
+  - small-nonuniform-dropout  — complex categorical choices (JSON layer masks)
+"""
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+RESULTS_ROOT = Path(__file__).parent.parent / "results"
+
+# Pick three study.db files that cover different shapes of data.
+DB_PATHS = {
+    "structured_dropout": RESULTS_ROOT / "hypertune-compare_small_structured_dropout" / "study.db",
+    "baseline_small":     RESULTS_ROOT / "hypertune-baseline_small_hyperparameter_tuning" / "study.db",
+    "nonuniform_dropout": RESULTS_ROOT / "hypertune-small-nonuniform-dropout" / "study.db",
+}
+
+# Skip the whole module if the result files are absent (CI without data).
+pytestmark = pytest.mark.skipif(
+    not all(p.exists() for p in DB_PATHS.values()),
+    reason="study.db result files not found — skipping ORM tests",
+)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def sessions():
+    from retrosynformer.models_optuna import connect
+    opened = {k: connect(v) for k, v in DB_PATHS.items()}
+    yield opened
+    for s in opened.values():
+        s.close()
+
+
+# ---------------------------------------------------------------------------
+# VersionInfo / AlembicVersion
+# ---------------------------------------------------------------------------
+
+def test_version_info_present(sessions):
+    from retrosynformer.models_optuna import VersionInfo
+    for name, session in sessions.items():
+        vi = session.query(VersionInfo).first()
+        assert vi is not None, f"{name}: no version_info row"
+        assert isinstance(vi.schema_version, int)
+        assert vi.library_version.startswith("4.")  # Optuna 4.x
+
+
+def test_alembic_version_present(sessions):
+    from retrosynformer.models_optuna import AlembicVersion
+    for name, session in sessions.items():
+        av = session.query(AlembicVersion).first()
+        assert av is not None, f"{name}: no alembic_version row"
+        assert isinstance(av.version_num, str) and len(av.version_num) > 0
+
+
+# ---------------------------------------------------------------------------
+# Study
+# ---------------------------------------------------------------------------
+
+def test_study_name(sessions):
+    from retrosynformer.models_optuna import Study
+    expected = {
+        "structured_dropout": "compare_small_structured_dropout",
+        "baseline_small":     "baseline_small_hyperparameter_tuning",
+        "nonuniform_dropout": "small-nonuniform-dropout",
+    }
+    for name, session in sessions.items():
+        studies = session.query(Study).all()
+        names = [s.study_name for s in studies]
+        assert expected[name] in names, f"{name}: expected study_name not found, got {names}"
+
+
+def test_study_direction(sessions):
+    from retrosynformer.models_optuna import Study
+    for name, session in sessions.items():
+        study = session.query(Study).first()
+        assert study.direction in ("MAXIMIZE", "MINIMIZE"), (
+            f"{name}: unexpected direction {study.direction!r}"
+        )
+
+
+def test_study_repr(sessions):
+    from retrosynformer.models_optuna import Study
+    for name, session in sessions.items():
+        study = session.query(Study).first()
+        r = repr(study)
+        assert study.study_name in r
+
+
+# ---------------------------------------------------------------------------
+# Trials
+# ---------------------------------------------------------------------------
+
+def test_trials_exist(sessions):
+    from retrosynformer.models_optuna import Trial
+    for name, session in sessions.items():
+        trials = session.query(Trial).all()
+        assert len(trials) > 0, f"{name}: no trials"
+
+
+def test_trial_states(sessions):
+    from retrosynformer.models_optuna import Trial
+    valid_states = {"COMPLETE", "RUNNING", "FAIL", "WAITING"}
+    for name, session in sessions.items():
+        for t in session.query(Trial).all():
+            assert t.state in valid_states, f"{name} trial {t.number}: bad state {t.state!r}"
+
+
+def test_trial_number_monotonic(sessions):
+    from retrosynformer.models_optuna import Study
+    for name, session in sessions.items():
+        for study in session.query(Study).all():
+            nums = [t.number for t in study.trials]
+            assert nums == sorted(nums), f"{name}/{study.study_name}: trial numbers not sorted"
+
+
+def test_complete_trials_have_datetimes(sessions):
+    from retrosynformer.models_optuna import Trial
+    for name, session in sessions.items():
+        for t in session.query(Trial).filter_by(state="COMPLETE"):
+            assert t.datetime_start is not None, f"{name} trial {t.number}: no datetime_start"
+            assert t.datetime_complete is not None, f"{name} trial {t.number}: no datetime_complete"
+            assert t.datetime_complete >= t.datetime_start
+
+
+def test_duration_min(sessions):
+    from retrosynformer.models_optuna import Trial
+    for name, session in sessions.items():
+        for t in session.query(Trial).filter_by(state="COMPLETE"):
+            dur = t.duration_min
+            assert dur is not None and dur >= 0, f"{name} trial {t.number}: bad duration {dur}"
+
+
+# ---------------------------------------------------------------------------
+# TrialParam — decoded values
+# ---------------------------------------------------------------------------
+
+def test_params_dict_has_all_params(sessions):
+    from retrosynformer.models_optuna import Trial
+    for name, session in sessions.items():
+        for t in session.query(Trial).filter_by(state="COMPLETE"):
+            pd = t.params_dict
+            assert isinstance(pd, dict) and len(pd) > 0, (
+                f"{name} trial {t.number}: empty params_dict"
+            )
+
+
+def test_categorical_decoded_not_float_index(sessions):
+    """Decoded categorical values must be the actual choice, not a raw float."""
+    from retrosynformer.models_optuna import TrialParam
+    for name, session in sessions.items():
+        for p in session.query(TrialParam).all():
+            dist = p.distribution
+            if dist["name"] == "CategoricalDistribution":
+                choices = dist["attributes"]["choices"]
+                decoded = p.decoded_value
+                assert decoded in choices, (
+                    f"{name} param {p.param_name}: decoded {decoded!r} not in choices {choices!r}"
+                )
+                # Must NOT be a bare float index unless the choice itself is a float
+                if not isinstance(choices[0], float):
+                    assert not isinstance(decoded, float) or int(decoded) == decoded, (
+                        f"{name}: {p.param_name} decoded to raw float index {decoded}"
+                    )
+
+
+def test_float_distribution_decoded_in_bounds(sessions):
+    from retrosynformer.models_optuna import TrialParam
+    for name, session in sessions.items():
+        for p in session.query(TrialParam).all():
+            dist = p.distribution
+            if dist["name"] == "FloatDistribution":
+                lo = dist["attributes"]["low"]
+                hi = dist["attributes"]["high"]
+                val = p.decoded_value
+                assert lo <= val <= hi, (
+                    f"{name} {p.param_name}: {val} not in [{lo}, {hi}]"
+                )
+
+
+def test_nonuniform_dropout_complex_choices(sessions):
+    """small-nonuniform-dropout has JSON-string layer masks as choices."""
+    from retrosynformer.models_optuna import TrialParam
+    session = sessions["nonuniform_dropout"]
+    layer_params = (
+        session.query(TrialParam)
+        .filter(TrialParam.param_name == "layer_shared_resid_dropout")
+        .all()
+    )
+    assert len(layer_params) > 0, "Expected layer_shared_resid_dropout params"
+    for p in layer_params:
+        decoded = p.decoded_value
+        # Choices are JSON strings representing lists of booleans
+        assert isinstance(decoded, str), f"Expected string choice, got {type(decoded)}: {decoded!r}"
+        parsed = json.loads(decoded)
+        assert isinstance(parsed, list), f"Expected JSON list, got {type(parsed)}"
+        assert all(isinstance(v, bool) for v in parsed)
+
+
+# ---------------------------------------------------------------------------
+# TrialValue — objective score
+# ---------------------------------------------------------------------------
+
+def test_complete_trials_have_objective(sessions):
+    from retrosynformer.models_optuna import Trial
+    for name, session in sessions.items():
+        for t in session.query(Trial).filter_by(state="COMPLETE"):
+            val = t.objective_value
+            assert val is not None, f"{name} trial {t.number}: COMPLETE but no objective_value"
+            assert isinstance(val, float)
+
+
+def test_objective_value_finite(sessions):
+    from retrosynformer.models_optuna import Trial, TrialValue
+    for name, session in sessions.items():
+        for v in session.query(TrialValue).filter_by(value_type="FINITE"):
+            assert v.value is not None and abs(v.value) < 1e9, (
+                f"{name}: FINITE value {v.value} looks wrong"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Study.best_trial
+# ---------------------------------------------------------------------------
+
+def test_best_trial_has_max_score(sessions):
+    from retrosynformer.models_optuna import Study
+    for name, session in sessions.items():
+        for study in session.query(Study).all():
+            bt = study.best_trial
+            if bt is None:
+                continue  # no complete trials
+            assert bt.state == "COMPLETE"
+            if study.direction == "MAXIMIZE":
+                assert all(
+                    t.objective_value is None or t.objective_value <= bt.objective_value
+                    for t in study.complete_trials
+                ), f"{name}/{study.study_name}: best_trial is not the maximum"
+
+
+# ---------------------------------------------------------------------------
+# Study.search_space
+# ---------------------------------------------------------------------------
+
+def test_search_space_keys_match_params(sessions):
+    from retrosynformer.models_optuna import Study
+    for name, session in sessions.items():
+        for study in session.query(Study).all():
+            ss = study.search_space
+            all_param_names = {
+                p.param_name
+                for t in study.complete_trials
+                for p in t.params
+            }
+            assert set(ss.keys()) == all_param_names, (
+                f"{name}/{study.study_name}: search_space keys {set(ss.keys())} "
+                f"!= actual params {all_param_names}"
+            )
+
+
+def test_search_space_categorical_is_union(sessions):
+    """search_space choices must be the union across all trials."""
+    from retrosynformer.models_optuna import Study
+    for name, session in sessions.items():
+        for study in session.query(Study).all():
+            ss = study.search_space
+            for param_name, dist in ss.items():
+                if dist["name"] != "CategoricalDistribution":
+                    continue
+                merged_choices = set(dist["attributes"]["choices"])
+                for t in study.complete_trials:
+                    for p in t.params:
+                        if p.param_name == param_name:
+                            assert p.decoded_value in merged_choices, (
+                                f"{name}/{study.study_name}/{param_name}: "
+                                f"decoded value {p.decoded_value!r} missing from union"
+                            )
+
+
+# ---------------------------------------------------------------------------
+# Merge compatibility check
+# ---------------------------------------------------------------------------
+
+def test_check_merge_compatible_same_db(sessions):
+    """A database is always compatible with itself."""
+    from retrosynformer.models_optuna import check_merge_compatibility
+    for name, session in sessions.items():
+        check_merge_compatibility(session, session)  # must not raise
+
+
+def test_check_merge_structured_vs_baseline(sessions):
+    """Two MAXIMIZE small-dataset studies should be compatible."""
+    from retrosynformer.models_optuna import check_merge_compatibility, MergeConflict
+    try:
+        check_merge_compatibility(
+            sessions["structured_dropout"],
+            sessions["baseline_small"],
+        )
+    except MergeConflict as exc:
+        # Both are MAXIMIZE; only failure allowed is distribution-type mismatch
+        assert "distribution" in str(exc).lower() or "mismatch" in str(exc).lower(), (
+            f"Unexpected MergeConflict: {exc}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# merge_search_space
+# ---------------------------------------------------------------------------
+
+def test_merge_search_space_contains_all_params(sessions):
+    """Merged space must contain every param from either study."""
+    from retrosynformer.models_optuna import merge_search_space, TrialParam
+    sa = sessions["structured_dropout"]
+    sb = sessions["baseline_small"]
+    merged = merge_search_space(sa, sb)
+    params_a = {p.param_name for p in sa.query(TrialParam).all()}
+    params_b = {p.param_name for p in sb.query(TrialParam).all()}
+    assert set(merged.keys()) == params_a | params_b
+
+
+def test_merge_search_space_categorical_union(sessions):
+    """Merged CategoricalDistribution choices must be the superset."""
+    from retrosynformer.models_optuna import merge_search_space, _collect_param_info
+    sa = sessions["structured_dropout"]
+    sb = sessions["baseline_small"]
+    merged = merge_search_space(sa, sb)
+    info_a = _collect_param_info(sa)
+    info_b = _collect_param_info(sb)
+
+    for param, rec in merged.items():
+        if rec["dist_type"] != "CategoricalDistribution":
+            continue
+        merged_set = set(rec["choices"])
+        if param in info_a and info_a[param]["choices"]:
+            assert info_a[param]["choices"] <= merged_set, (
+                f"{param}: A choices not subset of merged"
+            )
+        if param in info_b and info_b[param]["choices"]:
+            assert info_b[param]["choices"] <= merged_set, (
+                f"{param}: B choices not subset of merged"
+            )
+
+
+def test_merge_search_space_float_bounds_widened(sessions):
+    """Merged float bounds must be at least as wide as either source."""
+    from retrosynformer.models_optuna import merge_search_space, _collect_param_info
+    sa = sessions["structured_dropout"]
+    sb = sessions["baseline_small"]
+    merged = merge_search_space(sa, sb)
+    info_a = _collect_param_info(sa)
+    info_b = _collect_param_info(sb)
+
+    for param, rec in merged.items():
+        if rec["dist_type"] == "CategoricalDistribution":
+            continue
+        if param in info_a and info_a[param]["low"] is not None:
+            assert rec["low"]  <= info_a[param]["low"]
+            assert rec["high"] >= info_a[param]["high"]
+        if param in info_b and info_b[param]["low"] is not None:
+            assert rec["low"]  <= info_b[param]["low"]
+            assert rec["high"] >= info_b[param]["high"]
+
+
+def test_encode_param_value_categorical(sessions):
+    """Re-encoded index must round-trip through the merged choices list."""
+    from retrosynformer.models_optuna import (
+        merge_search_space, encode_param_value, TrialParam
+    )
+    sa = sessions["structured_dropout"]
+    sb = sessions["baseline_small"]
+    merged = merge_search_space(sa, sb)
+
+    for session in (sa, sb):
+        for p in session.query(TrialParam).all():
+            if p.distribution["name"] != "CategoricalDistribution":
+                continue
+            if p.param_name not in merged:
+                continue
+            decoded = p.decoded_value
+            new_idx = encode_param_value(decoded, merged[p.param_name])
+            # Round-trip: new index must point back to the same value
+            assert merged[p.param_name]["choices"][int(new_idx)] == decoded, (
+                f"{p.param_name}: round-trip failed for {decoded!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# plan_merge
+# ---------------------------------------------------------------------------
+
+def test_plan_merge_returns_expected_keys(sessions):
+    from retrosynformer.models_optuna import plan_merge
+    plan = plan_merge(sessions["structured_dropout"], sessions["baseline_small"])
+    assert set(plan.keys()) == {"new_study_name", "merged_space", "changes", "warnings"}
+
+
+def test_plan_merge_study_name(sessions):
+    from retrosynformer.models_optuna import plan_merge
+    plan = plan_merge(
+        sessions["structured_dropout"],
+        sessions["baseline_small"],
+        new_study_name="custom_merged",
+    )
+    assert plan["new_study_name"] == "custom_merged"
+
+
+def test_plan_merge_changes_list(sessions):
+    """n_heads has different choices in structured vs baseline — should appear in changes."""
+    from retrosynformer.models_optuna import plan_merge
+    plan = plan_merge(sessions["structured_dropout"], sessions["baseline_small"])
+    changed_params = {c["param"] for c in plan["changes"]}
+    # n_layers: structured has [2,3,4,5], baseline has [3,4,8,12,18,26] → widened
+    assert "n_layers" in changed_params
+    # n_heads: structured has [1,2,3,4], baseline has [1,2,4] → structured is superset,
+    # baseline adds nothing new; still a difference (only_in_A non-empty)
+    assert "n_heads" in changed_params
+
+
+def test_plan_merge_warns_about_running_trials(sessions):
+    """baseline_small has a RUNNING trial — plan should warn."""
+    from retrosynformer.models_optuna import plan_merge
+    plan = plan_merge(sessions["structured_dropout"], sessions["baseline_small"])
+    warning_text = " ".join(plan["warnings"]).upper()
+    assert "RUNNING" in warning_text
