@@ -63,4 +63,37 @@ train:
   batch_size: 128
   loss: crossEntropyLoss
   n_epochs: 200
-  results_path: /retrosynformer/results/ 
+  results_path: /retrosynformer/results/
+
+# ---------------------------------------------------------------------------
+# Logging — controls which fields are written to train_progress.jsonl.
+# Remove any field name to exclude it.  Omit the entire `logging:` section
+# (or the `fields:` key) to write every accumulated field.
+# Add a field by calling EpochLogger.update("my_field", value) anywhere in
+# your training code and listing the name here.
+# ---------------------------------------------------------------------------
+logging:
+  fields:
+    # ---- core metrics (always useful) ----
+    - epoch
+    - train_loss
+    - train_action_accuracy
+    - train_route_accuracy
+    - valid_loss
+    - valid_action_accuracy
+    - valid_route_accuracy
+    - seconds_per_epoch
+    # ---- optimiser state ----
+    - learning_rate
+    - n_lr_reductions
+    - gradient_norm
+    # ---- early-stopping / checkpoint state ----
+    - is_best
+    - best_valid_route_accuracy
+    - epochs_without_improvement
+    # ---- wall-clock / provenance ----
+    - elapsed_seconds
+    - timestamp
+    - study_name
+    - trial_number
+    - config_hash

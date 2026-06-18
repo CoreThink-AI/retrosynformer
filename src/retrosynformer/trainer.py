@@ -7,6 +7,8 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
+from .epoch_logger import EpochLogger
+
 import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score
@@ -185,6 +187,7 @@ class RetroTrainer:
                 self.model.parameters(), max_norm=float("inf")
             ).item()
             self.optimizer.step()
+
             total_loss += loss.item()
 
             actions_id_batch.extend(actions_id)
@@ -206,12 +209,9 @@ class RetroTrainer:
             flat_actions_id_batch, flat_actions_id_pred_batch
         )
 
-        return (
-            total_loss / len(self.train_dataloader),
-            action_accuracy,
-            route_accuracy,
-            total_grad_norm / len(self.train_dataloader),
-        )
+        mean_grad_norm = total_grad_norm / len(self.train_dataloader)
+        EpochLogger.update("gradient_norm", mean_grad_norm)
+        return total_loss / len(self.train_dataloader), action_accuracy, route_accuracy
 
     def eval(self, dataloader=None):
         if not dataloader:
@@ -351,6 +351,18 @@ class RetroTrainer:
 
         train_start_time = time.time()
 
+        EpochLogger.configure(
+            logging_config=self.config.get("logging", {}),
+            jsonl_path=progress_path,
+            train_start_time=train_start_time,
+        )
+        EpochLogger.set_persistent(
+            study_name=study_name,
+            trial_number=trial_number,
+            config_hash=config_hash,
+            n_epochs=n_epochs,
+        )
+
         print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
         if verbose:
             _hdr_prefix = [f"{'trial':>5}"] if trial_number is not None else []
@@ -367,7 +379,8 @@ class RetroTrainer:
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
 
-            train_loss, train_action_accuracy, train_route_accuracy, mean_grad_norm = (
+            EpochLogger.begin_epoch(epoch)
+            train_loss, train_action_accuracy, train_route_accuracy = (
                 self.train_one_epoch()
             )
             training_loss.append(train_loss)
@@ -443,28 +456,23 @@ class RetroTrainer:
             else:
                 fraction_targets_solved = None
 
-            record = {
-                "epoch": epoch,
-                "train_loss": train_loss,
-                "train_action_accuracy": train_action_accuracy,
-                "train_route_accuracy": train_route_accuracy,
-                "valid_loss": valid_loss,
-                "valid_action_accuracy": valid_action_accuracy,
-                "valid_route_accuracy": valid_route_accuracy,
-                "seconds_per_epoch": seconds_this_epoch,
-                # --- new fields ---
-                "learning_rate": current_lr,
-                "elapsed_seconds": time.time() - train_start_time,
-                "is_best": is_best,
-                "epochs_without_improvement": epochs_no_improve,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "gradient_norm": mean_grad_norm,
-                "n_lr_reductions": self._n_lr_reductions,
-                "best_valid_route_accuracy": self._best_valid_route_accuracy,
-                "study_name": study_name,
-                "trial_number": trial_number,
-                "config_hash": config_hash,
-            }
+            EpochLogger.update_many(
+                train_loss=train_loss,
+                train_action_accuracy=train_action_accuracy,
+                train_route_accuracy=train_route_accuracy,
+                valid_loss=valid_loss,
+                valid_action_accuracy=valid_action_accuracy,
+                valid_route_accuracy=valid_route_accuracy,
+                seconds_per_epoch=seconds_this_epoch,
+                learning_rate=current_lr,
+                is_best=is_best,
+                epochs_without_improvement=epochs_no_improve,
+                n_lr_reductions=self._n_lr_reductions,
+                best_valid_route_accuracy=self._best_valid_route_accuracy,
+            )
+            # gradient_norm was already set inside train_one_epoch via EpochLogger.update()
+            # elapsed_seconds and timestamp are registered providers, evaluated at flush()
+            record = EpochLogger.flush()
             self.result_df = pd.concat(
                 [self.result_df, pd.DataFrame([record])], ignore_index=True
             )
@@ -488,8 +496,6 @@ class RetroTrainer:
                     f"{note:<4}",
                 ] + _row_suffix), flush=True)
 
-            with open(progress_path, "a") as f:
-                f.write(json.dumps(record) + "\n")
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
 
