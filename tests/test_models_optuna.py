@@ -525,3 +525,171 @@ def test_fixed_params_diff_different_studies(sessions):
     assert "train.n_epochs" in diffs or "train.early_stopping_patience" in diffs, (
         f"Expected training schedule differences; got: {list(diffs.keys())}"
     )
+
+
+# ---------------------------------------------------------------------------
+# estimate_incomplete_objectives
+# ---------------------------------------------------------------------------
+
+# Additional study databases used only for estimation tests.
+_LARGE_DB   = "results/hypertune-large-nonuniform-dropout-12-layers/study.db"
+_DETAILS_DB = "results/hypertune-standard-v2-dropout-details/study.db"
+_LR_DB      = "results/hypertune-standard-v2-lr0005/study.db"
+
+
+@pytest.fixture(scope="module")
+def large_session():
+    from retrosynformer.models_optuna import connect
+    s = connect(_LARGE_DB)
+    yield s
+    s.close()
+
+
+@pytest.fixture(scope="module")
+def details_session():
+    from retrosynformer.models_optuna import connect
+    s = connect(_DETAILS_DB)
+    yield s
+    s.close()
+
+
+@pytest.fixture(scope="module")
+def lr_session():
+    from retrosynformer.models_optuna import connect
+    s = connect(_LR_DB)
+    yield s
+    s.close()
+
+
+def test_load_jsonl_metric_returns_sorted_pairs():
+    """_load_jsonl_metric must return epoch-sorted (epoch, value) pairs."""
+    from retrosynformer.models_optuna import _load_jsonl_metric
+    pairs = _load_jsonl_metric(
+        "results/hypertune-large-nonuniform-dropout-12-layers/trial_002/train_progress.jsonl",
+        "valid_route_accuracy",
+    )
+    assert len(pairs) >= 6, f"Expected ≥6 pairs, got {len(pairs)}"
+    epochs = [e for e, _ in pairs]
+    assert epochs == sorted(epochs), "Pairs must be sorted by epoch"
+    assert all(isinstance(v, float) for _, v in pairs)
+
+
+def test_load_jsonl_metric_deduplicates_epochs(tmp_path):
+    """If the same epoch appears twice, only the last value is kept."""
+    from retrosynformer.models_optuna import _load_jsonl_metric
+    import json as _json
+    jf = tmp_path / "train_progress.jsonl"
+    rows = [
+        {"epoch": 0, "valid_route_accuracy": 0.1},
+        {"epoch": 0, "valid_route_accuracy": 0.2},  # duplicate — keep this
+        {"epoch": 1, "valid_route_accuracy": 0.3},
+    ]
+    jf.write_text("\n".join(_json.dumps(r) for r in rows))
+    pairs = _load_jsonl_metric(str(jf), "valid_route_accuracy")
+    assert len(pairs) == 2, f"Expected 2 unique epochs, got {len(pairs)}"
+    assert pairs[0] == (0, 0.2), "Last value for epoch 0 must survive de-dup"
+
+
+def test_load_jsonl_metric_missing_file():
+    from retrosynformer.models_optuna import _load_jsonl_metric
+    pairs = _load_jsonl_metric("/nonexistent/train_progress.jsonl", "valid_route_accuracy")
+    assert pairs == []
+
+
+def test_fit_quadratic_estimate_concave_down():
+    """Concave-down parabola should extrapolate to vertex when it precedes target."""
+    from retrosynformer.models_optuna import _fit_quadratic_estimate
+    import numpy as np
+    # Perfect quadratic: value peaks at epoch 50, we've only observed 0..30
+    a, b, c = -0.001, 0.1, 0.0
+    epochs = list(range(15, 31))
+    pairs = [(e, a * e**2 + b * e + c) for e in epochs]
+    result = _fit_quadratic_estimate(pairs, target_epoch=99, direction="MAXIMIZE")
+    # Vertex at -b/(2a) = -0.1 / (-0.002) = 50
+    assert abs(result["target_epoch"] - 50.0) < 1.0, (
+        f"Expected extrapolation near vertex (50), got {result['target_epoch']}"
+    )
+    assert result["r_squared"] > 0.99
+
+
+def test_fit_quadratic_estimate_concave_up_minimize():
+    """Concave-up parabola MINIMIZE: extrapolate to vertex."""
+    from retrosynformer.models_optuna import _fit_quadratic_estimate
+    # Parabola opens upward, MINIMIZE: minimum at epoch 20
+    a, b, c = 0.001, -0.04, 1.0
+    epochs = list(range(5, 18))
+    pairs = [(e, a * e**2 + b * e + c) for e in epochs]
+    result = _fit_quadratic_estimate(pairs, target_epoch=40, direction="MINIMIZE")
+    assert abs(result["target_epoch"] - 20.0) < 2.0
+    assert result["r_squared"] > 0.99
+
+
+def test_fit_quadratic_estimate_r_squared_in_range():
+    """R² must be in [0, 1] for typical data."""
+    from retrosynformer.models_optuna import _fit_quadratic_estimate
+    pairs = [(i, 0.1 * i ** 0.5) for i in range(10, 21)]
+    result = _fit_quadratic_estimate(pairs, target_epoch=30, direction="MAXIMIZE")
+    assert 0.0 <= result["r_squared"] <= 1.0
+
+
+def test_estimate_incomplete_objectives_large_study(large_session):
+    """hypertune-large has a RUNNING trial with 37 epochs — should produce an estimate."""
+    from retrosynformer.models_optuna import estimate_incomplete_objectives
+    results = estimate_incomplete_objectives(_LARGE_DB, large_session)
+    running = {k: v for k, v in results.items() if v["state"] == "RUNNING"}
+    assert len(running) >= 1, "Expected at least one RUNNING trial"
+    # The trial with 37 epochs must produce a non-skipped estimate
+    estimated = {k: v for k, v in running.items() if not v["skipped"]}
+    assert len(estimated) >= 1, (
+        f"Expected at least one RUNNING trial with ≥6 epochs; got: {running}"
+    )
+    for trial_num, res in estimated.items():
+        assert res["estimated_value"] is not None
+        assert isinstance(res["estimated_value"], float)
+        assert res["r_squared"] is not None
+        assert 0.0 <= res["r_squared"] <= 1.0, f"R² out of range: {res['r_squared']}"
+        assert res["n_points_fit"] >= 3, "Second-half must have ≥3 points"
+        assert res["poly_coeffs"] is not None and len(res["poly_coeffs"]) == 3
+
+
+def test_estimate_incomplete_objectives_too_few_epochs(details_session):
+    """hypertune-standard-v2-dropout-details trial_5 has only 2 epochs — must skip."""
+    from retrosynformer.models_optuna import estimate_incomplete_objectives
+    results = estimate_incomplete_objectives(_DETAILS_DB, details_session, min_epochs=6)
+    for trial_num, res in results.items():
+        if res["n_epochs_observed"] < 6:
+            assert res["skipped"] is True
+            assert res["estimated_value"] is None
+            assert "min" in (res["skip_reason"] or "").lower()
+
+
+def test_estimate_incomplete_objectives_lr_study(lr_session):
+    """hypertune-standard-v2-lr0005 trial_5 has 7 epochs — should not skip."""
+    from retrosynformer.models_optuna import estimate_incomplete_objectives
+    results = estimate_incomplete_objectives(_LR_DB, lr_session, min_epochs=6)
+    not_skipped = {k: v for k, v in results.items() if not v["skipped"]}
+    assert len(not_skipped) >= 1, (
+        f"Expected ≥1 non-skipped RUNNING trial with 7 epochs; got: {results}"
+    )
+    for trial_num, res in not_skipped.items():
+        assert res["estimated_value"] is not None
+        assert isinstance(res["estimated_value"], float)
+
+
+def test_estimate_incomplete_objectives_metric_override(large_session):
+    """Passing metric= should override config-derived metric."""
+    from retrosynformer.models_optuna import estimate_incomplete_objectives
+    results = estimate_incomplete_objectives(
+        _LARGE_DB, large_session, metric="valid_action_accuracy"
+    )
+    for res in results.values():
+        assert res["metric"] == "valid_action_accuracy"
+
+
+def test_estimate_incomplete_objectives_no_state_mutation(large_session):
+    """estimate_incomplete_objectives must not modify any trial states."""
+    from retrosynformer.models_optuna import estimate_incomplete_objectives, Trial
+    before = {t.number: t.state for t in large_session.query(Trial).all()}
+    estimate_incomplete_objectives(_LARGE_DB, large_session)
+    after = {t.number: t.state for t in large_session.query(Trial).all()}
+    assert before == after, "Trial states must not be modified by estimation"

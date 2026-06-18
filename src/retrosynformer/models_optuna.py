@@ -843,6 +843,225 @@ def study_config_params(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Polynomial estimation for RUNNING / WAITING trials
+# ---------------------------------------------------------------------------
+
+_DEFAULT_OBJECTIVE_METRIC = "valid_route_accuracy"
+
+
+def _load_jsonl_metric(
+    jsonl_path: str | Path,
+    metric: str,
+) -> list[tuple[int, float]]:
+    """Load (epoch, value) pairs for *metric* from a train_progress.jsonl.
+
+    De-duplicates by epoch number (keeps the last value seen — handles
+    append-on-restart files where epoch 0 may appear several times).
+    Skips lines where the metric is absent or non-finite.
+
+    Returns an empty list if the file does not exist or cannot be read.
+    """
+    import math
+
+    path = Path(jsonl_path)
+    if not path.exists():
+        return []
+
+    seen: dict[int, float] = {}
+    try:
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if metric not in row:
+                continue
+            val = row[metric]
+            if val is None or (isinstance(val, float) and not math.isfinite(val)):
+                continue
+            epoch = int(row.get("epoch", len(seen)))
+            seen[epoch] = float(val)
+    except Exception:
+        return []
+
+    return sorted(seen.items())
+
+
+def _trial_objective_metric(db_path: str | Path, trial_number: int) -> str:
+    """Return the ``optuna.objective_metric`` for a trial from its config file.
+
+    Falls back to ``"valid_route_accuracy"`` when the config is absent or
+    the key is not set.
+    """
+    try:
+        import yaml
+        cfg_path = trial_config_path(db_path, trial_number)
+        cfg = yaml.safe_load(Path(cfg_path).read_text()) or {}
+        return cfg.get("optuna", {}).get("objective_metric", _DEFAULT_OBJECTIVE_METRIC)
+    except Exception:
+        return _DEFAULT_OBJECTIVE_METRIC
+
+
+def _fit_quadratic_estimate(
+    epoch_value_pairs: list[tuple[int, float]],
+    target_epoch: int,
+    direction: str = "MAXIMIZE",
+) -> dict:
+    """Fit a degree-2 polynomial to *epoch_value_pairs* and extrapolate.
+
+    For a downward-opening parabola (``a < 0``) with a MAXIMIZE objective,
+    the vertex is the natural extrapolation target — but only if it lies
+    between the last observed epoch and the planned final epoch.  Otherwise
+    extrapolation goes to *target_epoch*.
+
+    Returns a dict with keys:
+        ``estimated_value``, ``target_epoch`` (float, where poly was evaluated),
+        ``r_squared``, ``n_points``, ``poly_coeffs``.
+    """
+    import numpy as np
+
+    epochs = np.array([e for e, _ in epoch_value_pairs], dtype=float)
+    values = np.array([v for _, v in epoch_value_pairs], dtype=float)
+
+    coeffs = np.polyfit(epochs, values, 2)
+    a, b, _ = coeffs
+
+    extr_epoch = float(target_epoch)
+    if abs(a) > 1e-12:
+        vertex = -b / (2.0 * a)
+        beneficial_vertex = (
+            (direction == "MAXIMIZE" and a < 0) or
+            (direction == "MINIMIZE" and a > 0)
+        )
+        if beneficial_vertex and epochs[-1] < vertex <= target_epoch:
+            extr_epoch = vertex
+        elif beneficial_vertex and vertex <= epochs[-1]:
+            # Already past the vertex — current last observed is the peak
+            extr_epoch = float(epochs[-1])
+
+    estimated = float(np.polyval(coeffs, extr_epoch))
+
+    y_pred = np.polyval(coeffs, epochs)
+    ss_res = float(np.sum((values - y_pred) ** 2))
+    ss_tot = float(np.sum((values - np.mean(values)) ** 2))
+    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 1e-15 else 1.0
+
+    return {
+        "estimated_value": estimated,
+        "target_epoch": extr_epoch,
+        "r_squared": r_squared,
+        "n_points": len(epoch_value_pairs),
+        "poly_coeffs": coeffs.tolist(),
+    }
+
+
+def estimate_incomplete_objectives(
+    db_path: str | Path,
+    session: Session,
+    *,
+    metric: Optional[str] = None,
+    min_epochs: int = 6,
+) -> dict[int, dict]:
+    """Estimate objective values for RUNNING / WAITING trials via polynomial fit.
+
+    For each incomplete trial:
+
+    1. Locate ``train_progress.jsonl`` via the ``trial_NNN/`` convention.
+    2. Determine the objective metric from each trial's ``model.config.yaml``
+       (``optuna.objective_metric``), or from *metric* if given, or fall back
+       to ``"valid_route_accuracy"``.
+    3. Skip if fewer than *min_epochs* total epoch rows are available.
+    4. Take the **second half** of epoch rows by count.
+    5. Fit a degree-2 polynomial (``numpy.polyfit``) to those rows.
+    6. Extrapolate to the vertex epoch (when the parabola opens beneficially
+       and the vertex is in range) or to ``n_epochs - 1`` from the config.
+
+    Trial states are **never modified** — this is purely analytical.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the study.db file.
+    session:
+        ORM session for that database.
+    metric:
+        Override the objective metric column.  If None, each trial's config
+        is consulted; falls back to ``"valid_route_accuracy"``.
+    min_epochs:
+        Minimum total epoch rows required before attempting a fit.  Trials
+        with fewer rows get ``skipped=True``.
+
+    Returns
+    -------
+    dict[int, dict]
+        ``{trial_number: result}`` for every RUNNING / WAITING trial.
+
+        Each result contains:
+            ``state``, ``metric``, ``n_epochs_observed``,
+            ``estimated_value`` (None if skipped),
+            ``n_points_fit``, ``target_epoch``, ``r_squared``,
+            ``poly_coeffs``, ``skipped``, ``skip_reason``.
+    """
+    study = session.query(Study).first()
+    direction = study.direction if study else "MAXIMIZE"
+
+    results: dict[int, dict] = {}
+
+    for trial in session.query(Trial).filter(Trial.state.in_(["RUNNING", "WAITING"])).all():
+        trial_metric = metric or _trial_objective_metric(db_path, trial.number)
+
+        try:
+            import yaml
+            cfg_path = trial_config_path(db_path, trial.number)
+            cfg = yaml.safe_load(Path(cfg_path).read_text()) or {}
+            n_epochs = int(cfg.get("train", {}).get("n_epochs", 100))
+        except Exception:
+            n_epochs = 100
+
+        jsonl_path = Path(db_path).parent / f"trial_{trial.number:03d}" / "train_progress.jsonl"
+        pairs = _load_jsonl_metric(jsonl_path, trial_metric)
+
+        base = {
+            "state": trial.state,
+            "metric": trial_metric,
+            "n_epochs_observed": len(pairs),
+        }
+
+        if len(pairs) < min_epochs:
+            results[trial.number] = {
+                **base,
+                "estimated_value": None,
+                "n_points_fit": 0,
+                "target_epoch": None,
+                "r_squared": None,
+                "poly_coeffs": None,
+                "skipped": True,
+                "skip_reason": f"only {len(pairs)} epoch(s) observed (min {min_epochs})",
+            }
+            continue
+
+        half_start = len(pairs) // 2
+        half_pairs = pairs[half_start:]
+        fit = _fit_quadratic_estimate(half_pairs, n_epochs - 1, direction)
+
+        results[trial.number] = {
+            **base,
+            "estimated_value": fit["estimated_value"],
+            "n_points_fit": fit["n_points"],
+            "target_epoch": fit["target_epoch"],
+            "r_squared": fit["r_squared"],
+            "poly_coeffs": fit["poly_coeffs"],
+            "skipped": False,
+            "skip_reason": None,
+        }
+
+    return results
+
+
 def fixed_params_diff(
     db_path_a: str | Path,
     session_a: Session,
