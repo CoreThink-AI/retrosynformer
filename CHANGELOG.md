@@ -5,6 +5,17 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.14] — 2026-06-18
+
+**Quadratic objective estimation for incomplete trials; large-study merge; 11 new jsonl fields per epoch.**
+
+- `models_optuna.py`: `estimate_incomplete_objectives()` fits a degree-2 polynomial to the second half of each RUNNING/WAITING trial's `train_progress.jsonl` and extrapolates to the vertex or `n_epochs`; helpers `_load_jsonl_metric` (epoch de-dup for append-on-restart files), `_trial_objective_metric`, `_fit_quadratic_estimate`.
+- `scripts/merge_large_studies.py`: merges all `hypertune-*large*` study databases into `results/hypermerge/large-merged/`; COMPLETE trials carry objective values, RUNNING/WAITING/FAIL stored as FAIL; relative symlinks to original `trial_NNN/` directories; `SOURCES.txt` provenance; fixed params that vary across studies (`hidden_size`, `head_dim`, `batch_size`, `early_stopping_patience`) promoted to `CategoricalDistribution` dimensions so the TPE surrogate can learn their effect.
+- `trainer.py`: 11 new fields appended to `train_progress.jsonl` each epoch: `learning_rate`, `elapsed_seconds`, `is_best`, `epochs_without_improvement`, `timestamp`, `gradient_norm`, `n_lr_reductions`, `best_valid_route_accuracy`, `study_name`, `trial_number`, `config_hash`; removed dead `time.time()` call.
+- 11 new tests in `test_models_optuna.py` for the polynomial estimation logic.
+
+---
+
 ## [0.1.13] — 2026-06-17
 
 **`rs-plot-learning-curves`: multiple `--metric` flags; fixed params in trial table; Optuna params marked with `*`.**
