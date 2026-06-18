@@ -9,17 +9,15 @@ import pandas as pd
 import torch
 import yaml
 from torch.utils.data import DataLoader
-
-logger = logging.getLogger(__name__)
-
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
 
-from .data import RouteDatasetTorch, collate_fn
 from . import trainer as _trainer_mod
+from .data import RouteDatasetTorch, collate_fn
 from .trainer import RetroTrainer
 from .utils import evaluation, reward_functions, utils
-
 from .utils.utils import get_device
+
+logger = logging.getLogger(__name__)
 DEVICE = get_device()
 
 
@@ -263,13 +261,46 @@ def init_model(config, model_path=None):
 
 
 DATASET_CONFIGS = {
-    "small":    {"routes": "data/small_routes.json",    "building_blocks": "data/small_building_blocks.csv",    "templates": "data/small_reaction_templates.pickle",    "action_dim": 589},
-    "standard": {"routes": "data/standard_routes.json", "building_blocks": "data/standard_building_blocks.csv", "templates": "data/standard_reaction_templates.pickle", "action_dim": 1573},
-    "large":    {"routes": "data/large_routes.json",    "building_blocks": "data/large_building_blocks.csv",    "templates": "data/large_reaction_templates.pickle",    "action_dim": 2957},
+    "small":    {
+        "routes": "data/small_routes.json",
+        "building_blocks": "data/small_building_blocks.csv",
+        "templates": "data/small_reaction_templates.pickle",
+        "action_dim": 589},
+    "standard": {
+        "routes": "data/standard_routes.json",
+        "building_blocks": "data/standard_building_blocks.csv",
+        "templates": "data/standard_reaction_templates.pickle",
+        "action_dim": 1573},
+    "large":    {
+        "routes": "data/large_routes.json",
+        "building_blocks": "data/large_building_blocks.csv",
+        "templates": "data/large_reaction_templates.pickle",
+        "action_dim": 2957},
 }
 
 
-def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=None, batch_size=None, n_heads=None, n_layers=None, seed=None, head_dim=None, results_path=None, lr=None, dropout=None, attn_pdrop=None, embd_pdrop=None, resid_pdrop=None, momentum=None, eval_n_batches=None, structured_dropout_bottleneck=None, structured_dropout_rate=None, layer_shared_resid_dropout=None, eval_routes_at_end=False, trial_number=None, study_name=None):
+def main(
+        config_path,
+        resume=False,
+        n_epochs=None,
+        dataset=None,
+        start_epoch=None,
+        batch_size=None,
+        n_heads=None,
+        n_layers=None,
+        seed=None,
+        head_dim=None,
+        results_path=None,
+        lr=None,
+        attn_pdrop=None, embd_pdrop=None, resid_pdrop=None,
+        momentum=None,
+        eval_n_batches=None,
+        # dropout=None,
+        # structured_dropout_bottleneck=None, structured_dropout_rate=None,
+        layer_shared_resid_dropout=None,
+        eval_routes_at_end=False,
+        trial_number=None,
+        study_name=None):
     start_time = time.time()
     print("Initiate training.")
     config = read_config(config_path)
@@ -307,11 +338,11 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if momentum is not None:
         config["optimizer"]["momentum"] = momentum
         print(f"momentum override: {momentum}")
-    if dropout is not None:
-        config["model"]["attn_pdrop"] = dropout
-        config["model"]["embd_pdrop"] = dropout
-        config["model"]["resid_pdrop"] = dropout
-        print(f"dropout override: {dropout} (attn/embd/resid)")
+    # if dropout is not None:
+    #     config["model"]["attn_pdrop"] = dropout
+    #     config["model"]["embd_pdrop"] = dropout
+    #     config["model"]["resid_pdrop"] = dropout
+    #     print(f"dropout override: {dropout} (attn/embd/resid)")
     if attn_pdrop is not None:
         config["model"]["attn_pdrop"] = attn_pdrop
         print(f"attn_pdrop override: {attn_pdrop}")
@@ -331,12 +362,12 @@ def main(config_path, resume=False, n_epochs=None, dataset=None, start_epoch=Non
     if eval_n_batches is not None:
         config["evaluation"]["eval_n_batches"] = eval_n_batches
         print(f"eval_n_batches override: {eval_n_batches}")
-    if structured_dropout_bottleneck is not None:
-        config["model"]["structured_dropout_bottleneck"] = int(structured_dropout_bottleneck)
-        print(f"structured_dropout_bottleneck override: {structured_dropout_bottleneck}")
-    if structured_dropout_rate is not None:
-        config["model"]["structured_dropout_rate"] = float(structured_dropout_rate)
-        print(f"structured_dropout_rate override: {structured_dropout_rate}")
+    # if structured_dropout_bottleneck is not None:
+    #     config["model"]["structured_dropout_bottleneck"] = int(structured_dropout_bottleneck)
+    #     print(f"structured_dropout_bottleneck override: {structured_dropout_bottleneck}")
+    # if structured_dropout_rate is not None:
+    #     config["model"]["structured_dropout_rate"] = float(structured_dropout_rate)
+    #     print(f"structured_dropout_rate override: {structured_dropout_rate}")
     # Derive hidden_size from n_heads * head_dim whenever head_dim is present in config.
     if "head_dim" in config["model"]:
         config["model"]["hidden_size"] = config["model"]["n_heads"] * config["model"]["head_dim"]
@@ -493,20 +524,20 @@ if __name__ == "__main__":
         dest="lr",
         help="Override optimizer.lr from config",
     )
-    parser.add_argument(
-        "--dropout",
-        type=float,
-        default=None,
-        dest="dropout",
-        help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
-    )
-    parser.add_argument(
-        "--structured-dropout-rate",
-        type=float,
-        default=None,
-        dest="structured_dropout_rate",
-        help="Global multiplier on learned structured-dropout probabilities (0=off, 1=default, >1=amplify)",
-    )
+    # parser.add_argument(
+    #     "--dropout",
+    #     type=float,
+    #     default=None,
+    #     dest="dropout",
+    #     help="Override all dropout rates (attn_pdrop, embd_pdrop, resid_pdrop) from config",
+    # )
+    # parser.add_argument(
+    #     "--structured-dropout-rate",
+    #     type=float,
+    #     default=None,
+    #     dest="structured_dropout_rate",
+    #     help="Global multiplier on learned structured-dropout probabilities (0=off, 1=default, >1=amplify)",
+    # )
     parser.add_argument(
         "--layer-shared-resid-dropout",
         action="store_true",
