@@ -64,20 +64,30 @@ class StudyAdmin(ModelView):
 
 class TrialAdmin(ModelView):
     column_list = [
-        "study", "trial_number", "state", "epoch_count",
+        "study", "trial_number", "state",
+        "datetime_start", "datetime_complete", "duration_min",
+        "epoch_count",
         "optuna_score", "valid_loss", "valid_action_accuracy",
-        "valid_route_accuracy", "fraction_targets_solved", "duration_min",
+        "valid_route_accuracy", "fraction_targets_solved",
         "synced_at",
     ]
     column_sortable_list = [
-        ("study", "study.study_name"), "trial_number", "state", "epoch_count",
+        ("study", "study.study_name"), "trial_number", "state",
+        "datetime_start", "datetime_complete", "duration_min",
+        "epoch_count",
         "optuna_score", "valid_loss", "valid_action_accuracy",
-        "valid_route_accuracy", "fraction_targets_solved", "duration_min",
+        "valid_route_accuracy", "fraction_targets_solved",
         "synced_at",
     ]
-    column_searchable_list = []
-    column_filters = ["state", "optuna_score", "fraction_targets_solved", "epoch_count"]
-    column_default_sort = ("synced_at", True)
+    column_searchable_list = ["study.study_name"]
+    column_filters = [
+        "state", "study.study_name",
+        "datetime_start", "datetime_complete", "duration_min",
+        "optuna_score", "valid_loss", "valid_action_accuracy",
+        "valid_route_accuracy", "fraction_targets_solved",
+        "epoch_count",
+    ]
+    column_default_sort = ("datetime_start", True)
     can_create = False
     can_delete = False
     can_edit = False
@@ -91,28 +101,16 @@ class TrialAdmin(ModelView):
             if _is_stale(m) else
             f'<span class="badge badge-{m.state.lower()}">{m.state}</span>'
         ),
-        "synced_at": lambda v, c, m, n: m.synced_at.strftime("%Y-%m-%d %H:%M") if m.synced_at else "—",
-        "optuna_score": lambda v, c, m, n: f"{m.optuna_score:.4f}" if m.optuna_score is not None else "—",
-        "valid_loss": lambda v, c, m, n: f"{m.valid_loss:.4f}" if m.valid_loss is not None else "—",
-        "valid_action_accuracy": lambda v, c, m, n: f"{m.valid_action_accuracy:.4f}" if m.valid_action_accuracy is not None else "—",
-        "valid_route_accuracy": lambda v, c, m, n: f"{m.valid_route_accuracy:.4f}" if m.valid_route_accuracy is not None else "—",
-        "fraction_targets_solved": lambda v, c, m, n: f"{m.fraction_targets_solved:.4f}" if m.fraction_targets_solved is not None else "—",
+        "datetime_start":    lambda v, c, m, n: m.datetime_start.strftime("%Y-%m-%d %H:%M")    if m.datetime_start    else "—",
+        "datetime_complete": lambda v, c, m, n: m.datetime_complete.strftime("%Y-%m-%d %H:%M") if m.datetime_complete else "—",
+        "synced_at":         lambda v, c, m, n: m.synced_at.strftime("%Y-%m-%d %H:%M")         if m.synced_at         else "—",
+        "optuna_score":              lambda v, c, m, n: f"{m.optuna_score:.4f}"              if m.optuna_score              is not None else "—",
+        "valid_loss":                lambda v, c, m, n: f"{m.valid_loss:.4f}"                if m.valid_loss                is not None else "—",
+        "valid_action_accuracy":     lambda v, c, m, n: f"{m.valid_action_accuracy:.4f}"     if m.valid_action_accuracy     is not None else "—",
+        "valid_route_accuracy":      lambda v, c, m, n: f"{m.valid_route_accuracy:.4f}"      if m.valid_route_accuracy      is not None else "—",
+        "fraction_targets_solved":   lambda v, c, m, n: f"{m.fraction_targets_solved:.4f}"   if m.fraction_targets_solved   is not None else "—",
+        "duration_min":              lambda v, c, m, n: f"{m.duration_min:.1f}"              if m.duration_min              is not None else "—",
     }
-
-    def _curves_link(self, context, model, name):
-        if model.trial_dir is None:
-            return "—"
-        study_name = model.study.study_name if model.study else "?"
-        url = url_for("dashboard.trial_curves", study_name=study_name,
-                      trial_num=model.trial_number)
-        return Markup(f'<a href="{url}">📈 curves</a>')
-
-    column_extra_row_actions = []
-    column_list = [
-        "study", "trial_number", "state", "epoch_count",
-        "optuna_score", "valid_loss", "valid_action_accuracy",
-        "valid_route_accuracy", "fraction_targets_solved", "duration_min",
-    ]
 
 
 class EpochRecordAdmin(ModelView):
