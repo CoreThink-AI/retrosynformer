@@ -360,11 +360,19 @@ def sync_study(db_path: str, root: str, force: bool = False) -> bool:
             break
 
     # Compute git hash once per study using the earliest trial start time
+    def _to_dt(v):
+        return datetime.fromisoformat(str(v)) if not isinstance(v, datetime) else v
+
     starts = [t["datetime_start"] for t in info["trials"] if t["datetime_start"] is not None]
-    study_start = min(
-        (datetime.fromisoformat(str(s)) if not isinstance(s, datetime) else s)
-        for s in starts
-    ) if starts else None
+    ends   = [t["datetime_complete"] for t in info["trials"] if t["datetime_complete"] is not None]
+
+    study_start = min(_to_dt(s) for s in starts) if starts else None
+    study_end   = max(_to_dt(e) for e in ends)   if ends   else (
+                  max(_to_dt(s) for s in starts)  if starts else None)
+
+    existing.started_at   = study_start
+    existing.completed_at = study_end
+
     git_hash = git_message = None
     if study_start:
         repo_root = os.path.abspath(os.path.join(root, ".."))

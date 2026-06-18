@@ -9,6 +9,22 @@ from datetime import timedelta
 from flask import Flask, redirect, request, session, url_for
 from flask_admin import Admin
 
+
+def _migrate_schema(db) -> None:
+    """Add columns introduced after the initial schema without dropping the DB."""
+    from sqlalchemy import inspect, text
+    inspector = inspect(db.engine)
+    existing = {c["name"] for c in inspector.get_columns("studies")}
+    new_cols = [
+        ("started_at",   "DATETIME"),
+        ("completed_at", "DATETIME"),
+    ]
+    with db.engine.connect() as conn:
+        for col, col_type in new_cols:
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE studies ADD COLUMN {col} {col_type}"))
+        conn.commit()
+
 from .extensions import limiter
 from .models import EpochRecord, Study, Trial, TrialHyperparams, db
 from .views import (DashboardIndexView, EpochRecordAdmin, StudyAdmin,
@@ -104,6 +120,7 @@ def create_app(
 
     with app.app_context():
         db.create_all()
+        _migrate_schema(db)
 
     admin = Admin(
         app,

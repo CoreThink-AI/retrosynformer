@@ -25,6 +25,8 @@ class Study(db.Model):
     mean_score = db.Column(db.Float)
     std_score = db.Column(db.Float)
     best_trial_number = db.Column(db.Integer)
+    started_at = db.Column(db.DateTime)    # earliest trial datetime_start
+    completed_at = db.Column(db.DateTime)  # latest trial datetime_complete (or latest start)
     last_synced_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

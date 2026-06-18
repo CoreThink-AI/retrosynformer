@@ -38,23 +38,27 @@ def _is_stale(trial) -> bool:
 
 class StudyAdmin(ModelView):
     column_list = [
-        "study_name", "status", "n_trials", "n_complete", "n_running",
+        "study_name", "status", "started_at", "completed_at",
+        "n_trials", "n_complete", "n_running",
         "best_score", "best_trial_number", "objective_metric", "last_synced_at",
     ]
     column_sortable_list = [
-        "study_name", "status", "n_trials", "n_complete", "n_running",
+        "study_name", "status", "started_at", "completed_at",
+        "n_trials", "n_complete", "n_running",
         "best_score", "best_trial_number", "objective_metric", "last_synced_at",
     ]
     column_searchable_list = ["study_name"]
     column_filters = ["status", "best_score", "n_trials"]
-    column_default_sort = ("last_synced_at", True)
+    column_default_sort = ("started_at", True)
     can_create = False
     can_delete = True
     can_edit = False
     can_view_details = True
     column_formatters = {
-        "best_score": lambda v, c, m, n: f"{m.best_score:.4f}" if m.best_score is not None else "—",
-        "last_synced_at": lambda v, c, m, n: m.last_synced_at.strftime("%H:%M:%S") if m.last_synced_at else "—",
+        "best_score":    lambda v, c, m, n: f"{m.best_score:.4f}" if m.best_score is not None else "—",
+        "started_at":    lambda v, c, m, n: m.started_at.strftime("%Y-%m-%d %H:%M")    if m.started_at    else "—",
+        "completed_at":  lambda v, c, m, n: m.completed_at.strftime("%Y-%m-%d %H:%M")  if m.completed_at  else "—",
+        "last_synced_at": lambda v, c, m, n: m.last_synced_at.strftime("%H:%M:%S")     if m.last_synced_at else "—",
     }
 
 

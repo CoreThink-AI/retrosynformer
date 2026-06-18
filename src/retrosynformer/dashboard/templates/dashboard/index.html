@@ -124,21 +124,23 @@
     </div>
   </div>
 
-  <!-- Active studies first -->
+  <!-- Studies table -->
   <h5>Studies <span class="text-muted small" id="sync-msg"></span></h5>
   <div class="table-responsive">
-  <table class="table table-sm table-hover table-bordered">
+  <table id="studies-table" class="table table-sm table-hover table-bordered sortable-table">
     <thead class="thead-light">
       <tr>
-        <th>Study</th>
-        <th>Status</th>
-        <th>Trials</th>
-        <th>Complete</th>
-        <th>Running</th>
-        <th>Best Score</th>
-        <th>Best Trial</th>
-        <th>Epoch</th>
-        <th>Metric</th>
+        <th data-col="0" class="sortable">Study <span class="sort-icon">↕</span></th>
+        <th data-col="1" class="sortable">Status <span class="sort-icon">↕</span></th>
+        <th data-col="2" class="sortable">Started <span class="sort-icon">↕</span></th>
+        <th data-col="3" class="sortable">Completed <span class="sort-icon">↕</span></th>
+        <th data-col="4" class="sortable">Trials <span class="sort-icon">↕</span></th>
+        <th data-col="5" class="sortable">Complete <span class="sort-icon">↕</span></th>
+        <th data-col="6" class="sortable">Running <span class="sort-icon">↕</span></th>
+        <th data-col="7" class="sortable">Best Score <span class="sort-icon">↕</span></th>
+        <th data-col="8">Best Trial</th>
+        <th data-col="9" class="sortable">Epoch <span class="sort-icon">↕</span></th>
+        <th data-col="10">Metric</th>
         <th>Curves</th>
       </tr>
     </thead>
@@ -146,8 +148,14 @@
       {% for s in studies %}
       <tr>
         <td>{{ s.study_name }}</td>
-        <td>
+        <td data-val="{{ s.status }}">
           <span class="badge badge-{{ s.status }}">{{ s.status }}</span>
+        </td>
+        <td data-val="{{ s.started_at.isoformat() if s.started_at else '' }}" class="metric small">
+          {{ s.started_at.strftime("%Y-%m-%d %H:%M") if s.started_at else "—" }}
+        </td>
+        <td data-val="{{ s.completed_at.isoformat() if s.completed_at else '' }}" class="metric small">
+          {{ s.completed_at.strftime("%Y-%m-%d %H:%M") if s.completed_at else "—" }}
         </td>
         <td class="metric">{{ s.n_trials }}</td>
         <td class="metric">{{ s.n_complete }}</td>
@@ -165,7 +173,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="text-center text-muted">No studies synced yet. <button class="btn btn-sm btn-primary" onclick="triggerSync()">Sync now</button></td></tr>
+      <tr><td colspan="12" class="text-center text-muted">No studies synced yet. <button class="btn btn-sm btn-primary" onclick="triggerSync()">Sync now</button></td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -220,6 +228,52 @@
   </div>
   {% endif %}
 </div>
+
+<style>
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sortable:hover { background: #e2e6ea; }
+  th.sort-asc  .sort-icon::after { content: " ▲"; }
+  th.sort-desc .sort-icon::after { content: " ▼"; }
+  th.sortable .sort-icon { color: #aaa; font-size: 0.75em; }
+</style>
+<script>
+(function() {
+  function cellVal(td) {
+    return td.dataset.val !== undefined ? td.dataset.val : td.textContent.trim();
+  }
+  function sortTable(table, col, asc) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {
+      const va = cellVal(a.cells[col]), vb = cellVal(b.cells[col]);
+      const na = parseFloat(va), nb = parseFloat(vb);
+      const numericA = !isNaN(na) && va !== '', numericB = !isNaN(nb) && vb !== '';
+      if (numericA && numericB) return asc ? na - nb : nb - na;
+      if (va === '' || va === '—') return 1;
+      if (vb === '' || vb === '—') return -1;
+      return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+    table.querySelectorAll('th').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
+    const th = table.querySelector(`th[data-col="${col}"]`);
+    if (th) th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.sortable-table').forEach(table => {
+      let sortCol = 2, sortAsc = false;   // default: Started ↓ (most recent first)
+      sortTable(table, sortCol, sortAsc);
+      table.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = parseInt(th.dataset.col);
+          if (col === sortCol) sortAsc = !sortAsc;
+          else { sortCol = col; sortAsc = false; }
+          sortTable(table, sortCol, sortAsc);
+        });
+      });
+    });
+  });
+})();
+</script>
 
 <script>
 function triggerSync() {
