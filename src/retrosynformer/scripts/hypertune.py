@@ -399,10 +399,58 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
 
 
 # ---------------------------------------------------------------------------
-# Optuna objective
+# Ordered grid enumeration
 # ---------------------------------------------------------------------------
 
 _RESERVED_OPTUNA_KEYS = {"objective_metric"}
+
+
+def _enumerate_ordered_params(optuna_cfg: dict) -> list[dict]:
+    """Return every combination of list-typed optuna params in declaration order.
+
+    Only params specified as a flat list or list-of-lists (explicit choices)
+    participate.  Dict params with ``low``/``high`` ranges are excluded and
+    will be sampled by Optuna's normal sampler for each enqueued trial.
+
+    Inner lists (list-of-lists form, e.g. ``layer_shared_resid_dropout``) are
+    JSON-serialised to strings, matching what ``_suggest`` passes to
+    ``trial.suggest_categorical`` so that Optuna's trial storage is consistent.
+
+    Returns an empty list when no list-typed params are present.
+    """
+    import json as _json
+    from itertools import product as _product
+
+    names: list[str] = []
+    choices_per_param: list[list] = []
+
+    for name, spec in optuna_cfg.items():
+        if name in _RESERVED_OPTUNA_KEYS:
+            continue
+        if isinstance(spec, list):
+            if spec and isinstance(spec[0], list):
+                # List-of-lists: serialise inner lists to JSON strings.
+                names.append(name)
+                choices_per_param.append(
+                    [_json.dumps(lst, separators=(",", ":")) for lst in spec]
+                )
+            else:
+                names.append(name)
+                choices_per_param.append(list(spec))
+        elif isinstance(spec, dict) and "choices" in spec:
+            names.append(name)
+            choices_per_param.append(list(spec["choices"]))
+        # dict with low/high → continuous/stepped range; skip
+
+    if not names:
+        return []
+
+    return [dict(zip(names, combo)) for combo in _product(*choices_per_param)]
+
+
+# ---------------------------------------------------------------------------
+# Optuna objective
+# ---------------------------------------------------------------------------
 
 
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str,
@@ -530,7 +578,7 @@ def main():
     )
     parser.add_argument(
         "--n-trials", type=int, default=20,
-        help="Total number of Optuna trials (including the fixed baseline)",
+        help="Total number of Optuna trials to run",
     )
     parser.add_argument(
         "--n-epochs", type=int, default=200,
@@ -581,9 +629,18 @@ def main():
     # Persist n_trials in study.db so it can be retrieved without the CLI args.
     study.set_user_attr("n_trials", args.n_trials)
 
-    # Only enqueue the baseline on a fresh study — resuming from storage already has it.
+    # On a fresh study, pre-enqueue all ordered combinations so that list-typed
+    # params are tried in declaration order.  Range params are sampled normally
+    # by Optuna for each enqueued trial.  Falls back to the fixed baseline when
+    # no list-typed params are present (pure continuous / range-only search).
     if len(study.trials) == 0:
-        study.enqueue_trial(BASELINE_TRIAL)
+        preprocessed_cfg = _preprocess_optuna_config(read_config(args.config_path))
+        ordered_combos = _enumerate_ordered_params(preprocessed_cfg.get("optuna", {}))
+        if ordered_combos:
+            for combo in ordered_combos:
+                study.enqueue_trial(combo)
+        else:
+            study.enqueue_trial(BASELINE_TRIAL)
 
     def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
         """Write a completion record to run.jsonl after each trial."""

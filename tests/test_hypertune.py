@@ -79,6 +79,77 @@ def test_suggest_float_inferred_from_python_float_types(trial):
 
 
 # ---------------------------------------------------------------------------
+# _enumerate_ordered_params
+# ---------------------------------------------------------------------------
+
+def test_enumerate_flat_lists_cartesian_product():
+    cfg = {"n_heads": [1, 2], "dropout": [0.0, 0.1]}
+    combos = ht._enumerate_ordered_params(cfg)
+    assert combos == [
+        {"n_heads": 1, "dropout": 0.0},
+        {"n_heads": 1, "dropout": 0.1},
+        {"n_heads": 2, "dropout": 0.0},
+        {"n_heads": 2, "dropout": 0.1},
+    ]
+
+
+def test_enumerate_preserves_declaration_order():
+    cfg = {"a": [1, 2], "b": [10, 20], "c": [100, 200]}
+    combos = ht._enumerate_ordered_params(cfg)
+    assert len(combos) == 8
+    assert combos[0] == {"a": 1, "b": 10, "c": 100}
+    assert combos[-1] == {"a": 2, "b": 20, "c": 200}
+
+
+def test_enumerate_list_of_lists_serialised_to_json():
+    import json
+    cfg = {"layer_shared_resid_dropout": [[True, False], [False, True]]}
+    combos = ht._enumerate_ordered_params(cfg)
+    assert len(combos) == 2
+    # Values must be JSON strings matching what _suggest passes to suggest_categorical.
+    assert combos[0] == {"layer_shared_resid_dropout": json.dumps([True, False], separators=(",", ":"))}
+    assert combos[1] == {"layer_shared_resid_dropout": json.dumps([False, True], separators=(",", ":"))}
+
+
+def test_enumerate_skips_range_params():
+    cfg = {"n_heads": [1, 2], "lr": {"low": 1e-4, "high": 1e-2, "log": True}}
+    combos = ht._enumerate_ordered_params(cfg)
+    assert all("lr" not in c for c in combos)
+    assert len(combos) == 2
+
+
+def test_enumerate_skips_reserved_keys():
+    cfg = {"objective_metric": "valid_action_accuracy", "n_heads": [1, 2]}
+    combos = ht._enumerate_ordered_params(cfg)
+    assert all("objective_metric" not in c for c in combos)
+    assert len(combos) == 2
+
+
+def test_enumerate_choices_dict_included():
+    cfg = {"n_heads": {"choices": [1, 2, 4]}}
+    combos = ht._enumerate_ordered_params(cfg)
+    assert len(combos) == 3
+    assert combos[1] == {"n_heads": 2}
+
+
+def test_enumerate_no_list_params_returns_empty():
+    cfg = {"lr": {"low": 1e-4, "high": 1e-2}, "n_layers": {"low": 2, "high": 8}}
+    assert ht._enumerate_ordered_params(cfg) == []
+
+
+def test_enumerate_mixed_list_and_list_of_lists():
+    import json
+    cfg = {
+        "n_heads": [1, 2],
+        "layer_shared_resid_dropout": [[True, False], [False, True]],
+    }
+    combos = ht._enumerate_ordered_params(cfg)
+    assert len(combos) == 4
+    assert combos[0]["n_heads"] == 1
+    assert combos[0]["layer_shared_resid_dropout"] == json.dumps([True, False], separators=(",", ":"))
+
+
+# ---------------------------------------------------------------------------
 # _validate_config
 # ---------------------------------------------------------------------------
 
