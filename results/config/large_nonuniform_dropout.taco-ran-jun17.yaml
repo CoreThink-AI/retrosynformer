@@ -42,8 +42,8 @@ optuna:
   layer_shared_resid_dropout:
     - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     - [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0]  # mistake on taco study 
-    - [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
-    - [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    # - [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+    # - [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
   attn_pdrop:
     low: 0.13
     high: 0.2
@@ -67,7 +67,7 @@ context:
   templates_path: data/large_reaction_templates.pickle
 
 dataset:
-  action_dim: 2957  # large=2957, standard=1573, small=589
+  action_dim: 589
   drop_duplicates: true
   fp_dim: 1024
   n_in_state: 2
@@ -80,7 +80,7 @@ evaluation:
   batch_size: 64
   beam_width: 1
   eval_n_batches: 10
-  eval_routes_frequency: 25  # 100
+  eval_routes_frequency: 25
   max_depth: 6
   test_frac: 0.1
   sort_on: trajectory_prob
@@ -112,7 +112,7 @@ reward:
 
 train:
   batch_size: 512
-  early_stopping_patience: 20
+  early_stopping_patience: 15  # 20
   loss: crossEntropyLoss
   lr_scheduler_patience: 10
   n_epochs: 200
