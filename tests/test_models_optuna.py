@@ -426,8 +426,102 @@ def test_plan_merge_changes_list(sessions):
 
 
 def test_plan_merge_warns_about_running_trials(sessions):
-    """baseline_small has a RUNNING trial — plan should warn."""
+    """baseline_small has a RUNNING trial — plan should warn, NOT say convert to FAIL."""
     from retrosynformer.models_optuna import plan_merge
     plan = plan_merge(sessions["structured_dropout"], sessions["baseline_small"])
     warning_text = " ".join(plan["warnings"]).upper()
     assert "RUNNING" in warning_text
+    assert "CONVERT" not in warning_text, "Warning must not instruct state conversion"
+    assert "DROP" not in warning_text, "Warning must not instruct dropping trials"
+
+
+# ---------------------------------------------------------------------------
+# Config-file augmentation
+# ---------------------------------------------------------------------------
+
+def test_trial_config_path_convention():
+    from retrosynformer.models_optuna import trial_config_path
+    p = trial_config_path(DB_PATHS["structured_dropout"], 2)
+    assert p.name == "model.config.yaml"
+    assert "trial_002" in str(p)
+    assert p.exists(), f"Expected config at {p}"
+
+
+def test_load_trial_config_returns_dict():
+    from retrosynformer.models_optuna import load_trial_config, trial_config_path
+    path = trial_config_path(DB_PATHS["structured_dropout"], 2)
+    cfg = load_trial_config(path)
+    assert isinstance(cfg, dict) and len(cfg) > 0
+    # optuna section should be excluded
+    assert "optuna" not in cfg
+    # must have model and train sections
+    assert "model" in cfg
+    assert "train" in cfg
+
+
+def test_load_trial_config_missing_file_returns_empty():
+    from retrosynformer.models_optuna import load_trial_config
+    cfg = load_trial_config("/nonexistent/path/model.config.yaml")
+    assert cfg == {}
+
+
+def test_study_config_params_has_fixed_keys(sessions):
+    """study_config_params should return params NOT searched by Optuna."""
+    from retrosynformer.models_optuna import study_config_params
+    configs = study_config_params(DB_PATHS["structured_dropout"], sessions["structured_dropout"])
+    assert len(configs) > 0, "No configs loaded"
+    # All returned dicts should contain fixed parameters
+    for trial_num, flat in configs.items():
+        assert isinstance(flat, dict)
+        # These are fixed across the study — must be present in the config
+        assert "train.batch_size" in flat, f"trial {trial_num}: missing train.batch_size"
+        assert "train.n_epochs" in flat, f"trial {trial_num}: missing train.n_epochs"
+        assert "dataset.action_dim" in flat, f"trial {trial_num}: missing dataset.action_dim"
+
+
+def test_study_config_params_excludes_searched_params(sessions):
+    """Optuna-searched params must not appear in the fixed-params dict."""
+    from retrosynformer.models_optuna import study_config_params, TrialParam
+    session = sessions["structured_dropout"]
+    configs = study_config_params(DB_PATHS["structured_dropout"], session)
+    searched_names = {p.param_name for p in session.query(TrialParam).all()}
+    for trial_num, flat in configs.items():
+        leaf_keys = {k.rsplit(".", 1)[-1] for k in flat}
+        overlap = leaf_keys & searched_names
+        assert not overlap, (
+            f"trial {trial_num}: config returned searched params {overlap}"
+        )
+
+
+def test_study_config_params_no_path_values(sessions):
+    """Path-valued keys should be excluded by default."""
+    from retrosynformer.models_optuna import study_config_params, _CONFIG_PATH_KEYS
+    configs = study_config_params(DB_PATHS["structured_dropout"], sessions["structured_dropout"])
+    for trial_num, flat in configs.items():
+        assert not (set(flat.keys()) & _CONFIG_PATH_KEYS), (
+            f"trial {trial_num}: path keys leaked into fixed params"
+        )
+
+
+def test_fixed_params_diff_same_study(sessions):
+    """Comparing a study with itself should yield no differences."""
+    from retrosynformer.models_optuna import fixed_params_diff
+    diffs = fixed_params_diff(
+        DB_PATHS["structured_dropout"], sessions["structured_dropout"],
+        DB_PATHS["structured_dropout"], sessions["structured_dropout"],
+    )
+    assert diffs == {}
+
+
+def test_fixed_params_diff_different_studies(sessions):
+    """structured_dropout vs baseline_small differ in at least n_epochs."""
+    from retrosynformer.models_optuna import fixed_params_diff
+    diffs = fixed_params_diff(
+        DB_PATHS["structured_dropout"], sessions["structured_dropout"],
+        DB_PATHS["baseline_small"],    sessions["baseline_small"],
+    )
+    assert len(diffs) > 0, "Expected differences between two distinct studies"
+    # Both use small dataset (action_dim=589) but have different n_epochs
+    assert "train.n_epochs" in diffs or "train.early_stopping_patience" in diffs, (
+        f"Expected training schedule differences; got: {list(diffs.keys())}"
+    )

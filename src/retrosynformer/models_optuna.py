@@ -49,12 +49,14 @@ choices, which corrupts the TPE surrogate model.
    directions must match for every objective index, and
    ``trial_values.objective`` must be consistent.
 
-**Stale state to discard or convert**
-- RUNNING trials: their heartbeats refer to a process that no longer
-  exists.  Convert to FAIL (or drop) before merging.
-- WAITING trials: pre-allocated slots with no params.  Drop them.
-- ``trial_heartbeats``: all records are stale post-merge.  Drop the
-  table contents.
+**Incomplete trials in the merged database**
+RUNNING, WAITING, and FAIL trials are kept with their original state
+unchanged — do NOT relabel them.  They carry no objective value and the
+TPE sampler will simply ignore them when fitting its surrogate model.
+Their ``trial_params`` rows (if any exist) still describe the
+hyperparameter point that was being explored, which is useful for
+provenance.  ``trial_heartbeats`` for RUNNING trials are stale but
+harmless; drop them only if the target Optuna version complains.
 
 **Using the Optuna API instead**
 The cleanest way to avoid all of the above is to use Optuna's own
@@ -714,7 +716,8 @@ def plan_merge(
             if n:
                 warnings.append(
                     f"Study {label} has {n} {state} trial(s). "
-                    f"Convert to FAIL or drop before merging."
+                    f"Their state will be preserved as-is; the TPE sampler "
+                    f"ignores trials without a recorded objective value."
                 )
 
     return {
@@ -723,3 +726,164 @@ def plan_merge(
         "changes": changes,
         "warnings": warnings,
     }
+
+
+# ---------------------------------------------------------------------------
+# Config-file augmentation — parameters not stored in study.db
+# ---------------------------------------------------------------------------
+
+# Sections of model.config.yaml that carry INPUT parameters.
+# The "optuna" section describes the search space, not actual values — skip it.
+# The "evaluation" and "train.results_path" sections carry output/path values — skip paths.
+_CONFIG_INPUT_SECTIONS = ("model", "optimizer", "train", "dataset", "context", "reward")
+
+# Flat keys whose values are filesystem paths or output artefacts, not inputs.
+_CONFIG_PATH_KEYS = {
+    "context.building_blocks", "context.templates_path",
+    "dataset.routes_path", "dataset.synthetic_routes_path",
+    "train.results_path",
+}
+
+
+def trial_config_path(db_path: str | Path, trial_number: int) -> Path:
+    """Return the expected path to ``model.config.yaml`` for *trial_number*.
+
+    Convention: configs live at ``<study_dir>/trial_NNN/model.config.yaml``
+    where NNN is the zero-padded trial number (e.g. 0 → ``trial_000``).
+    Returns the path regardless of whether the file exists.
+    """
+    return Path(db_path).parent / f"trial_{trial_number:03d}" / "model.config.yaml"
+
+
+def load_trial_config(config_path: str | Path) -> dict:
+    """Load a ``model.config.yaml`` and return the raw nested dict.
+
+    The ``optuna`` section (search-space definition) and any path-valued
+    keys are excluded so only actual runtime input values remain.
+
+    Returns an empty dict if the file does not exist or cannot be parsed.
+    """
+    try:
+        import yaml
+        cfg = yaml.safe_load(Path(config_path).read_text()) or {}
+    except Exception:
+        return {}
+    # Keep only input sections.
+    return {k: v for k, v in cfg.items() if k in _CONFIG_INPUT_SECTIONS}
+
+
+def _flatten(nested: dict, prefix: str = "") -> dict[str, object]:
+    """Recursively flatten a nested dict using dot-separated keys."""
+    out: dict[str, object] = {}
+    for k, v in nested.items():
+        key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            out.update(_flatten(v, key))
+        else:
+            out[key] = v
+    return out
+
+
+def study_config_params(
+    db_path: str | Path,
+    session: Session,
+    *,
+    exclude_paths: bool = True,
+) -> dict[int, dict[str, object]]:
+    """Load ``model.config.yaml`` for every trial and return a flat param dict.
+
+    Only parameters NOT already captured in ``trial_params`` (i.e., the
+    fixed parameters that Optuna did not search over) are included in the
+    returned dicts.  Parameters that Optuna searched over will appear in
+    both the config and ``TrialParam`` rows; those are omitted here to
+    avoid duplication — use :meth:`Trial.params_dict` for the searched
+    params.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the study.db file (used to locate trial directories).
+    session:
+        ORM session for the same database.
+    exclude_paths:
+        If True (default), drop keys whose values are filesystem paths
+        (e.g. ``context.building_blocks``).
+
+    Returns
+    -------
+    dict[int, dict[str, object]]
+        ``{trial_number: {flat_config_key: value}}`` for parameters that
+        are NOT in the trial's ``trial_params`` rows.  Trials with no
+        config file are absent from the dict.
+    """
+    # Collect param_names that Optuna searched, per trial.
+    searched_by_trial: dict[int, set[str]] = {}
+    for trial in session.query(Trial).all():
+        searched_by_trial[trial.number] = {p.param_name for p in trial.params}
+
+    result: dict[int, dict[str, object]] = {}
+    for trial in session.query(Trial).all():
+        cfg_path = trial_config_path(db_path, trial.number)
+        raw = load_trial_config(cfg_path)
+        if not raw:
+            continue
+        flat = _flatten(raw)
+        if exclude_paths:
+            flat = {k: v for k, v in flat.items() if k not in _CONFIG_PATH_KEYS}
+        # Drop keys that correspond to Optuna-searched params.
+        # The mapping from config key to param_name is not 1-to-1, so we
+        # keep any key whose leaf name (after the last dot) is NOT a searched
+        # param_name.  This is conservative: it may keep a few overlapping
+        # keys (e.g. model.n_heads vs n_heads), but avoids losing genuinely
+        # fixed parameters with similar names.
+        searched = searched_by_trial.get(trial.number, set())
+        flat = {k: v for k, v in flat.items()
+                if k.rsplit(".", 1)[-1] not in searched}
+        result[trial.number] = flat
+    return result
+
+
+def fixed_params_diff(
+    db_path_a: str | Path,
+    session_a: Session,
+    db_path_b: str | Path,
+    session_b: Session,
+) -> dict[str, dict]:
+    """Compare fixed (non-searched) config params between two studies.
+
+    Returns a dict of params that differ between the two studies, with
+    the values seen in each.  Params that vary across trials within a
+    single study are noted as "varies" rather than a single value.
+
+    A non-empty result is a strong signal that the two studies are not
+    directly comparable (e.g. different ``dataset.action_dim`` means
+    they used different molecule datasets and their trials cannot be
+    meaningfully combined for TPE).
+
+    Returns
+    -------
+    dict[str, {"A": value_or_"varies", "B": value_or_"varies"}]
+    """
+    def _summarise(cfg_by_trial: dict[int, dict]) -> dict[str, object]:
+        """Collapse per-trial config to study-level: single value or 'varies'."""
+        summary: dict[str, object] = {}
+        for flat in cfg_by_trial.values():
+            for k, v in flat.items():
+                if k not in summary:
+                    summary[k] = v
+                elif summary[k] != v:
+                    summary[k] = "varies"
+        return summary
+
+    configs_a = study_config_params(db_path_a, session_a)
+    configs_b = study_config_params(db_path_b, session_b)
+    summary_a = _summarise(configs_a)
+    summary_b = _summarise(configs_b)
+
+    diffs: dict[str, dict] = {}
+    for key in sorted(set(summary_a) | set(summary_b)):
+        va = summary_a.get(key, "<absent>")
+        vb = summary_b.get(key, "<absent>")
+        if va != vb:
+            diffs[key] = {"A": va, "B": vb}
+    return diffs
