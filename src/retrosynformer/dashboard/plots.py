@@ -98,27 +98,59 @@ def load_optuna_study(db_path: str, study_name: str):
 
 
 def build_parcoords_figure(optuna_study) -> go.Figure:
-    """Parallel coordinate plot coloured by objective value.
+    """Scatter matrix (SPLOM) coloured by objective value.
 
-    Uses optuna.visualization.plot_parallel_coordinate so categorical and
-    log-scale parameters are handled automatically.  Axes are ordered by
-    _PARCOORDS_PARAM_ORDER; any extra sampled params are appended at the end.
+    go.Parcoords requires WebGL; go.Splom is pure SVG and works everywhere.
+    Each cell shows the pairwise scatter for two hyperparameters; yellow dots
+    = high objective score, purple = low.  Hover shows trial number and value.
     """
-    import optuna.visualization as ov
+    complete = [t for t in optuna_study.trials
+                if t.state.name == "COMPLETE" and t.value is not None]
+    if not complete:
+        fig = go.Figure()
+        fig.update_layout(title="No complete trials yet", template="plotly_white")
+        return fig
 
     sampled: set[str] = set()
-    for t in optuna_study.trials:
+    for t in complete:
         sampled.update(t.params.keys())
 
     ordered = [p for p in _PARCOORDS_PARAM_ORDER if p in sampled]
-    rest = sorted(sampled - set(ordered))
-    params = ordered + rest or None  # None → optuna picks all
+    rest    = sorted(sampled - set(ordered))
+    param_names = ordered + rest
 
-    fig = ov.plot_parallel_coordinate(optuna_study, params=params or None)
+    dimensions = []
+    for p in param_names:
+        values = [t.params.get(p) for t in complete]
+        if all(v is None for v in values):
+            continue
+        dimensions.append(dict(label=p, values=values))
+
+    scores = [t.value for t in complete]
+    # Append the objective as the final column so score vs each param is visible.
+    dimensions.append(dict(label="objective", values=scores))
+
+    fig = go.Figure(go.Splom(
+        dimensions=dimensions,
+        marker=dict(
+            color=scores,
+            colorscale="Viridis",
+            showscale=True,
+            size=7,
+            line=dict(width=0.3, color="white"),
+            colorbar=dict(title="objective", thickness=14),
+        ),
+        text=[f"trial {t.number}: {t.value:.4f}" for t in complete],
+        diagonal_visible=True,
+        showupperhalf=False,
+    ))
+
+    n = len(dimensions)
     fig.update_layout(
-        title="Hyperparameter parallel coordinates",
-        height=500,
-        margin=dict(l=80, r=80, t=60, b=60),
+        title="Hyperparameter scatter matrix",
+        height=max(500, 140 * n),
+        margin=dict(l=60, r=20, t=60, b=60),
+        template="plotly_white",
     )
     return fig
 
