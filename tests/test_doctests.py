@@ -10,6 +10,7 @@ import importlib
 import pytest
 
 DOCTEST_MODULES = [
+    "retrosynformer.etl",
     "retrosynformer.utils.utils",
     "retrosynformer.utils.reward_functions",
     "retrosynformer.data",

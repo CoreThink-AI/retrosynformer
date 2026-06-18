@@ -69,6 +69,7 @@ import time
 import optuna
 
 import retrosynformer.trainer as _trainer_mod
+from retrosynformer.etl import mask_dict_to_list
 from retrosynformer.runner import main as train
 from retrosynformer.runner import read_config
 
@@ -117,6 +118,47 @@ def _setup_jsonl_logging(run_jsonl: str) -> None:
     handler = _JsonlHandler(run_jsonl)
     handler.setLevel(logging.WARNING)
     logging.getLogger().addHandler(handler)
+
+
+# ---------------------------------------------------------------------------
+# Config preprocessing
+# ---------------------------------------------------------------------------
+
+def _preprocess_optuna_config(config: dict) -> dict:
+    """Return a copy of *config* with optuna search-space specs normalised.
+
+    Currently handles one transformation:
+
+    ``optuna.layer_shared_resid_dropout`` list-of-dicts → list-of-lists
+        Each dict maps integer layer indices to bool/int values; missing
+        indices are filled with ``False``.  The conversion uses
+        ``mask_dict_to_list`` so all inner lists reach the same length
+        (determined by the largest key across all dicts in the list).
+
+        YAML example (dict form)::
+
+            optuna:
+              layer_shared_resid_dropout:
+                - {0: true, 2: true}
+                - {1: true, 3: true}
+
+        is equivalent to the existing list-of-lists form::
+
+            optuna:
+              layer_shared_resid_dropout:
+                - [true, false, true, false]
+                - [false, true, false, true]
+    """
+    import copy
+    config = copy.deepcopy(config)
+    lsrd = config.get("optuna", {}).get("layer_shared_resid_dropout")
+    if isinstance(lsrd, list) and lsrd and isinstance(lsrd[0], dict):
+        max_key = max(max(d.keys()) for d in lsrd if d)
+        length = max_key + 1
+        config["optuna"]["layer_shared_resid_dropout"] = [
+            mask_dict_to_list(d, fillna=False, length=length) for d in lsrd
+        ]
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +408,7 @@ _RESERVED_OPTUNA_KEYS = {"objective_metric"}
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str,
               results_base: str, run_jsonl: str, eval_n_batches: int | None = None,
               study_name: str | None = None, n_trials: int | None = None) -> float:
-    config = read_config(config_path)
+    config = _preprocess_optuna_config(read_config(config_path))
     optuna_config = config.get("optuna", {})
     # Reserved keys configure the study itself and must not be passed to _suggest.
     objective_metric = optuna_config.get("objective_metric", "valid_route_accuracy")
@@ -512,8 +554,8 @@ def main():
     )
     args = parser.parse_args()
 
-    # Validate config eagerly so bad configs fail before any study setup.
-    _validate_config(read_config(args.config_path), n_trials=args.n_trials)
+    # Preprocess then validate config eagerly so bad configs fail before any study setup.
+    _validate_config(_preprocess_optuna_config(read_config(args.config_path)), n_trials=args.n_trials)
 
     results_base = f"results/hypertune-{args.study_name}"
     run_jsonl = os.path.join(results_base, "run.jsonl")
