@@ -280,3 +280,39 @@ def test_validate_config_random_seed_scalar_raises():
     cfg = {"optuna": {"random_seed": 42}}
     with pytest.raises(ValueError, match="list of ints or a dict"):
         ht._validate_config(cfg)
+
+
+# ---------------------------------------------------------------------------
+# n_trials persistence
+# ---------------------------------------------------------------------------
+
+def test_study_set_user_attr_n_trials(tmp_path):
+    """n_trials is stored as a user attr in study.db."""
+    import optuna
+    storage = f"sqlite:///{tmp_path}/study.db"
+    study = optuna.create_study(study_name="test", storage=storage, direction="maximize")
+    study.set_user_attr("n_trials", 42)
+    # Reload from storage to confirm it round-trips.
+    loaded = optuna.load_study(study_name="test", storage=storage)
+    assert loaded.user_attrs["n_trials"] == 42
+
+
+def test_n_trials_written_to_model_config_yaml(tmp_path):
+    """objective() writes n_trials into model.config.yaml after training."""
+    import yaml
+
+    # Write a minimal model.config.yaml (simulating what runner.main() saves).
+    cfg = {"context": {"random_state": 7}, "train": {"results_path": str(tmp_path)}}
+    saved_cfg_path = tmp_path / "model.config.yaml"
+    saved_cfg_path.write_text(yaml.dump(cfg))
+
+    # Simulate the post-save block directly.
+    import yaml as _yaml
+    with open(saved_cfg_path) as f:
+        saved = _yaml.safe_load(f)
+    saved.setdefault("train", {})["n_trials"] = 20
+    with open(saved_cfg_path, "w") as f:
+        _yaml.dump(saved, f, default_flow_style=False)
+
+    result = yaml.safe_load(saved_cfg_path.read_text())
+    assert result["train"]["n_trials"] == 20

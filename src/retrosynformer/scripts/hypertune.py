@@ -365,7 +365,7 @@ _RESERVED_OPTUNA_KEYS = {"objective_metric"}
 
 def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str,
               results_base: str, run_jsonl: str, eval_n_batches: int | None = None,
-              study_name: str | None = None) -> float:
+              study_name: str | None = None, n_trials: int | None = None) -> float:
     config = read_config(config_path)
     optuna_config = config.get("optuna", {})
     # Reserved keys configure the study itself and must not be passed to _suggest.
@@ -424,12 +424,13 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
     t0 = time.time()
     val_loss, val_acc, val_route_acc, fraction_solved = train(**model_params)
 
-    # Post-save verification: confirm the seed was written to model.config.yaml.
+    # Post-save update: read model.config.yaml, verify seed, inject n_trials,
+    # then write it back so every trial config is self-contained.
+    import yaml as _yaml
+    saved_cfg_path = os.path.join(trial_dir, "model.config.yaml")
+    with open(saved_cfg_path) as _f:
+        saved_cfg = _yaml.safe_load(_f)
     if "seed" in model_params:
-        import yaml as _yaml
-        saved_cfg_path = os.path.join(trial_dir, "model.config.yaml")
-        with open(saved_cfg_path) as _f:
-            saved_cfg = _yaml.safe_load(_f)
         saved_seed = saved_cfg.get("context", {}).get("random_state")
         if saved_seed != model_params["seed"]:
             raise RuntimeError(
@@ -437,6 +438,10 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
                 f"expected {model_params['seed']} in model.config.yaml "
                 f"context.random_state but found {saved_seed!r}."
             )
+    if n_trials is not None:
+        saved_cfg.setdefault("train", {})["n_trials"] = n_trials
+        with open(saved_cfg_path, "w") as _f:
+            _yaml.dump(saved_cfg, _f, default_flow_style=False)
 
     # Compute the Optuna objective from whichever metric is configured.
     # val_route_acc avoids a spurious 0.0 when early stopping fires before
@@ -531,6 +536,8 @@ def main():
         storage=storage,
         load_if_exists=True,
     )
+    # Persist n_trials in study.db so it can be retrieved without the CLI args.
+    study.set_user_attr("n_trials", args.n_trials)
 
     # Only enqueue the baseline on a fresh study — resuming from storage already has it.
     if len(study.trials) == 0:
@@ -554,7 +561,8 @@ def main():
         _trainer_mod.set_interrupt_callback(study.stop)
         try:
             return objective(trial, args.config_path, args.n_epochs, args.dataset,
-                             results_base, run_jsonl, args.eval_n_batches, args.study_name)
+                             results_base, run_jsonl, args.eval_n_batches, args.study_name,
+                             args.n_trials)
         finally:
             _trainer_mod.clear_interrupt_callback()
 
