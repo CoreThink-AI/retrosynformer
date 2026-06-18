@@ -98,11 +98,11 @@ def load_optuna_study(db_path: str, study_name: str):
 
 
 def build_parcoords_figure(optuna_study) -> go.Figure:
-    """Scatter matrix (SPLOM) coloured by objective value.
+    """Lower-triangle scatter matrix coloured by objective value.
 
-    go.Parcoords requires WebGL; go.Splom is pure SVG and works everywhere.
-    Each cell shows the pairwise scatter for two hyperparameters; yellow dots
-    = high objective score, purple = low.  Hover shows trial number and value.
+    Uses individual go.Scatter traces (pure SVG) arranged in a subplot grid,
+    avoiding go.Parcoords and go.Splom which both require WebGL.
+    Yellow dots = high objective score, purple = low.
     """
     complete = [t for t in optuna_study.trials
                 if t.state.name == "COMPLETE" and t.value is not None]
@@ -114,42 +114,85 @@ def build_parcoords_figure(optuna_study) -> go.Figure:
     sampled: set[str] = set()
     for t in complete:
         sampled.update(t.params.keys())
-
     ordered = [p for p in _PARCOORDS_PARAM_ORDER if p in sampled]
     rest    = sorted(sampled - set(ordered))
-    param_names = ordered + rest
+    dims    = ordered + rest + ["objective"]
 
-    dimensions = []
-    for p in param_names:
-        values = [t.params.get(p) for t in complete]
-        if all(v is None for v in values):
-            continue
-        dimensions.append(dict(label=p, values=values))
+    pv = {p: [t.params.get(p) for t in complete] for p in dims[:-1]}
+    pv["objective"] = [t.value for t in complete]
+    scores = pv["objective"]
+    hover  = [f"trial {t.number}: {t.value:.4f}" for t in complete]
 
-    scores = [t.value for t in complete]
-    # Append the objective as the final column so score vs each param is visible.
-    dimensions.append(dict(label="objective", values=scores))
+    n   = len(dims)
+    fig = make_subplots(rows=n, cols=n,
+                        horizontal_spacing=0.025, vertical_spacing=0.025)
 
-    fig = go.Figure(go.Splom(
-        dimensions=dimensions,
-        marker=dict(
-            color=scores,
-            colorscale="Viridis",
-            showscale=True,
-            size=7,
-            line=dict(width=0.3, color="white"),
-            colorbar=dict(title="objective", thickness=14),
-        ),
-        text=[f"trial {t.number}: {t.value:.4f}" for t in complete],
-        diagonal_visible=True,
-        showupperhalf=False,
-    ))
+    first = True
+    for ri in range(n):
+        for ci in range(n):
+            r, c = ri + 1, ci + 1
+            if ci < ri:
+                cb = dict(title="obj", thickness=10, len=0.4, x=1.02) if first else {}
+                fig.add_trace(
+                    go.Scatter(
+                        x=pv[dims[ci]], y=pv[dims[ri]], mode="markers",
+                        marker=dict(color=scores, colorscale="Viridis", size=5,
+                                    showscale=first, colorbar=cb,
+                                    line=dict(width=0.3, color="white")),
+                        text=hover,
+                        hovertemplate=(f"%{{text}}<br>{dims[ci]}=%{{x:.4g}}"
+                                       f"<br>{dims[ri]}=%{{y:.4g}}<extra></extra>"),
+                        showlegend=False,
+                    ), row=r, col=c,
+                )
+                first = False
+            else:
+                fig.add_trace(go.Scatter(x=[], y=[], showlegend=False), row=r, col=c)
 
-    n = len(dimensions)
+    # Axis configuration: bottom row gets x-labels; left col gets y-labels
+    for ri in range(n):
+        for ci in range(n):
+            r, c = ri + 1, ci + 1
+            is_lower  = ci < ri
+            on_bottom = ri == n - 1
+            on_left   = ci == 0
+            if is_lower:
+                fig.update_xaxes(
+                    showticklabels=on_bottom, tickfont=dict(size=7),
+                    title_text=dims[ci] if on_bottom else "",
+                    title_font=dict(size=8),
+                    row=r, col=c,
+                )
+                fig.update_yaxes(
+                    showticklabels=on_left, tickfont=dict(size=7),
+                    title_text=dims[ri] if on_left else "",
+                    title_font=dict(size=8),
+                    row=r, col=c,
+                )
+            else:
+                fig.update_xaxes(showgrid=False, zeroline=False, showline=False,
+                                 showticklabels=False, ticks="", row=r, col=c)
+                fig.update_yaxes(showgrid=False, zeroline=False, showline=False,
+                                 showticklabels=False, ticks="", row=r, col=c)
+
+    # Diagonal annotations: param name labels in paper coordinates
+    label_size = min(10, max(7, 80 // n))
+    for i, name in enumerate(dims):
+        xp = (i + 0.5) / n
+        yp = 1.0 - (i + 0.5) / n
+        fig.add_annotation(
+            x=xp, y=yp, xref="paper", yref="paper",
+            text=f"<b>{name}</b>", showarrow=False,
+            font=dict(size=label_size, color="#333"),
+            bgcolor="rgba(240,240,255,0.85)",
+            bordercolor="#aaa", borderwidth=1, borderpad=3,
+        )
+
+    height = max(500, 120 * n)
     fig.update_layout(
         title="Hyperparameter scatter matrix",
-        height=max(500, 140 * n),
-        margin=dict(l=60, r=20, t=60, b=60),
+        height=height,
+        margin=dict(l=100, r=90, t=60, b=100),
         template="plotly_white",
     )
     return fig
