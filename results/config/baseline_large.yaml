@@ -1,0 +1,108 @@
+# Hyperparameter search for layer-shared residual dropout on the small dataset.
+#
+# Architecture is fixed at the best-performing trial from standard-v2-dropout-details
+# trial_001 (epoch 81: best valid_action_accuracy=0.3399):
+#   n_heads=5, n_layers=10, head_dim=128, hidden_size=640
+#   lr=9.685e-4, attn_pdrop=0.166, embd_pdrop=0.006, resid_pdrop=0.087
+#
+# This study searches only the layer_shared_resid_dropout binary pattern:
+# whether to tie the attention and MLP residual dropout masks within each layer.
+# Four patterns are compared (24-element lists, truncated to n_layers=10 at runtime):
+#
+#   all-tied   [True]*24  — every layer uses a shared mask
+#   none-tied  [False]*24 — standard independent masks (baseline)
+#   first-only [True] + [False]*23 — only the first layer is tied
+#   last-only  [False]*23 + [True] — only the last layer is tied
+
+# This file intended to be run with:
+  # rs-hypertune -c results/config/small_nonuniform_dropout.yaml \
+  #     --n-trials 7 --n-epochs 100 --dataset large \
+  #     --study-name large-nonuniform-dropout-12-layers
+
+optuna:
+  # Metric maximised by Optuna across trials:
+  #   valid_route_accuracy  — fraction of validation routes where every step matches
+  #   valid_action_accuracy — per-step template prediction accuracy on validation set
+  #   fraction_solved       — fraction of targets solved during route evaluation
+  objective_metric: valid_action_accuracy  # valid_route_accuracy | valid_action_accuracy | fraction_solved
+  # layer_shared_resid_dropout:
+  #   - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  #   - [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0]
+  # attn_pdrop:
+  #   low: 0.13
+  #   high: 0.2
+  #   log: true
+  # embd_pdrop:
+  #   low: 0.0
+  #   high: 0.07
+  # resid_pdrop:
+  #   low: 0.02
+  #   high: 0.1
+  #   log: true
+  # lr:
+  #   high: .004
+  #   low: .0009
+  #   log: true
+  n_heads: [1, 2, 4, 8]
+  n_layers: [2, 3, 4, 6, 8, 12, 16, 24, 32]
+  head_dim: [64, 128, 256]
+  lr:
+    low: 1.0e-4
+    high: 1.0
+    log: true
+  dropout:
+    low: 0.0
+    high: 0.3
+  structured_dropout_bottleneck:
+    low: 32
+    high: 512
+    log: true
+
+context:
+  building_blocks: data/standard_building_blocks.csv
+  random_state: 1
+  templates_path: data/standard_reaction_templates.pickle
+dataset:
+  action_dim: 2957  # large=2957, medium=1573, small=589
+  drop_duplicates: true
+  fp_dim: 1024
+  n_in_state: 2
+  routes_path: data/standard_routes.json
+  shuffle: true
+  synthetic_routes_path: false
+  valid_set: n1+n5
+evaluation:
+  batch_size: 512
+  beam_width: 1
+  eval_n_batches: 10
+  eval_routes_frequency: 100
+  max_depth: 6
+  test_frac: 0.1
+  sort_on: trajectory_prob
+  ted_exhaustive_limit: 64
+model:
+  action_tanh: false
+  activation_function: relu
+  attn_pdrop: 0.02
+  embd_pdrop: 0.2
+  head_dim: 256
+  max_ep_len: 20
+  n_heads: 4
+  n_layers: 26
+  resid_pdrop: 0.08
+optimizer:
+  lr: 0.211
+  momentum: 0.98
+reward:
+  building_block_reward_factor: 0
+  building_block_scale_with_depth: 2
+  dead_end_reward_factor: -2
+  dead_end_scale_with_depth: 2
+  intermediate_reward_factor: -2
+  intermediate_scale_with_depth: 1
+train:
+  batch_size: 512
+  loss: crossEntropyLoss
+  n_epochs: 1
+  early_stopping_patience: 4
+  results_path: results/
