@@ -35,12 +35,9 @@ optuna:
   head_dim: [64, 128, 256]
   # lr: .211  # 0.0009685260076984002
   lr:
-    high: 1.0e-4  # 0.004
-    low: 1.0  # .0009
+    low: 1.0e-4  # 0.004
+    high: .22  # .0009
     log: true
-  # dropout:
-  #   low: 0.0
-  #   high: 0.3
 
   # # Dropout experiments by HL
   # layer_shared_resid_dropout:
