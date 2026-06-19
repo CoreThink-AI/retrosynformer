@@ -52,14 +52,16 @@ RUN chmod +x /app/entrypoint.sh
 
 # GCS source URIs (overridable at deploy time via --set-env-vars).
 # Local destination paths are where the app reads the files after download.
-ENV MODEL_WEIGHTS_GCS=gs://biochem-db-by-hobs/retrosynformer/models/trial_000/model.pth \
-    MODEL_CONFIG_GCS=gs://biochem-db-by-hobs/retrosynformer/models/trial_000/config.yaml \
-    BUILDING_BLOCKS_GCS=gs://biochem-db-by-hobs/retrosynformer/data/small_building_blocks.csv \
-    TEMPLATES_GCS=gs://biochem-db-by-hobs/retrosynformer/data/small_reaction_templates.pickle \
+ENV MODEL_WEIGHTS_GCS=gs://biochem-db-by-hobs/retrosynformer/models/large_nonuniform_trial000/model.pth \
+    MODEL_CONFIG_GCS=gs://biochem-db-by-hobs/retrosynformer/models/large_nonuniform_trial000/config.yaml \
+    BUILDING_BLOCKS_GCS=gs://biochem-db-by-hobs/retrosynformer/data/large_building_blocks.csv \
+    TEMPLATES_GCS=gs://biochem-db-by-hobs/retrosynformer/data/large_reaction_templates.pickle \
     MODEL_WEIGHTS_PATH=/tmp/model/model.pth \
     MODEL_CONFIG_PATH=/tmp/model/config.yaml \
-    BUILDING_BLOCKS_PATH=/tmp/data/small_building_blocks.csv \
-    TEMPLATES_PATH=/tmp/data/small_reaction_templates.pickle \
+    BUILDING_BLOCKS_PATH=/tmp/data/large_building_blocks.csv \
+    TEMPLATES_PATH=/tmp/data/large_reaction_templates.pickle \
+    FALLBACK_MODEL_WEIGHTS_GCS=gs://biochem-db-by-hobs/retrosynformer/models/large_nonuniform_trial000/model.pth \
+    FALLBACK_MODEL_CONFIG_GCS=gs://biochem-db-by-hobs/retrosynformer/models/large_nonuniform_trial000/config.yaml \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8080

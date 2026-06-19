@@ -45,7 +45,7 @@ steps:
       - --max-instances=1
       - --timeout=120
       - --update-annotations=autoscaling.knative.dev/maxScale=1,run.googleapis.com/maxScale=1
-      - --update-env-vars=MODEL_WEIGHTS_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_MODEL_TRIAL/model.pth,MODEL_CONFIG_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_MODEL_TRIAL/config.yaml,BUILDING_BLOCKS_GCS=gs://$_GCS_BUCKET/retrosynformer/data/$_DATASET_BUILDING_BLOCKS,TEMPLATES_GCS=gs://$_GCS_BUCKET/retrosynformer/data/$_DATASET_TEMPLATES,MODEL_WEIGHTS_PATH=/tmp/model/model.pth,MODEL_CONFIG_PATH=/tmp/model/config.yaml,BUILDING_BLOCKS_PATH=/tmp/data/$_DATASET_BUILDING_BLOCKS,TEMPLATES_PATH=/tmp/data/$_DATASET_TEMPLATES
+      - --update-env-vars=MODEL_WEIGHTS_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_MODEL_TRIAL/model.pth,MODEL_CONFIG_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_MODEL_TRIAL/config.yaml,BUILDING_BLOCKS_GCS=gs://$_GCS_BUCKET/retrosynformer/data/$_DATASET_BUILDING_BLOCKS,TEMPLATES_GCS=gs://$_GCS_BUCKET/retrosynformer/data/$_DATASET_TEMPLATES,MODEL_WEIGHTS_PATH=/tmp/model/model.pth,MODEL_CONFIG_PATH=/tmp/model/config.yaml,BUILDING_BLOCKS_PATH=/tmp/data/$_DATASET_BUILDING_BLOCKS,TEMPLATES_PATH=/tmp/data/$_DATASET_TEMPLATES,FALLBACK_MODEL_WEIGHTS_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_FALLBACK_MODEL_TRIAL/model.pth,FALLBACK_MODEL_CONFIG_GCS=gs://$_GCS_BUCKET/retrosynformer/models/$_FALLBACK_MODEL_TRIAL/config.yaml
     waitFor:
       - push
 
@@ -54,6 +54,7 @@ substitutions:
   _REGION: us-central1
   _GCS_BUCKET: biochem-db-by-hobs
   _MODEL_TRIAL: large_nonuniform_trial000
+  _FALLBACK_MODEL_TRIAL: large_nonuniform_trial000
   _DATASET_BUILDING_BLOCKS: large_building_blocks.csv
   _DATASET_TEMPLATES: large_reaction_templates.pickle
 

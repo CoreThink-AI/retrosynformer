@@ -5,17 +5,19 @@ Reads pairs of env vars:
   - *_PATH : local destination path
 
 Skips files that already exist (safe for container restarts when /tmp persists).
+
+Fallback: if the primary model weights are corrupt or missing, the script
+automatically downloads from FALLBACK_MODEL_WEIGHTS_GCS / FALLBACK_MODEL_CONFIG_GCS
+and overwrites the primary local paths so the app loads a known-good model.
 """
 import os
 import sys
+import zipfile
 from pathlib import Path
 
 
 def _download(gcs_uri: str, local_path: str) -> None:
     path = Path(local_path)
-    if path.exists():
-        print(f"  {local_path}: already present, skipping", flush=True)
-        return
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         from google.cloud import storage
@@ -33,12 +35,39 @@ def _download(gcs_uri: str, local_path: str) -> None:
     print(f"  Done ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
 
 
+def _download_if_missing(gcs_uri: str, local_path: str) -> None:
+    if Path(local_path).exists():
+        print(f"  {local_path}: already present, skipping", flush=True)
+        return
+    _download(gcs_uri, local_path)
+
+
+def _is_valid_model(local_path: str) -> bool:
+    """Return True if local_path is a readable PyTorch checkpoint (ZIP archive).
+
+    Reads only the ZIP central directory — fast even for large .pth files.
+    """
+    try:
+        with zipfile.ZipFile(local_path, "r") as z:
+            z.namelist()
+        return True
+    except Exception as e:
+        print(f"  Model validation failed for {local_path}: {e}", flush=True)
+        return False
+
+
 ARTIFACT_PAIRS = [
     ("MODEL_WEIGHTS_GCS", "MODEL_WEIGHTS_PATH"),
     ("MODEL_CONFIG_GCS", "MODEL_CONFIG_PATH"),
     ("BUILDING_BLOCKS_GCS", "BUILDING_BLOCKS_PATH"),
     ("TEMPLATES_GCS", "TEMPLATES_PATH"),
 ]
+
+FALLBACK_PAIRS = [
+    ("FALLBACK_MODEL_WEIGHTS_GCS", "MODEL_WEIGHTS_PATH"),
+    ("FALLBACK_MODEL_CONFIG_GCS", "MODEL_CONFIG_PATH"),
+]
+
 
 if __name__ == "__main__":
     print("==> Downloading model artifacts from GCS...", flush=True)
@@ -50,5 +79,31 @@ if __name__ == "__main__":
             continue
         if not local_path:
             sys.exit(f"  {gcs_var} is set but {path_var} is not — cannot determine local destination")
-        _download(gcs_uri, local_path)
+        _download_if_missing(gcs_uri, local_path)
     print("==> Artifact download complete.", flush=True)
+
+    # Validate model weights; fall back to the previous known-good model if corrupt.
+    model_path = os.environ.get("MODEL_WEIGHTS_PATH")
+    if model_path and not _is_valid_model(model_path):
+        fallback_weights = os.environ.get("FALLBACK_MODEL_WEIGHTS_GCS")
+        fallback_config = os.environ.get("FALLBACK_MODEL_CONFIG_GCS")
+        if not fallback_weights or not fallback_config:
+            sys.exit("Primary model is invalid and no fallback configured (set FALLBACK_MODEL_WEIGHTS_GCS / FALLBACK_MODEL_CONFIG_GCS)")
+
+        print("==> Primary model is invalid — falling back to:", flush=True)
+        print(f"    weights: {fallback_weights}", flush=True)
+        print(f"    config:  {fallback_config}", flush=True)
+
+        # Remove the corrupt files so _download won't skip them.
+        Path(model_path).unlink(missing_ok=True)
+        config_path = os.environ.get("MODEL_CONFIG_PATH")
+        if config_path:
+            Path(config_path).unlink(missing_ok=True)
+
+        _download(fallback_weights, model_path)
+        if config_path:
+            _download(fallback_config, config_path)
+
+        if not _is_valid_model(model_path):
+            sys.exit("Fallback model is also invalid — cannot start server")
+        print("==> Fallback model loaded successfully.", flush=True)
