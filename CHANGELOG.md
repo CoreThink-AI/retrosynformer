@@ -5,6 +5,21 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.17] — 2026-06-18
+
+**Multi-model objective extrapolation module (`extrapolate.py`).**
+
+- New `src/retrosynformer/extrapolate.py`: `extrapolate_objective(values, n_epochs)` fits four models to progressively wider windows of training history and combines them via inverse-variance weighting into a single estimate with standard error.
+  - `linear` (degree 1) — last ¼ of epochs
+  - `quadratic` (degree 2) — last ½ of epochs
+  - `cubic` (degree 3) — last ¾ of epochs
+  - `log` (`y = a·log1p(x) + b`) — all epochs
+  - Returns `None` when `n_observed < min_points` (default 4); accepts optional `epochs=` list for non-contiguous resumed training.
+- `models_optuna.py`: `estimate_incomplete_objectives()` now delegates to `extrapolate_objective()` replacing the single quadratic fit; result dict gains `se` and `models` keys.
+- 23 new tests in `tests/test_extrapolate.py`.
+
+---
+
 ## [0.1.16] — 2026-06-18
 
 **Async CPU route evaluation: beam search on idle CPU cores while GPU trains.**
