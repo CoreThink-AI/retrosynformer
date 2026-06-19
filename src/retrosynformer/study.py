@@ -183,11 +183,12 @@ def inject_estimated_scores(
         return dfs
 
     num_to_id = dict(zip(trials_df["number"].astype(int), trials_df["trial_id"].astype(int)))
-    _MAX_ESTIMATED_SCORE = 0.8  # polynomial extrapolation artifacts above this are unreliable
+    _MIN_ESTIMATED_SCORE = 0.0
+    _MAX_ESTIMATED_SCORE = 0.8  # polynomial extrapolation artifacts outside [0, 0.8] are unreliable
     new_rows: list[dict] = []
     for trial_num, result in estimates.items():
         est_val = result.get("estimated_value")
-        if est_val is None or est_val > _MAX_ESTIMATED_SCORE:
+        if est_val is None or not (_MIN_ESTIMATED_SCORE <= est_val <= _MAX_ESTIMATED_SCORE):
             continue
         trial_id = num_to_id.get(int(trial_num))
         if trial_id is None:

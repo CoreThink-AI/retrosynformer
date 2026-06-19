@@ -48,7 +48,8 @@ steps:
       - push
 
 substitutions:
-  _IMAGE: gcr.io/$PROJECT_ID/retrosynformer-inference:$SHORT_SHA
+  _TAG: latest
+  _IMAGE: gcr.io/$PROJECT_ID/retrosynformer-inference:$_TAG
   _REGION: us-central1
   _GCS_BUCKET: biochem-db-by-hobs
   _MODEL_TRIAL: large_nonuniform_trial000
