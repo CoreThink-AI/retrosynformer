@@ -5,6 +5,15 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.18] — 2026-06-18
+
+**Async metric extrapolation co-scheduled with route evaluation.**
+
+- `async_eval.py`: `_extrapolation_worker()` extrapolates all 5 training metrics (`train_loss`, `train_action_accuracy`, `train_route_accuracy`, `valid_action_accuracy`, `valid_route_accuracy`) to 4 time horizons (1.0×, 1.1×, 1.5×, 2.0× `n_epochs`) using `extrapolate_objective()`; runs in a `ThreadPoolExecutor` (pure numpy — no process overhead needed). `AsyncRouteEvalPool` gains `submit_extrapolation()`, `collect_extrapolation_if_ready()`, `collect_extrapolation_blocking()`.
+- `trainer.py`: extrapolation submitted alongside every route eval (async and sync paths); result merged into the same `pred_routes_train_progress.json` entry under an `"extrapolation"` key; `_extrap_buffer` coordinates the faster thread result with the slower beam-search result.
+
+---
+
 ## [0.1.17] — 2026-06-18
 
 **Multi-model objective extrapolation module (`extrapolate.py`).**
