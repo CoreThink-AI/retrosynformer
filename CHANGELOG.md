@@ -5,6 +5,17 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.16] — 2026-06-18
+
+**Async CPU route evaluation: beam search on idle CPU cores while GPU trains.**
+
+- New `src/retrosynformer/async_eval.py`: `AsyncRouteEvalPool` backed by `ProcessPoolExecutor`; compounds sharded across `eval_n_workers` CPU processes; `submit()` is non-blocking, `collect_if_ready()` returns `None` while running and the merged result dict when done, `collect_blocking()` for end-of-training.
+- `_eval_worker_chunk()`: module-level picklable worker that reconstructs the model on CPU from serialised `state_dict` bytes, patches `get_device()` to force CPU, and runs beam search with the full `RoutePredictor` pipeline (including TED scoring).
+- `trainer.py`: evaluation block branches on `evaluation.async_route_eval`; async path submits at eval epoch and collects at the top of each subsequent epoch; synchronous path unchanged; pool shut down after training.
+- `results/config.yaml`: `async_route_eval: false` and `eval_n_workers: 24` added to `evaluation:` section (opt-in, default off).
+
+---
+
 ## [0.1.15] — 2026-06-18
 
 **EpochLogger singleton: configurable per-epoch JSONL accumulator.**
