@@ -1,9 +1,11 @@
 # Cloud Build CI/CD: build and deploy on push to main.
 #
-# Set up in Cloud Console → Cloud Build → Triggers:
-#   Source: github.com/corethink-ai/retrosynformer, branch: ^main$
-#   Config: cloudbuild.yaml (this file)
-#   Substitutions: _REGION=us-central1, _GCS_BUCKET=biochem-db-by-hobs, _MODEL_TRIAL=large_nonuniform_trial000
+# Trigger-based build: SHORT_SHA is set automatically; pass _TAG=SHORT_SHA in
+# the trigger's substitution overrides.
+#
+# Manual build:
+#   gcloud builds submit --config cloudbuild.yaml --region=us-central1 \
+#     --substitutions="_TAG=$(git rev-parse --short HEAD)" .
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -11,14 +13,14 @@ steps:
     args:
       - build
       - -t
-      - $_IMAGE
+      - gcr.io/$PROJECT_ID/retrosynformer-inference:$_TAG
       - .
 
   - name: gcr.io/cloud-builders/docker
     id: push
     args:
       - push
-      - $_IMAGE
+      - gcr.io/$PROJECT_ID/retrosynformer-inference:$_TAG
     waitFor:
       - build
 
@@ -30,7 +32,7 @@ steps:
       - services
       - update
       - retrosynformer-inference
-      - --image=$_IMAGE
+      - --image=gcr.io/$PROJECT_ID/retrosynformer-inference:$_TAG
       - --region=$_REGION
       - --execution-environment=gen2
       - --gpu=1
@@ -49,7 +51,6 @@ steps:
 
 substitutions:
   _TAG: latest
-  _IMAGE: gcr.io/$PROJECT_ID/retrosynformer-inference:$_TAG
   _REGION: us-central1
   _GCS_BUCKET: biochem-db-by-hobs
   _MODEL_TRIAL: large_nonuniform_trial000
