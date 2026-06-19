@@ -646,10 +646,10 @@ def test_estimate_incomplete_objectives_large_study(large_session):
     for trial_num, res in estimated.items():
         assert res["estimated_value"] is not None
         assert isinstance(res["estimated_value"], float)
-        assert res["r_squared"] is not None
-        assert 0.0 <= res["r_squared"] <= 1.0, f"R² out of range: {res['r_squared']}"
-        assert res["n_points_fit"] >= 3, "Second-half must have ≥3 points"
-        assert res["poly_coeffs"] is not None and len(res["poly_coeffs"]) == 3
+        assert res["se"] is not None and res["se"] >= 0.0
+        assert res["models"] is not None
+        successful = [m for m in res["models"].values() if m["success"]]
+        assert len(successful) >= 1, "At least one model should succeed with 37 epochs"
 
 
 def test_estimate_incomplete_objectives_too_few_epochs(details_session):

@@ -1003,8 +1003,9 @@ def estimate_incomplete_objectives(
         Each result contains:
             ``state``, ``metric``, ``n_epochs_observed``,
             ``estimated_value`` (None if skipped),
-            ``n_points_fit``, ``target_epoch``, ``r_squared``,
-            ``poly_coeffs``, ``skipped``, ``skip_reason``.
+            ``se`` (combined standard error, None if skipped),
+            ``models`` (per-model breakdown from :func:`extrapolate_objective`,
+            None if skipped), ``skipped``, ``skip_reason``.
     """
     study = session.query(Study).first()
     direction = study.direction if study else "MAXIMIZE"
@@ -1044,20 +1045,33 @@ def estimate_incomplete_objectives(
             }
             continue
 
-        half_start = len(pairs) // 2
-        half_pairs = pairs[half_start:]
-        fit = _fit_quadratic_estimate(half_pairs, n_epochs - 1, direction)
+        from .extrapolate import extrapolate_objective
+        obs_values = [v for _, v in pairs]
+        obs_epochs = [e for e, _ in pairs]
+        fit = extrapolate_objective(
+            obs_values, n_epochs,
+            epochs=obs_epochs,
+            min_points=min_epochs,
+        )
 
-        results[trial.number] = {
-            **base,
-            "estimated_value": fit["estimated_value"],
-            "n_points_fit": fit["n_points"],
-            "target_epoch": fit["target_epoch"],
-            "r_squared": fit["r_squared"],
-            "poly_coeffs": fit["poly_coeffs"],
-            "skipped": False,
-            "skip_reason": None,
-        }
+        if fit is None:
+            results[trial.number] = {
+                **base,
+                "estimated_value": None,
+                "se": None,
+                "models": None,
+                "skipped": True,
+                "skip_reason": f"extrapolate_objective returned None for {len(pairs)} epoch(s)",
+            }
+        else:
+            results[trial.number] = {
+                **base,
+                "estimated_value": fit["estimate"],
+                "se": fit["se"],
+                "models": fit["models"],
+                "skipped": False,
+                "skip_reason": None,
+            }
 
     return results
 
