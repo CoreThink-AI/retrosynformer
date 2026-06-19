@@ -14,10 +14,18 @@ import sys
 
 import pandas as pd
 
-from retrosynformer.study import concat, dfs_to_trials_df, to_dfs
+from retrosynformer.study import (
+    concat,
+    dfs_to_trials_df,
+    inject_estimated_scores,
+    inject_train_metrics,
+    to_dfs,
+)
 
 SCIENTIFIC_COLS = {"lr"}
-SCORE_COLS = {"score", "duration_min", "dropout"}
+SCORE_COLS = {"score", "duration_min", "dropout", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
+HIGHER_IS_BETTER = {"score", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
+METRIC_COLS = ["valid_action_accuracy", "valid_route_accuracy", "estimated_score"]
 
 
 def _fmt_value(col: str, val) -> str:
@@ -28,7 +36,8 @@ def _fmt_value(col: str, val) -> str:
     if col in SCIENTIFIC_COLS:
         return f"{val:.2e}"
     if isinstance(val, float):
-        return f"{val:.4f}"
+        prefix = "~" if col == "estimated_score" else ""
+        return f"{prefix}{val:.4f}"
     return str(val)
 
 
@@ -63,8 +72,8 @@ def main():
         print(f"  {p}")
     print()
 
-    # Load and merge all studies.
-    dfs_list = [to_dfs(p) for p in paths]
+    # Load each study, inject train metrics and estimates, then merge all.
+    dfs_list = [inject_estimated_scores(inject_train_metrics(to_dfs(p), p), p) for p in paths]
     merged = dfs_list[0]
     for d in dfs_list[1:]:
         merged = concat(merged, d)
@@ -80,18 +89,20 @@ def main():
         sys.exit(f"Unknown sort column '{sort_col}'. Available: {list(df.columns)}")
     ascending = args.ascending
     if ascending is None:
-        ascending = sort_col != "score"
+        ascending = sort_col not in HIGHER_IS_BETTER
     df = df.sort_values(sort_col, ascending=ascending, na_position="last").reset_index(drop=True)
 
     # Mark the best completed trial overall.
     completed = df[df["state"] == "COMPLETE"]
     best_idx = completed["score"].idxmax() if not completed.empty else None
 
-    # Column order: study_name first (if present), then fixed, then params, then score.
+    # Column order: study_name first (if present), then fixed, then params,
+    # then any present train-metric cols, then score last.
     fixed = ["trial", "state", "duration_min"]
     meta = ["study_name"] if "study_name" in df.columns else []
-    param_cols = sorted(c for c in df.columns if c not in meta + fixed + ["score"])
-    ordered_cols = meta + fixed + param_cols + ["score"]
+    extras = [c for c in METRIC_COLS if c in df.columns]
+    param_cols = sorted(c for c in df.columns if c not in meta + fixed + extras + ["score"])
+    ordered_cols = meta + fixed + param_cols + extras + ["score"]
     ordered_cols = [c for c in ordered_cols if c in df.columns]
 
     # Compute column widths.

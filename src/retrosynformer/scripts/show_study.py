@@ -12,10 +12,18 @@ import sys
 
 import pandas as pd
 
-from retrosynformer.study import to_dfs, to_trials_df
+from retrosynformer.study import (
+    dfs_to_trials_df,
+    inject_estimated_scores,
+    inject_train_metrics,
+    to_dfs,
+)
 
 SCIENTIFIC_COLS = {"lr"}
-SCORE_COLS = {"score", "duration_min", "dropout"}
+SCORE_COLS = {"score", "duration_min", "dropout", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
+HIGHER_IS_BETTER = {"score", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
+# Appear just before "score" in the output regardless of sort order.
+METRIC_COLS = ["valid_action_accuracy", "valid_route_accuracy", "estimated_score"]
 
 
 def _fmt_value(col: str, val) -> str:
@@ -26,7 +34,8 @@ def _fmt_value(col: str, val) -> str:
     if col in SCIENTIFIC_COLS:
         return f"{val:.2e}"
     if isinstance(val, float):
-        return f"{val:.4f}"
+        prefix = "~" if col == "estimated_score" else ""
+        return f"{prefix}{val:.4f}"
     return str(val)
 
 
@@ -57,7 +66,9 @@ def main():
     print()
 
     # --- per-trial summary ---------------------------------------------------
-    df = to_trials_df(args.db)
+    dfs = inject_train_metrics(dfs, args.db)
+    dfs = inject_estimated_scores(dfs, args.db)
+    df = dfs_to_trials_df(dfs)
     if df.empty:
         print("No trials found.")
         return
@@ -68,17 +79,19 @@ def main():
         sys.exit(f"Unknown sort column '{sort_col}'. Available: {list(df.columns)}")
     ascending = args.ascending
     if ascending is None:
-        ascending = sort_col != "score"
+        ascending = sort_col not in HIGHER_IS_BETTER
     df = df.sort_values(sort_col, ascending=ascending).reset_index(drop=True)
 
     # Mark the best completed trial
     completed = df[df["state"] == "COMPLETE"]
     best_trial = completed.loc[completed["score"].idxmax(), "trial"] if not completed.empty else None
 
-    # Determine column order: fixed cols first, then params alphabetically
+    # Determine column order: fixed cols first, then params alphabetically,
+    # then any present train-metric cols, then score last.
     fixed = ["trial", "state", "duration_min"]
-    param_cols = sorted(c for c in df.columns if c not in fixed + ["score"])
-    ordered_cols = fixed + param_cols + ["score"]
+    extras = [c for c in METRIC_COLS if c in df.columns]
+    param_cols = sorted(c for c in df.columns if c not in fixed + extras + ["score"])
+    ordered_cols = fixed + param_cols + extras + ["score"]
     ordered_cols = [c for c in ordered_cols if c in df.columns]
 
     # Build header

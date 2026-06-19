@@ -2,11 +2,12 @@
 
 Public API
 ----------
-to_dfs(db_path)                    -> dict[str, DataFrame]   all raw tables
-to_trials_df(db_path)              -> DataFrame               one row per trial, params decoded
-dfs_to_trials_df(dfs)              -> DataFrame               same, from an already-loaded dict
-concat(study_a_dfs, study_b_dfs)   -> dict[str, DataFrame]   merge two study dicts
-concat_all(pattern, root)          -> dict[str, DataFrame]   merge all study.db files in a glob
+to_dfs(db_path)                          -> dict[str, DataFrame]   all raw tables
+to_trials_df(db_path)                    -> DataFrame               one row per trial, params decoded
+dfs_to_trials_df(dfs)                    -> DataFrame               same, from an already-loaded dict
+inject_train_metrics(dfs, db_path)       -> dict[str, DataFrame]   add best per-epoch metrics from jsonl
+concat(study_a_dfs, study_b_dfs)         -> dict[str, DataFrame]   merge two study dicts
+concat_all(pattern, root)                -> dict[str, DataFrame]   merge all study.db files in a glob
 """
 import functools
 import glob as _glob
@@ -56,6 +57,133 @@ _OWN_PKS: dict[str, str] = {
 
 # These tables are schema/migration metadata — keep A's copy unchanged.
 _SINGLETON_TABLES = {"version_info", "alembic_version"}
+
+
+_TRAIN_METRICS = ("valid_action_accuracy", "valid_route_accuracy")
+
+
+def _read_best_metric(trial_dir: str, metric: str) -> float | None:
+    """Return the highest value of *metric* found across all epochs in train_progress.jsonl."""
+    jsonl = os.path.join(trial_dir, "train_progress.jsonl")
+    if not os.path.exists(jsonl):
+        return None
+    best: float | None = None
+    with open(jsonl) as fh:
+        for line in fh:
+            try:
+                val = json.loads(line).get(metric)
+            except json.JSONDecodeError:
+                continue
+            if val is not None and (best is None or val > best):
+                best = val
+    return best
+
+
+def inject_train_metrics(
+    dfs: dict[str, pd.DataFrame],
+    db_path: str,
+    metrics: tuple[str, ...] | list[str] = _TRAIN_METRICS,
+) -> dict[str, pd.DataFrame]:
+    """Inject best per-epoch training metrics from each trial's train_progress.jsonl.
+
+    Reads ``trial_NNN/train_progress.jsonl`` (relative to *db_path*'s directory)
+    for every trial in *dfs* and stores the best value of each metric in
+    ``trial_user_attributes``.  Trials without a jsonl file are skipped silently.
+
+    Call this *before* :func:`dfs_to_trials_df` so the metrics appear as columns.
+    """
+    trials_df = dfs.get("trials")
+    if trials_df is None or trials_df.empty:
+        return dfs
+
+    db_dir = os.path.dirname(os.path.abspath(db_path))
+    new_rows: list[dict] = []
+    for _, row in trials_df.iterrows():
+        trial_dir = os.path.join(db_dir, f"trial_{int(row['number']):03d}")
+        for metric in metrics:
+            val = _read_best_metric(trial_dir, metric)
+            if val is not None:
+                new_rows.append({
+                    "trial_id": row["trial_id"],
+                    "key": metric,
+                    "value_json": json.dumps(val),
+                })
+
+    if not new_rows:
+        return dfs
+
+    dfs = {k: v.copy() for k, v in dfs.items()}
+    existing = dfs.get("trial_user_attributes", pd.DataFrame())
+    new_df = pd.DataFrame(new_rows)
+
+    # Assign fresh auto-increment IDs that don't collide with existing rows.
+    max_id = int(existing["trial_user_attribute_id"].max()) if not existing.empty and "trial_user_attribute_id" in existing.columns else -1
+    new_df.insert(0, "trial_user_attribute_id", range(max_id + 1, max_id + 1 + len(new_df)))
+
+    dfs["trial_user_attributes"] = pd.concat([existing, new_df], ignore_index=True)
+    return dfs
+
+
+def inject_estimated_scores(
+    dfs: dict[str, pd.DataFrame],
+    db_path: str,
+) -> dict[str, pd.DataFrame]:
+    """Add polynomial-extrapolated objective estimates for RUNNING/WAITING trials.
+
+    Uses :func:`retrosynformer.models_optuna.estimate_incomplete_objectives` to
+    fit a degree-2 polynomial to the second half of each incomplete trial's
+    ``train_progress.jsonl`` and store the extrapolated value as an
+    ``estimated_score`` user attribute.
+
+    Trials whose jsonl has fewer than 6 epochs, or where the extrapolation
+    fails, are left with no estimate.  Safe to call when SQLAlchemy / the
+    models_optuna module is unavailable — it returns *dfs* unchanged.
+    """
+    try:
+        from retrosynformer.models_optuna import connect, estimate_incomplete_objectives
+    except Exception:
+        return dfs
+
+    trials_df = dfs.get("trials")
+    if trials_df is None or trials_df.empty:
+        return dfs
+
+    session = connect(db_path)
+    try:
+        estimates = estimate_incomplete_objectives(db_path, session)
+    except Exception:
+        session.close()
+        return dfs
+    session.close()
+
+    if not estimates:
+        return dfs
+
+    num_to_id = dict(zip(trials_df["number"].astype(int), trials_df["trial_id"].astype(int)))
+    new_rows: list[dict] = []
+    for trial_num, result in estimates.items():
+        est_val = result.get("estimated_value")
+        if est_val is None:
+            continue
+        trial_id = num_to_id.get(int(trial_num))
+        if trial_id is None:
+            continue
+        new_rows.append({
+            "trial_id": trial_id,
+            "key": "estimated_score",
+            "value_json": json.dumps(float(est_val)),
+        })
+
+    if not new_rows:
+        return dfs
+
+    dfs = {k: v.copy() for k, v in dfs.items()}
+    existing = dfs.get("trial_user_attributes", pd.DataFrame())
+    new_df = pd.DataFrame(new_rows)
+    max_id = int(existing["trial_user_attribute_id"].max()) if not existing.empty and "trial_user_attribute_id" in existing.columns else -1
+    new_df.insert(0, "trial_user_attribute_id", range(max_id + 1, max_id + 1 + len(new_df)))
+    dfs["trial_user_attributes"] = pd.concat([existing, new_df], ignore_index=True)
+    return dfs
 
 
 def to_dfs(db_path: str) -> dict[str, pd.DataFrame]:
@@ -132,8 +260,23 @@ def dfs_to_trials_df(dfs: dict[str, pd.DataFrame]) -> pd.DataFrame:
         .rename(columns={"value": "score"})
     )
 
+    # --- user attributes (injected train metrics) ----------------------------
+    user_attrs = dfs.get("trial_user_attributes", pd.DataFrame())
+    if not user_attrs.empty and {"trial_id", "key", "value_json"}.issubset(user_attrs.columns):
+        ua = user_attrs[["trial_id", "key", "value_json"]].copy()
+        ua["_val"] = ua["value_json"].apply(lambda x: json.loads(x) if pd.notna(x) else None)
+        ua_wide = (
+            ua.pivot_table(index="trial_id", columns="key", values="_val", aggfunc="first")
+            .reset_index()
+        )
+        ua_wide.columns.name = None
+    else:
+        ua_wide = None
+
     # --- join ----------------------------------------------------------------
     result = trials.merge(params_wide, on="trial_id", how="left")
+    if ua_wide is not None:
+        result = result.merge(ua_wide, on="trial_id", how="left")
     result = result.merge(values, on="trial_id", how="left")
 
     # Add study_name when multiple studies are present.
