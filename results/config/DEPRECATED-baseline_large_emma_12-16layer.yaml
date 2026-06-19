@@ -30,24 +30,21 @@ model:
   hidden_size: 512
   max_ep_len: 20
   n_heads: 2
-  n_layers: 12
-  resid_pdrop: 0.029754580813298768
+  n_layers: 24
+  resid_pdrop: 0.02
 optimizer:
   lr: 0.039169457489827024
   momentum: 0.98
 optuna:
+  n_layers: [24, 26]
   attn_pdrop:
     high: 0.131
     log: true
     low: 0.12
   embd_pdrop:
-    high: 0.0075
-    low: 0.00001
+    high: 0.01
+    low: 0.000001
     log: true
-  resid_pdrop:
-    high: 0.031
-    log: true
-    low: 0.029
   lr:
     high: 0.044
     log: true
@@ -64,6 +61,10 @@ optuna:
   # - 21
   # - 26
   objective_metric: valid_action_accuracy
+  resid_pdrop:
+    high: 0.03
+    log: true
+    low: 0.001
 reward:
   building_block_reward_factor: 0
   building_block_scale_with_depth: 2

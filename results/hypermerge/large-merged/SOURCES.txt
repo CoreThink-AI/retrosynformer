@@ -1,0 +1,57 @@
+Merged study: large-merged
+Created: 2026-06-18T16:16:25.808458
+
+Source studies:
+  baseline-large-emma-21-layers: {'COMPLETE': 1, 'RUNNING': 1, 'WAITING': 10}
+  baseline-large-emma-24-layers: {'FAIL': 2, 'WAITING': 18}
+  large-nonuniform-dropout-12-layers: {'COMPLETE': 2, 'RUNNING': 1}
+
+Merged search space (11 dims):
+  attn_pdrop (searched): [0.13, 0.2]
+  embd_pdrop (searched): [0.0, 0.21]
+  layer_shared_resid_dropout (searched): choices=['[0,0,0,0,0,0,0,0,0,0,0,0]', '[0,0,0,0,0,0,1,1,1,1,0,0]']
+  lr (searched): [0.0001, 0.22]
+  n_heads (searched): choices=[2, 3, 4, 5, 6]
+  n_layers (searched): choices=[12, 16, 21, 26]
+  resid_pdrop (searched): [0.01, 0.1]
+  batch_size (promoted from config): choices=[128, 512]
+  early_stopping_patience (promoted from config): choices=[15, 20]
+  head_dim (promoted from config): choices=[128, 256]
+  hidden_size (promoted from config): choices=[512, 640, 1024]
+
+Trial provenance:
+  trial_000 [COMPLETE] dims=10 <- baseline-large-emma-21-layers/trial_0 (dir)
+  trial_001 [FAIL    ] dims=10 <- baseline-large-emma-21-layers/trial_1 (dir)
+  trial_002 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_2
+  trial_003 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_3
+  trial_004 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_4
+  trial_005 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_5
+  trial_006 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_6
+  trial_007 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_7
+  trial_008 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_8
+  trial_009 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_9
+  trial_010 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_10
+  trial_011 [FAIL    ] dims= 0 <- baseline-large-emma-21-layers/trial_11
+  trial_012 [FAIL    ] dims=10 <- baseline-large-emma-24-layers/trial_0 (dir)
+  trial_013 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_1
+  trial_014 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_2
+  trial_015 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_3
+  trial_016 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_4
+  trial_017 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_5
+  trial_018 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_6
+  trial_019 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_7
+  trial_020 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_8
+  trial_021 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_9
+  trial_022 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_10
+  trial_023 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_11
+  trial_024 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_12
+  trial_025 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_13
+  trial_026 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_14
+  trial_027 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_15
+  trial_028 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_16
+  trial_029 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_17
+  trial_030 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_18
+  trial_031 [FAIL    ] dims= 0 <- baseline-large-emma-24-layers/trial_19
+  trial_032 [COMPLETE] dims=11 <- large-nonuniform-dropout-12-layers/trial_0 (dir)
+  trial_033 [COMPLETE] dims=11 <- large-nonuniform-dropout-12-layers/trial_1 (dir)
+  trial_034 [FAIL    ] dims=11 <- large-nonuniform-dropout-12-layers/trial_2 (dir)
