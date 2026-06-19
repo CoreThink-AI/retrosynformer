@@ -965,10 +965,11 @@ def estimate_incomplete_objectives(
     *,
     metric: Optional[str] = None,
     min_epochs: int = 6,
+    states: Optional[list[str]] = None,
 ) -> dict[int, dict]:
-    """Estimate objective values for RUNNING / WAITING trials via polynomial fit.
+    """Estimate objective values for trials via polynomial fit on training curves.
 
-    For each incomplete trial:
+    For each trial:
 
     1. Locate ``train_progress.jsonl`` via the ``trial_NNN/`` convention.
     2. Determine the objective metric from each trial's ``model.config.yaml``
@@ -994,11 +995,14 @@ def estimate_incomplete_objectives(
     min_epochs:
         Minimum total epoch rows required before attempting a fit.  Trials
         with fewer rows get ``skipped=True``.
+    states:
+        Trial states to include.  Defaults to ``["RUNNING", "WAITING"]``.
+        Pass ``None`` to include all states (including ``COMPLETE``).
 
     Returns
     -------
     dict[int, dict]
-        ``{trial_number: result}`` for every RUNNING / WAITING trial.
+        ``{trial_number: result}`` for every matched trial.
 
         Each result contains:
             ``state``, ``metric``, ``n_epochs_observed``,
@@ -1012,7 +1016,11 @@ def estimate_incomplete_objectives(
 
     results: dict[int, dict] = {}
 
-    for trial in session.query(Trial).filter(Trial.state.in_(["RUNNING", "WAITING"])).all():
+    query = session.query(Trial)
+    if states is not None:
+        query = query.filter(Trial.state.in_(states))
+    # states=None → no filter → all trials
+    for trial in query.all():
         trial_metric = metric or _trial_objective_metric(db_path, trial.number)
 
         try:

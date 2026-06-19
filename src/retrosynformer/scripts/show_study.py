@@ -23,7 +23,7 @@ SCIENTIFIC_COLS = {"lr"}
 SCORE_COLS = {"score", "duration_min", "dropout", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
 HIGHER_IS_BETTER = {"score", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
 # Appear just before "score" in the output regardless of sort order.
-METRIC_COLS = ["valid_action_accuracy", "valid_route_accuracy", "estimated_score"]
+METRIC_COLS = ["n_epochs", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"]
 
 
 def _fmt_value(col: str, val) -> str:

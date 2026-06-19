@@ -79,6 +79,22 @@ def _read_best_metric(trial_dir: str, metric: str) -> float | None:
     return best
 
 
+def _read_epoch_count(trial_dir: str) -> int | None:
+    """Return the number of valid epoch rows in train_progress.jsonl, or None if absent."""
+    jsonl = os.path.join(trial_dir, "train_progress.jsonl")
+    if not os.path.exists(jsonl):
+        return None
+    count = 0
+    with open(jsonl) as fh:
+        for line in fh:
+            try:
+                json.loads(line)
+                count += 1
+            except json.JSONDecodeError:
+                continue
+    return count if count > 0 else None
+
+
 def inject_train_metrics(
     dfs: dict[str, pd.DataFrame],
     db_path: str,
@@ -108,6 +124,13 @@ def inject_train_metrics(
                     "key": metric,
                     "value_json": json.dumps(val),
                 })
+        n_ep = _read_epoch_count(trial_dir)
+        if n_ep is not None:
+            new_rows.append({
+                "trial_id": row["trial_id"],
+                "key": "n_epochs",
+                "value_json": json.dumps(n_ep),
+            })
 
     if not new_rows:
         return dfs
@@ -150,7 +173,7 @@ def inject_estimated_scores(
 
     session = connect(db_path)
     try:
-        estimates = estimate_incomplete_objectives(db_path, session)
+        estimates = estimate_incomplete_objectives(db_path, session, states=None)
     except Exception:
         session.close()
         return dfs
@@ -160,10 +183,11 @@ def inject_estimated_scores(
         return dfs
 
     num_to_id = dict(zip(trials_df["number"].astype(int), trials_df["trial_id"].astype(int)))
+    _MAX_ESTIMATED_SCORE = 0.8  # polynomial extrapolation artifacts above this are unreliable
     new_rows: list[dict] = []
     for trial_num, result in estimates.items():
         est_val = result.get("estimated_value")
-        if est_val is None:
+        if est_val is None or est_val > _MAX_ESTIMATED_SCORE:
             continue
         trial_id = num_to_id.get(int(trial_num))
         if trial_id is None:

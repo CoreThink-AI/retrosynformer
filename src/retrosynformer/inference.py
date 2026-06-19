@@ -276,12 +276,13 @@ class RoutePredictor:
                             next_action_idx, self.config["dataset"]["action_dim"]
                         )
                         .unsqueeze(0)
-                        .unsqueeze(0),
+                        .unsqueeze(0)
+                        .to(self.device),
                     ],
                     dim=1,
                 )
                 new_rewards = (
-                    torch.tensor(current_beam.env.rewards).unsqueeze(0).unsqueeze(-1)
+                    torch.tensor(current_beam.env.rewards, device=self.device).unsqueeze(0).unsqueeze(-1)
                 )
                 new_rtg = (
                     (current_beam.rtgs_tensor[0][-1] - current_beam.env.rewards[-1])
@@ -296,7 +297,7 @@ class RoutePredictor:
                     (current_beam.rtgs_tensor, new_rtg), dim=1
                 )
                 new_timesteps = torch.arange(
-                    0, len(current_beam.predicted_actions) + 1
+                    0, len(current_beam.predicted_actions) + 1, device=self.device
                 ).unsqueeze(0)
 
                 beam_new = self.Beam(
