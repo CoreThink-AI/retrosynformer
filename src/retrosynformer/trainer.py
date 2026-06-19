@@ -7,6 +7,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
+from .async_eval import AsyncRouteEvalPool
 from .epoch_logger import EpochLogger
 
 import pandas as pd
@@ -292,9 +293,14 @@ class RetroTrainer:
 
     def _train(self, verbose=True, start_epoch=0, eval_routes_at_end=False,
                trial_number=None, study_name=None):
-        route_predictor = RoutePredictor(
-            self.model, self.config, beam_width=self.config["evaluation"]["beam_width"]
+        eval_cfg = self.config["evaluation"]
+        use_async = eval_cfg.get("async_route_eval", False)
+        route_predictor = None if use_async else RoutePredictor(
+            self.model, self.config, beam_width=eval_cfg["beam_width"]
         )
+        async_pool = AsyncRouteEvalPool(
+            n_workers=eval_cfg.get("eval_n_workers", 24)
+        ) if use_async else None
 
         n_epochs = self.config["train"]["n_epochs"]
         save_folder = self.config["train"]["results_path"]
@@ -434,27 +440,46 @@ class RetroTrainer:
             if valid_route_accuracy > self._best_valid_route_accuracy:
                 self._best_valid_route_accuracy = valid_route_accuracy
 
-            eval_routes_frequency = self.config["evaluation"]["eval_routes_frequency"]
-            if (
-                (epoch % eval_routes_frequency == 0 and epoch > 0)
-                or epoch == n_epochs - 1
-            ):
-                eval_start_time = time.time()
-                print(f"Epoch {epoch}: running route evaluation …", flush=True)
-                route_predictor.set_model(self.model)
-                pred_routes = route_predictor.eval_predicted_routes(
-                    self.valid_dataloader
-                )
-                self.results_eval.append({"epoch": epoch, "result": pred_routes})
-                solved_routes = [r["route_solved"] for r in pred_routes]
-                fraction_targets_solved = sum(solved_routes) / len(solved_routes)
-                valid_routes = [r["valid_route"] for r in pred_routes]
-                fraction_valid_routes = sum(valid_routes) / len(valid_routes)
-                print(f"  solved={fraction_targets_solved:.5f}  valid={fraction_valid_routes:.5f}"
-                      f"  ({len(pred_routes)} routes, {(time.time()-eval_start_time)/60:.1f} min)",
-                      flush=True)
+            eval_routes_frequency = eval_cfg["eval_routes_frequency"]
+            eval_due = (epoch % eval_routes_frequency == 0 and epoch > 0) or epoch == n_epochs - 1
+
+            # --- Async path ---------------------------------------------------
+            if use_async:
+                # Collect any previously submitted job that has finished.
+                async_result = async_pool.collect_if_ready()
+                if async_result is not None:
+                    pred_routes = async_result["routes"]
+                    self.results_eval.append({"epoch": async_result["eval_epoch"], "result": pred_routes})
+                    fraction_targets_solved = async_result["fraction_targets_solved"]
+                    fraction_valid_routes = async_result["fraction_valid_routes"]
+                    print(
+                        f"  [async] solved={fraction_targets_solved:.5f}"
+                        f"  valid={fraction_valid_routes:.5f}"
+                        f"  (lagged from epoch {async_result['eval_epoch']})",
+                        flush=True,
+                    )
+                if eval_due:
+                    async_pool.submit(self.model, self.config, self.valid_dataloader, epoch)
+
+            # --- Synchronous path (default) -----------------------------------
             else:
-                fraction_targets_solved = None
+                if eval_due:
+                    eval_start_time = time.time()
+                    print(f"Epoch {epoch}: running route evaluation …", flush=True)
+                    route_predictor.set_model(self.model)
+                    pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
+                    self.results_eval.append({"epoch": epoch, "result": pred_routes})
+                    solved_routes = [r["route_solved"] for r in pred_routes]
+                    fraction_targets_solved = sum(solved_routes) / len(solved_routes)
+                    valid_routes = [r["valid_route"] for r in pred_routes]
+                    fraction_valid_routes = sum(valid_routes) / len(valid_routes)
+                    print(
+                        f"  solved={fraction_targets_solved:.5f}  valid={fraction_valid_routes:.5f}"
+                        f"  ({len(pred_routes)} routes, {(time.time()-eval_start_time)/60:.1f} min)",
+                        flush=True,
+                    )
+                else:
+                    fraction_targets_solved = None
 
             EpochLogger.update_many(
                 train_loss=train_loss,
@@ -511,18 +536,43 @@ class RetroTrainer:
         # Run final route evaluation when explicitly requested (hypertune) or
         # when early stopping skipped the last scheduled eval epoch.
         if eval_routes_at_end or fraction_targets_solved is None:
-            print("Running final route evaluation …")
-            eval_start_time = time.time()
-            route_predictor.set_model(self.model)
-            pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
-            self.results_eval.append({"epoch": epoch, "result": pred_routes})
+            if use_async:
+                # Collect any in-flight job first; if nothing is running (or
+                # eval_routes_at_end forced a fresh run), submit one now and block.
+                if async_pool.is_running():
+                    print("[async_eval] Waiting for in-flight eval to finish …", flush=True)
+                    async_result = async_pool.collect_blocking(timeout=900)
+                else:
+                    print("[async_eval] Submitting final blocking route eval …", flush=True)
+                    async_pool.submit(self.model, self.config, self.valid_dataloader, epoch)
+                    async_result = async_pool.collect_blocking(timeout=900)
+                async_pool.shutdown()
+                if async_result is not None:
+                    pred_routes = async_result["routes"]
+                    self.results_eval.append({"epoch": epoch, "result": pred_routes})
+                    fraction_targets_solved = async_result["fraction_targets_solved"]
+                    print(
+                        f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
+                        f"({async_result['n_routes']} routes, "
+                        f"{async_result['eval_elapsed_seconds'] / 60:.1f} min on CPU)"
+                    )
+                else:
+                    fraction_targets_solved = 0.0
+            else:
+                print("Running final route evaluation …")
+                eval_start_time = time.time()
+                route_predictor.set_model(self.model)
+                pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
+                self.results_eval.append({"epoch": epoch, "result": pred_routes})
+                solved_routes = [r["route_solved"] for r in pred_routes]
+                fraction_targets_solved = sum(solved_routes) / len(solved_routes) if solved_routes else 0.0
+                print(
+                    f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
+                    f"({sum(solved_routes)}/{len(solved_routes)}) "
+                    f"in {(time.time() - eval_start_time) / 60:.1f} min"
+                )
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
-            solved_routes = [r["route_solved"] for r in pred_routes]
-            fraction_targets_solved = sum(solved_routes) / len(solved_routes) if solved_routes else 0.0
-            print(f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
-                  f"({sum(solved_routes)}/{len(solved_routes)}) "
-                  f"in {(time.time() - eval_start_time) / 60:.1f} min")
 
         # profiler.dump_stats(os.path.join(save_folder, 'emmas.cprofile'))
         utils.plot_train_progress(

@@ -35,6 +35,8 @@ evaluation:
   max_depth: 6
   test_frac: 0.1
   sort_on: trajectory_prob
+  async_route_eval: false  # set true to evaluate on CPU while GPU keeps training
+  eval_n_workers: 24       # CPU cores used when async_route_eval is true
 
 model:
   action_tanh: false
