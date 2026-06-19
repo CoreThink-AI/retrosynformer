@@ -1,0 +1,82 @@
+context:
+  building_blocks: data/large_building_blocks.csv
+  random_state: 1
+  templates_path: data/large_reaction_templates.pickle
+dataset:
+  action_dim: 2957
+  dataset_name: large
+  drop_duplicates: true
+  fp_dim: 1024
+  n_in_state: 2
+  routes_path: data/large_routes.json
+  shuffle: true
+  synthetic_routes_path: false
+  valid_set: n1+n5
+evaluation:
+  batch_size: 150
+  beam_width: 1
+  eval_n_batches: 10
+  eval_routes_frequency: 25
+  max_depth: 6
+  sort_on: trajectory_prob
+  ted_exhaustive_limit: 64
+  test_frac: 0.1
+model:
+  action_tanh: false
+  activation_function: relu
+  attn_pdrop: 0.13089013084445777
+  embd_pdrop: 0.007406544565444905
+  head_dim: 256
+  hidden_size: 512
+  max_ep_len: 20
+  n_heads: 2
+  n_layers: 12
+  resid_pdrop: 0.029754580813298768
+optimizer:
+  lr: 0.039169457489827024
+  momentum: 0.98
+optuna:
+  attn_pdrop:
+    high: 0.131
+    log: true
+    low: 0.12
+  embd_pdrop:
+    high: 0.0075
+    low: 0.00001
+    log: true
+  resid_pdrop:
+    high: 0.031
+    log: true
+    low: 0.029
+  lr:
+    high: 0.044
+    log: true
+    low: 0.038
+  # n_heads:
+  # - 2
+  # - 3
+  # - 4
+  # - 5
+  # - 6
+  # n_layers:
+  # - 12
+  # - 16
+  # - 21
+  # - 26
+  objective_metric: valid_action_accuracy
+reward:
+  building_block_reward_factor: 0
+  building_block_scale_with_depth: 2
+  dead_end_reward_factor: -2
+  dead_end_scale_with_depth: 2
+  intermediate_reward_factor: -2
+  intermediate_scale_with_depth: 1
+train:
+  batch_size: 128
+  early_stopping_patience: 10
+  loss: crossEntropyLoss
+  lr_scheduler_patience: 7
+  n_epochs: 200
+  results_path: results/hypertune-baseline-large-emma-24-layers/trial_000
+  resume: false
+  start_epoch: 0
