@@ -27,10 +27,31 @@ from __future__ import annotations
 import io
 import logging
 import time
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
 import torch
+
+# ---------------------------------------------------------------------------
+# Metric extrapolation constants
+# ---------------------------------------------------------------------------
+
+# Metrics extracted from train_progress.jsonl for extrapolation.
+_EXTRAP_METRICS = (
+    "train_loss",
+    "train_action_accuracy",
+    "train_route_accuracy",
+    "valid_action_accuracy",
+    "valid_route_accuracy",
+)
+
+# Horizon multipliers applied to n_epochs when extrapolating.
+_EXTRAP_HORIZONS: dict[str, float] = {
+    "1.0x": 1.0,
+    "1.1x": 1.1,
+    "1.5x": 1.5,
+    "2.0x": 2.0,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +200,62 @@ def _eval_worker_chunk(
 
 
 # ---------------------------------------------------------------------------
+# Extrapolation worker (runs in a thread — pure numpy, no process needed)
+# ---------------------------------------------------------------------------
+
+def _extrapolation_worker(
+    metric_histories: dict[str, list[float]],
+    n_epochs: int,
+    eval_epoch: int,
+) -> dict:
+    """Extrapolate each metric to multiple time horizons.
+
+    Parameters
+    ----------
+    metric_histories:
+        ``{metric_name: [value_epoch0, value_epoch1, …]}`` — a snapshot of
+        the training lists at the moment of submission.
+    n_epochs:
+        Planned total epochs (1.0× horizon target = ``n_epochs - 1``).
+    eval_epoch:
+        The epoch at which the snapshot was taken (stored in the result for
+        traceability).
+
+    Returns
+    -------
+    dict
+        ``{"eval_epoch": int, "metrics": {name: {"n_observed": int,
+        "horizons": {"1.0x": {"target_epoch", "estimate", "se"}, …}}}}``
+    """
+    from retrosynformer.extrapolate import extrapolate_objective
+
+    metrics_result: dict[str, Any] = {}
+    for metric, values in metric_histories.items():
+        if not values:
+            metrics_result[metric] = {"n_observed": 0, "horizons": {}}
+            continue
+        horizons: dict[str, dict] = {}
+        for label, factor in _EXTRAP_HORIZONS.items():
+            target_n = max(int(round(factor * n_epochs)), len(values) + 1)
+            result = extrapolate_objective(values, n_epochs=target_n)
+            if result is None:
+                horizons[label] = {
+                    "target_epoch": target_n - 1,
+                    "estimate": None,
+                    "se": None,
+                }
+            else:
+                horizons[label] = {
+                    "target_epoch": result["target_epoch"],
+                    "estimate": round(result["estimate"], 6),
+                    "se": round(result["se"], 6),
+                }
+        metrics_result[metric] = {"n_observed": len(values), "horizons": horizons}
+
+    return {"eval_epoch": eval_epoch, "metrics": metrics_result}
+
+
+# ---------------------------------------------------------------------------
 # Helpers (main-process side)
 # ---------------------------------------------------------------------------
 
@@ -237,14 +314,24 @@ class AsyncRouteEvalPool:
 
     def __init__(self, n_workers: int = 24) -> None:
         self._n_workers = n_workers
+        # Route-eval pool (process-based — heavy beam search)
         self._executor: ProcessPoolExecutor | None = None
         self._chunk_futures: list[Future] = []
         self._pending_epoch: int | None = None
         self._submit_time: float = 0.0
+        # Extrapolation pool (thread-based — fast numpy, no process overhead needed)
+        self._extrap_executor: ThreadPoolExecutor | None = None
+        self._extrap_future: Future | None = None
+        self._extrap_epoch: int | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _ensure_extrap_executor(self) -> ThreadPoolExecutor:
+        if self._extrap_executor is None:
+            self._extrap_executor = ThreadPoolExecutor(max_workers=1)
+        return self._extrap_executor
 
     def _ensure_executor(self) -> ProcessPoolExecutor:
         if self._executor is None:
@@ -355,8 +442,74 @@ class AsyncRouteEvalPool:
             time.sleep(2.0)
         return self.collect_if_ready()
 
+    # ------------------------------------------------------------------
+    # Extrapolation interface
+    # ------------------------------------------------------------------
+
+    def submit_extrapolation(
+        self,
+        metric_histories: dict[str, list[float]],
+        n_epochs: int,
+        epoch: int,
+    ) -> bool:
+        """Dispatch metric extrapolation to the thread pool (non-blocking).
+
+        Parameters
+        ----------
+        metric_histories:
+            Snapshot of training metric lists, keyed by metric name.
+            Pass ``list(training_loss)`` etc. to avoid mutation by the main
+            training loop before the thread reads the data.
+        n_epochs:
+            Planned total epochs (1.0× horizon = ``n_epochs - 1``).
+        epoch:
+            Current epoch (stored in the result for traceability).
+
+        Returns
+        -------
+        bool
+            ``True`` if submitted; ``False`` if the previous job is still running.
+        """
+        if self._extrap_future is not None and not self._extrap_future.done():
+            logger.info(
+                "[async_eval] Extrapolation epoch %d: previous (epoch %d) still running — skipping.",
+                epoch, self._extrap_epoch,
+            )
+            return False
+        executor = self._ensure_extrap_executor()
+        self._extrap_future = executor.submit(
+            _extrapolation_worker, metric_histories, n_epochs, epoch
+        )
+        self._extrap_epoch = epoch
+        return True
+
+    def collect_extrapolation_if_ready(self) -> dict | None:
+        """Return extrapolation result if the thread has finished, else ``None``."""
+        if self._extrap_future is None or not self._extrap_future.done():
+            return None
+        result = self._extrap_future.result()
+        self._extrap_future = None
+        self._extrap_epoch = None
+        return result
+
+    def collect_extrapolation_blocking(self, timeout: float = 60.0) -> dict | None:
+        """Block up to *timeout* seconds for the extrapolation thread."""
+        if self._extrap_future is None:
+            return None
+        try:
+            result = self._extrap_future.result(timeout=timeout)
+            self._extrap_future = None
+            self._extrap_epoch = None
+            return result
+        except Exception as exc:
+            logger.warning("[async_eval] Extrapolation collect failed: %s", exc)
+            return None
+
     def shutdown(self) -> None:
         """Shut down the worker pool. Safe to call even if no job was submitted."""
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None
+        if self._extrap_executor is not None:
+            self._extrap_executor.shutdown(wait=True)  # fast — always finishes quickly
+            self._extrap_executor = None

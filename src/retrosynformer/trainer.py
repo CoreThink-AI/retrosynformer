@@ -320,6 +320,7 @@ class RetroTrainer:
         patience = self.config["train"].get("early_stopping_patience", 0)
         epochs_no_improve = 0
         fraction_targets_solved = None
+        _extrap_buffer: dict | None = None  # holds extrapolation result until route eval lands
 
         training_loss, validation_loss = [], []
         (
@@ -445,11 +446,24 @@ class RetroTrainer:
 
             # --- Async path ---------------------------------------------------
             if use_async:
-                # Collect any previously submitted job that has finished.
+                # Collect any finished extrapolation result into the buffer so it
+                # can be attached to the route-eval entry when that arrives.
+                extrap_check = async_pool.collect_extrapolation_if_ready()
+                if extrap_check is not None:
+                    _extrap_buffer = extrap_check
+
+                # Collect route eval; merge buffered extrapolation if epochs match.
                 async_result = async_pool.collect_if_ready()
                 if async_result is not None:
                     pred_routes = async_result["routes"]
-                    self.results_eval.append({"epoch": async_result["eval_epoch"], "result": pred_routes})
+                    entry: dict = {"epoch": async_result["eval_epoch"], "result": pred_routes}
+                    if (
+                        _extrap_buffer is not None
+                        and _extrap_buffer["eval_epoch"] == async_result["eval_epoch"]
+                    ):
+                        entry["extrapolation"] = _extrap_buffer["metrics"]
+                        _extrap_buffer = None
+                    self.results_eval.append(entry)
                     fraction_targets_solved = async_result["fraction_targets_solved"]
                     fraction_valid_routes = async_result["fraction_valid_routes"]
                     print(
@@ -458,17 +472,45 @@ class RetroTrainer:
                         f"  (lagged from epoch {async_result['eval_epoch']})",
                         flush=True,
                     )
+
                 if eval_due:
                     async_pool.submit(self.model, self.config, self.valid_dataloader, epoch)
+                    async_pool.submit_extrapolation(
+                        metric_histories={
+                            "train_loss":             list(training_loss),
+                            "train_action_accuracy":  list(training_accuracy),
+                            "train_route_accuracy":   list(training_route_accuracy),
+                            "valid_action_accuracy":  list(validation_accuracy),
+                            "valid_route_accuracy":   list(validation_route_accuracy),
+                        },
+                        n_epochs=n_epochs,
+                        epoch=epoch,
+                    )
 
             # --- Synchronous path (default) -----------------------------------
             else:
                 if eval_due:
+                    from .async_eval import _extrapolation_worker
                     eval_start_time = time.time()
                     print(f"Epoch {epoch}: running route evaluation …", flush=True)
                     route_predictor.set_model(self.model)
                     pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
-                    self.results_eval.append({"epoch": epoch, "result": pred_routes})
+                    extrap = _extrapolation_worker(
+                        metric_histories={
+                            "train_loss":             list(training_loss),
+                            "train_action_accuracy":  list(training_accuracy),
+                            "train_route_accuracy":   list(training_route_accuracy),
+                            "valid_action_accuracy":  list(validation_accuracy),
+                            "valid_route_accuracy":   list(validation_route_accuracy),
+                        },
+                        n_epochs=n_epochs,
+                        epoch=epoch,
+                    )
+                    self.results_eval.append({
+                        "epoch": epoch,
+                        "result": pred_routes,
+                        "extrapolation": extrap["metrics"],
+                    })
                     solved_routes = [r["route_solved"] for r in pred_routes]
                     fraction_targets_solved = sum(solved_routes) / len(solved_routes)
                     valid_routes = [r["valid_route"] for r in pred_routes]
@@ -539,17 +581,34 @@ class RetroTrainer:
             if use_async:
                 # Collect any in-flight job first; if nothing is running (or
                 # eval_routes_at_end forced a fresh run), submit one now and block.
-                if async_pool.is_running():
-                    print("[async_eval] Waiting for in-flight eval to finish …", flush=True)
-                    async_result = async_pool.collect_blocking(timeout=900)
-                else:
+                _final_fresh = not async_pool.is_running()
+                if _final_fresh:
                     print("[async_eval] Submitting final blocking route eval …", flush=True)
                     async_pool.submit(self.model, self.config, self.valid_dataloader, epoch)
-                    async_result = async_pool.collect_blocking(timeout=900)
+                    async_pool.submit_extrapolation(
+                        metric_histories={
+                            "train_loss":             list(training_loss),
+                            "train_action_accuracy":  list(training_accuracy),
+                            "train_route_accuracy":   list(training_route_accuracy),
+                            "valid_action_accuracy":  list(validation_accuracy),
+                            "valid_route_accuracy":   list(validation_route_accuracy),
+                        },
+                        n_epochs=n_epochs,
+                        epoch=epoch,
+                    )
+                else:
+                    print("[async_eval] Waiting for in-flight eval to finish …", flush=True)
+                async_result = async_pool.collect_blocking(timeout=900)
+                extrap_final = async_pool.collect_extrapolation_blocking(timeout=60)
                 async_pool.shutdown()
                 if async_result is not None:
                     pred_routes = async_result["routes"]
-                    self.results_eval.append({"epoch": epoch, "result": pred_routes})
+                    entry = {"epoch": epoch, "result": pred_routes}
+                    if extrap_final is not None:
+                        entry["extrapolation"] = extrap_final["metrics"]
+                    elif _extrap_buffer is not None:
+                        entry["extrapolation"] = _extrap_buffer["metrics"]
+                    self.results_eval.append(entry)
                     fraction_targets_solved = async_result["fraction_targets_solved"]
                     print(
                         f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
@@ -559,13 +618,29 @@ class RetroTrainer:
                 else:
                     fraction_targets_solved = 0.0
             else:
+                from .async_eval import _extrapolation_worker
                 print("Running final route evaluation …")
                 eval_start_time = time.time()
                 route_predictor.set_model(self.model)
                 pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
-                self.results_eval.append({"epoch": epoch, "result": pred_routes})
+                extrap = _extrapolation_worker(
+                    metric_histories={
+                        "train_loss":             list(training_loss),
+                        "train_action_accuracy":  list(training_accuracy),
+                        "train_route_accuracy":   list(training_route_accuracy),
+                        "valid_action_accuracy":  list(validation_accuracy),
+                        "valid_route_accuracy":   list(validation_route_accuracy),
+                    },
+                    n_epochs=n_epochs,
+                    epoch=epoch,
+                )
                 solved_routes = [r["route_solved"] for r in pred_routes]
                 fraction_targets_solved = sum(solved_routes) / len(solved_routes) if solved_routes else 0.0
+                self.results_eval.append({
+                    "epoch": epoch,
+                    "result": pred_routes,
+                    "extrapolation": extrap["metrics"],
+                })
                 print(
                     f"Final route eval: {fraction_targets_solved:.4f} fraction solved "
                     f"({sum(solved_routes)}/{len(solved_routes)}) "
