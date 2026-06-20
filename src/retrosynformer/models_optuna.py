@@ -72,10 +72,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, relationship
-
 
 # ---------------------------------------------------------------------------
 # Declarative base
