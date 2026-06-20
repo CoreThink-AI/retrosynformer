@@ -77,7 +77,7 @@ def _find_trial_base(db_dir: str, study_name: str) -> str:
 def _trials_from_db(db_path: str) -> pd.DataFrame:
     dfs = to_dfs(db_path)
     df = dfs_to_trials_df(dfs)
-    df = df[df["state"].isin({"COMPLETE", "RUNNING"})].copy()
+    df = df[df["state"].isin({"COMPLETE", "RUNNING", "FAIL"})].copy()
     db_dir = os.path.dirname(os.path.abspath(db_path))
     df["db_path"] = db_path
     df["db_dir"] = db_dir
@@ -241,14 +241,17 @@ def main() -> None:
     all_trials = all_trials.sort_values("rank_val", ascending=rank_lower_is_better).reset_index(drop=True)
 
     if min_score is not None:
+        # Keep trials with NaN rank_val (no local jsonl yet — e.g. RUNNING on remote);
+        # only drop trials where we have data showing they're below the threshold.
         if rank_lower_is_better:
-            all_trials = all_trials[all_trials["rank_val"] <= min_score]
+            mask = all_trials["rank_val"].isna() | (all_trials["rank_val"] <= min_score)
         else:
-            all_trials = all_trials[all_trials["rank_val"] >= min_score]
+            mask = all_trials["rank_val"].isna() | (all_trials["rank_val"] >= min_score)
+        all_trials = all_trials[mask]
         if all_trials.empty:
-            sys.exit(f"No completed trials passing the min-score filter.")
+            sys.exit(f"No trials passing the min-score filter.")
 
-    top = all_trials.head(args.top)
+    top = all_trials.head(args.top).copy()
 
     _run_cache: dict[str, dict[int, tuple[dict, list[str]]]] = {}
     for tbd in top["trial_base_dir"].unique():
@@ -306,20 +309,22 @@ def main() -> None:
     metric_hdr = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
     col_w = max(len(metric_hdr), 9)
     direction = "↑" if not rank_lower_is_better else "↓"
-    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'ep':>4}  {'trial':>5}  {'study':<40}"
+    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'ep':>4}  {'state':>7}  {'trial':>5}  {'study':<40}"
     param_hdr = "  ".join(f"{_hdr(c):<{max(len(_hdr(c)),6)}}" for c in param_cols)
-    print(f"Top {len(top)} completed trials by {rank_metric}:")
+    print(f"Top {len(top)} trials by {rank_metric}:")
     print(f"{fixed_hdr}  {param_hdr}")
-    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'----':>4}  {'-----':>5}  {'-'*40}  " +
+    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'----':>4}  {'-------':>7}  {'-----':>5}  {'-'*40}  " +
           "  ".join("-" * max(len(_hdr(c)), 6) for c in param_cols))
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
         study_short = str(row["study_name"])[:40]
         optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
         n_ep = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
-        fixed_part = (f"  #{rank:>2}  {row['rank_val']:>{col_w}.4f}  "
+        state = str(row.get("state", ""))
+        rank_val_str = f"{row['rank_val']:>{col_w}.4f}" if pd.notna(row.get("rank_val")) else f"{'(no data)':>{col_w}}"
+        fixed_part = (f"  #{rank:>2}  {rank_val_str}  "
                       f"{optuna_score}  {n_ep:>4}  "
-                      f"{int(row['original_trial']):>5}  {study_short:<40}")
+                      f"{state:>7}  {int(row['original_trial']):>5}  {study_short:<40}")
         param_part = "  ".join(
             f"{_fmt(c, row[c]):<{max(len(_hdr(c)),6)}}" for c in param_cols
         )
@@ -331,6 +336,9 @@ def main() -> None:
     plotted = 0
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
+        if str(row.get("state", "")) == "FAIL":
+            print(f"  SKIP #{rank} (FAIL): no data to plot for trial {int(row['original_trial'])}")
+            continue
         jsonl = row["jsonl_path"]
         if not os.path.exists(jsonl):
             print(f"  SKIP #{rank}: {jsonl} not found")
