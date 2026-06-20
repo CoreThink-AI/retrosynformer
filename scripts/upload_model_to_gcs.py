@@ -63,7 +63,7 @@ def _upload_chunk(bucket, blob_prefix: str, idx: int, data: bytes, skip_existing
                 return idx, len(data)
         except Exception:
             pass
-    blob.upload_from_string(data, timeout=300, retry=_retry_policy())
+    blob.upload_from_string(data, timeout=1800, retry=_retry_policy())
     print(f"  chunk {idx:04d}: uploaded {len(data)/1e6:.1f} MB", flush=True)
     return idx, len(data)
 
@@ -71,10 +71,10 @@ def _upload_chunk(bucket, blob_prefix: str, idx: int, data: bytes, skip_existing
 def _retry_policy():
     from google.api_core import retry as api_retry
     return api_retry.Retry(
-        initial=1.0,
-        maximum=60.0,
+        initial=5.0,
+        maximum=120.0,
         multiplier=2.0,
-        deadline=600.0,
+        deadline=7200.0,
     )
 
 
