@@ -355,9 +355,6 @@ def main() -> None:
     plotted = 0
 
     for rank, (_, row) in enumerate(top.iterrows(), start=1):
-        if str(row.get("state", "")) == "FAIL":
-            print(f"  SKIP #{rank} (FAIL): no data to plot for trial {int(row['original_trial'])}")
-            continue
         jsonl = row["jsonl_path"]
         if not os.path.exists(jsonl):
             print(f"  SKIP #{rank}: {jsonl} not found")
