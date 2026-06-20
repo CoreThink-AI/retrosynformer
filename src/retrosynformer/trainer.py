@@ -440,6 +440,15 @@ class RetroTrainer:
 
             if valid_route_accuracy > self._best_valid_route_accuracy:
                 self._best_valid_route_accuracy = valid_route_accuracy
+                bestroutes_path = save_folder + "/model.bestroutes.pth"
+                tmp_fd3, tmp_path3 = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
+                try:
+                    os.close(tmp_fd3)
+                    shutil.copyfile(last_path, tmp_path3)
+                    os.replace(tmp_path3, bestroutes_path)
+                except Exception:
+                    os.unlink(tmp_path3)
+                    raise
 
             eval_routes_frequency = eval_cfg["eval_routes_frequency"]
             eval_due = (epoch % eval_routes_frequency == 0 and epoch > 0) or epoch == n_epochs - 1

@@ -115,6 +115,60 @@ def _load_run_params(trial_base_dir: str) -> dict[int, tuple[dict, list[str]]]:
     return result
 
 
+def _build_table_df(
+    top: pd.DataFrame,
+    rank_metric: str,
+    rank_metric_short: str,
+    rank_lower_is_better: bool,
+    param_cols: list,
+    optuna_col_set: set,
+) -> pd.DataFrame:
+    """Build a tidy DataFrame representing the ranked-trials summary table."""
+    direction = "↑" if not rank_lower_is_better else "↓"
+    metric_col = rank_metric_short + direction
+
+    def _hdr(c: str) -> str:
+        return c + "*" if c in optuna_col_set else c
+
+    def _fmt(col: str, val) -> str:
+        if isinstance(val, list):
+            return f"[{val[0]} ... {val[-1]}]" if len(val) > 3 else str(val)
+        if isinstance(val, str) and val.startswith("["):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list) and len(parsed) > 3:
+                    return f"[{parsed[0]} ... {parsed[-1]}]"
+            except (ValueError, json.JSONDecodeError):
+                pass
+        try:
+            if pd.isna(val):
+                return "-"
+        except (TypeError, ValueError):
+            pass
+        if col == "lr":
+            return f"{val:.2e}"
+        if isinstance(val, float) and val == int(val):
+            return str(int(val))
+        if isinstance(val, float):
+            return f"{val:.3f}"
+        return str(val)
+
+    rows = []
+    for rank, (_, row) in enumerate(top.iterrows(), start=1):
+        rec: dict = {"rank": f"#{rank}"}
+        rec[metric_col] = f"{row['rank_val']:.4f}" if pd.notna(row.get("rank_val")) else "(no data)"
+        rec["optuna"] = f"{row['score']:.4f}" if pd.notna(row.get("score")) else "-"
+        rec["ep"] = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
+        rec["state"] = str(row.get("state", ""))
+        rec["trial"] = int(row["original_trial"])
+        rec["study"] = str(row["study_name"])
+        for c in param_cols:
+            rec[_hdr(c)] = _fmt(c, row.get(c))
+        rows.append(rec)
+
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -280,56 +334,21 @@ def main() -> None:
     extra_params = [c for c in top.columns if c not in _non_param and c not in present_params and c not in _HIDDEN_PARAMS]
     param_cols = present_params + extra_params
 
-    def _hdr(c: str) -> str:
-        return c + "*" if c in optuna_col_set else c
-
-    def _fmt(col: str, val) -> str:
-        if isinstance(val, list):
-            return f"[{val[0]} ... {val[-1]}]" if len(val) > 3 else str(val)
-        if isinstance(val, str) and val.startswith("["):
-            try:
-                parsed = json.loads(val)
-                if isinstance(parsed, list) and len(parsed) > 3:
-                    return f"[{parsed[0]} ... {parsed[-1]}]"
-            except (ValueError, json.JSONDecodeError):
-                pass
-        try:
-            if pd.isna(val):
-                return "-"
-        except (TypeError, ValueError):
-            pass
-        if col == "lr":
-            return f"{val:.2e}"
-        if isinstance(val, float) and val == int(val):
-            return str(int(val))
-        if isinstance(val, float):
-            return f"{val:.3f}"
-        return str(val)
-
-    metric_hdr = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
-    col_w = max(len(metric_hdr), 9)
-    direction = "↑" if not rank_lower_is_better else "↓"
-    fixed_hdr = f"  {'#':>3}  {metric_hdr+direction:>{col_w}}  {'optuna':>6}  {'ep':>4}  {'state':>7}  {'trial':>5}  {'study':<40}"
-    param_hdr = "  ".join(f"{_hdr(c):<{max(len(_hdr(c)),6)}}" for c in param_cols)
+    rank_metric_short = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+    table_df = _build_table_df(top, rank_metric, rank_metric_short, rank_lower_is_better,
+                               param_cols, optuna_col_set)
     print(f"Top {len(top)} trials by {rank_metric}:")
-    print(f"{fixed_hdr}  {param_hdr}")
-    print(f"  {'---':>3}  {'-'*col_w}  {'------':>6}  {'----':>4}  {'-------':>7}  {'-----':>5}  {'-'*40}  " +
-          "  ".join("-" * max(len(_hdr(c)), 6) for c in param_cols))
-
-    for rank, (_, row) in enumerate(top.iterrows(), start=1):
-        study_short = str(row["study_name"])[:40]
-        optuna_score = f"{row['score']:6.4f}" if pd.notna(row.get("score")) else "     -"
-        n_ep = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
-        state = str(row.get("state", ""))
-        rank_val_str = f"{row['rank_val']:>{col_w}.4f}" if pd.notna(row.get("rank_val")) else f"{'(no data)':>{col_w}}"
-        fixed_part = (f"  #{rank:>2}  {rank_val_str}  "
-                      f"{optuna_score}  {n_ep:>4}  "
-                      f"{state:>7}  {int(row['original_trial']):>5}  {study_short:<40}")
-        param_part = "  ".join(
-            f"{_fmt(c, row[c]):<{max(len(_hdr(c)),6)}}" for c in param_cols
-        )
-        print(f"{fixed_part}  {param_part}")
+    print(table_df.to_string(index=False))
     print()
+
+    # Save table to CSV in the highest-ranked trial's study directory
+    if not table_df.empty:
+        top_study = str(top.iloc[0]["study_name"])
+        top_base = str(top.iloc[0]["trial_base_dir"])
+        csv_path = os.path.join(top_base, f"top_trials_{top_study}.csv")
+        table_df.to_csv(csv_path, index=False)
+        print(f"Table saved to {csv_path}")
+        print()
 
     palette = pc.qualitative.D3  # 10 distinct colors
     fig = go.Figure()
