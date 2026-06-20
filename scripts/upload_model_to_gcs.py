@@ -82,7 +82,7 @@ def upload_chunked(
     local_path: Path,
     gcs_uri: str,
     chunk_size: int = CHUNK_SIZE_DEFAULT,
-    max_workers: int = 8,
+    max_workers: int = 1,
     compress: bool = False,
     skip_existing: bool = False,
 ) -> None:
@@ -163,7 +163,7 @@ def main():
     parser.add_argument("local_path", type=Path, help="Local file to upload")
     parser.add_argument("gcs_uri", help="Destination gs:// URI (e.g. gs://bucket/path/model.pth.gz)")
     parser.add_argument("--chunk-mb", type=int, default=50, help="Chunk size in MB (default: 50)")
-    parser.add_argument("--workers", type=int, default=8, help="Parallel upload workers (default: 8)")
+    parser.add_argument("--workers", type=int, default=1, help="Upload workers (default: 1 — network is always the bottleneck)")
     parser.add_argument("--compress", action="store_true", help="gzip the file before chunking (for .pth → .pth.gz)")
     parser.add_argument("--skip-existing", action="store_true", help="Skip chunks already in GCS with matching size")
     args = parser.parse_args()
