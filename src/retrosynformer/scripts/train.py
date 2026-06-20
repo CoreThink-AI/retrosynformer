@@ -82,9 +82,7 @@ def main():
         seed=args.seed,
         head_dim=args.head_dim,
         lr=args.lr,
-        dropout=args.dropout,
         momentum=args.momentum,
-        structured_dropout_rate=args.structured_dropout_rate,
         eval_n_batches=args.eval_n_batches,
         results_path=args.results_path,
     )
