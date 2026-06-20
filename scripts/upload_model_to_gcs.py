@@ -30,6 +30,21 @@ from pathlib import Path
 CHUNK_SIZE_DEFAULT = 50 * 1024 * 1024  # 50 MB
 
 
+def _gcs_client(project: str | None = None):
+    """Return an authenticated GCS client using gcloud user token (bypasses stale ADC)."""
+    import subprocess
+    from google.cloud import storage
+    from google.oauth2.credentials import Credentials
+    try:
+        token = subprocess.check_output(
+            ["gcloud", "auth", "print-access-token"], stderr=subprocess.PIPE
+        ).decode().strip()
+        creds = Credentials(token=token)
+        return storage.Client(credentials=creds, project=project)
+    except Exception as e:
+        sys.exit(f"Cannot get gcloud token (run `gcloud auth login`): {e}")
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -75,7 +90,7 @@ def upload_chunked(
     bucket_name, blob_name = gcs_uri[5:].split("/", 1)
 
     try:
-        from google.cloud import storage
+        from google.cloud import storage  # noqa: F401 (just verify installed)
     except ImportError:
         sys.exit("google-cloud-storage not installed")
 
@@ -99,7 +114,7 @@ def upload_chunked(
     sha = _sha256(source_path)
     print(f"SHA256: {sha}", flush=True)
 
-    client = storage.Client()
+    client = _gcs_client(project=bucket_name)
     bucket = client.bucket(bucket_name)
 
     # Read entire file into memory in chunks and upload in parallel.
