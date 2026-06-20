@@ -2,6 +2,7 @@ import copy
 import logging
 import time
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
 from operator import attrgetter
 
 import pandas as pd
@@ -321,6 +322,111 @@ class RoutePredictor:
 
         return new_beams, route_done_beams, route_solved_beams
 
+    def _apply_templates_for_beam(
+        self,
+        parent_beam,
+        action_preds_1d: torch.Tensor,
+        beam_width: int,
+    ) -> tuple:
+        """Template-application half of beam expansion given pre-computed predictions.
+
+        Receives a 1-D CPU tensor of softmaxed action probabilities (already
+        computed by a batched GPU forward pass in predict_all_routes) and applies
+        rdchiral templates to generate child beams.  Called in parallel across
+        all current beams via ThreadPoolExecutor; safe because:
+          - action_preds_1d is a per-beam tensor with no shared mutable state
+          - self.env.available_templates is read-only
+          - copy.deepcopy gives each child beam its own env copy
+        """
+        new_beams = []
+        state = parent_beam.env.state[-1][0]
+        if not Chem.MolFromSmiles(state):
+            return [], [], []
+
+        k = int(self.config["dataset"]["action_dim"])
+        _, top_k_idx = torch.topk(action_preds_1d, k=k)
+
+        preds = action_preds_1d.clone()
+        not_top_k = torch.ones_like(preds, dtype=torch.bool)
+        not_top_k[top_k_idx] = False
+        preds[not_top_k] = -2.0
+
+        top_k_actions = self.env.available_templates[top_k_idx]
+        avail_mask = torch.tensor(
+            utils.check_available_actions(state, top_k_actions, use_template=True)[0]
+        )
+
+        not_avail = torch.ones_like(preds, dtype=torch.bool)
+        not_avail[top_k_idx[avail_mask]] = False
+        preds[not_avail] = -2.0
+        preds[0] = -2.0
+
+        if avail_mask.sum() < 1:
+            next_action_idx = torch.tensor([0])
+            next_action_pred = preds[[0]]
+        else:
+            next_action_pred, next_action_idx = torch.topk(
+                preds, k=min(beam_width, int(avail_mask.sum()))
+            )
+
+        route_done_beams, route_solved_beams = [], []
+        for i, next_action in enumerate(next_action_idx):
+            current_beam = copy.deepcopy(parent_beam)
+            current_beam.predicted_actions.append(next_action)
+            next_action_template = self.env.available_templates[next_action]
+            next_reactants = current_beam.env.step([next_action_template])
+
+            if not next_reactants:
+                continue
+
+            route_done, route_solved, _ = current_beam.env._check_if_done()
+            route_done_beams.append(route_done)
+            route_solved_beams.append(route_solved)
+
+            reaction = ".".join(next_reactants) + ">>" + state
+            current_beam.reaction_list.append(reaction)
+            current_beam.states.append(next_reactants)
+
+            new_actions = torch.cat([
+                current_beam.actions,
+                utils.one_hot_encoder(next_action_idx, self.config["dataset"]["action_dim"])
+                .unsqueeze(0).unsqueeze(0).to(self.device),
+            ], dim=1)
+            new_rewards = (
+                torch.tensor(current_beam.env.rewards, device=self.device)
+                .unsqueeze(0).unsqueeze(-1)
+            )
+            new_rtg = (
+                (current_beam.rtgs_tensor[0][-1] - current_beam.env.rewards[-1])
+                .unsqueeze(0).unsqueeze(-1)
+            )
+            new_attention_mask = torch.cat(
+                (current_beam.attention_mask, torch.ones(1, 1, device=self.device)), dim=1
+            )
+            new_rtgs_tensor = torch.cat((current_beam.rtgs_tensor, new_rtg), dim=1)
+            new_timesteps = torch.arange(
+                0, len(current_beam.predicted_actions) + 1, device=self.device
+            ).unsqueeze(0)
+
+            beam_new = self.Beam(
+                env=current_beam.env,
+                states=current_beam.states,
+                actions=new_actions,
+                rtgs_tensor=new_rtgs_tensor,
+                rewards=new_rewards,
+                total_reward=float(torch.sum(new_rewards)),
+                timesteps=new_timesteps,
+                attention_mask=new_attention_mask,
+                reaction_list=current_beam.reaction_list,
+                predicted_actions=current_beam.predicted_actions,
+                route_solved=route_solved,
+                route_done=route_done,
+                trajectory_prob=float(current_beam.trajectory_prob * next_action_pred[i]),
+            )
+            new_beams.append(beam_new)
+
+        return new_beams, route_done_beams, route_solved_beams
+
     def predict_all_routes(
         self,
         target: str,
@@ -389,19 +495,52 @@ class RoutePredictor:
         current_beams = [initial_beam]
         terminal_beams: list = []
 
-        with torch.no_grad():
+        # One ThreadPoolExecutor for the whole search; workers apply templates in
+        # parallel while the GPU runs the batched forward pass each depth level.
+        with torch.no_grad(), ThreadPoolExecutor(max_workers=beam_width) as executor:
             while current_beams:
                 next_beams: list = []
-                for beam_i in current_beams:
-                    new_beams, route_done_flags, _ = self.expand_beam(beam_i, beam_width)
+
+                # ── Batched fingerprint computation (parallel, RDKit releases GIL) ──
+                fp_futures = [
+                    executor.submit(
+                        convert_smiles_states_to_fp,
+                        b.states,
+                        self.config["dataset"]["fp_dim"],
+                        self.config["dataset"]["n_in_state"],
+                    )
+                    for b in current_beams
+                ]
+                states_batch = torch.stack(
+                    [f.result().to(dtype=torch.float32) for f in fp_futures], dim=0
+                ).to(self.device)  # (N, T, state_dim)
+
+                # ── Single GPU forward pass for all N beams ──
+                _, action_preds_batch, _ = self.model(
+                    states=states_batch,
+                    actions=torch.cat([b.actions for b in current_beams], dim=0),
+                    rewards=torch.cat([b.rewards for b in current_beams], dim=0),
+                    returns_to_go=torch.cat([b.rtgs_tensor for b in current_beams], dim=0),
+                    timesteps=torch.cat([b.timesteps for b in current_beams], dim=0),
+                    attention_mask=torch.cat([b.attention_mask for b in current_beams], dim=0),
+                    return_dict=False,
+                )
+                # (N, T, n_templates) → softmax over last timestep → CPU: (N, n_templates)
+                preds_per_beam = self.softmax(action_preds_batch[:, -1, :]).cpu()
+
+                # ── Parallel template application across all beams ──
+                results = list(executor.map(
+                    lambda args: self._apply_templates_for_beam(*args),
+                    [(b, preds_per_beam[i], beam_width) for i, b in enumerate(current_beams)],
+                ))
+
+                for (new_beams, done_flags, _), beam_i in zip(results, current_beams):
                     if not new_beams:
-                        # No children produced — treat the parent as a dead-end terminal.
                         terminal_beams.append(beam_i)
                     else:
-                        for b, done in zip(new_beams, route_done_flags):
+                        for b, done in zip(new_beams, done_flags):
                             (terminal_beams if done else next_beams).append(b)
 
-                # Prune active beams to beam_width by trajectory_prob before next round.
                 next_beams.sort(key=lambda b: b.trajectory_prob, reverse=True)
                 current_beams = next_beams[:beam_width]
 
