@@ -1076,6 +1076,7 @@ def estimate_incomplete_objectives(
                 **base,
                 "estimated_value": fit["estimate"],
                 "se": fit["se"],
+                "target_epoch": fit.get("target_epoch"),
                 "models": fit["models"],
                 "skipped": False,
                 "skip_reason": None,

@@ -122,6 +122,7 @@ def _build_table_df(
     rank_lower_is_better: bool,
     param_cols: list,
     optuna_col_set: set,
+    show_estimate: bool = False,
 ) -> pd.DataFrame:
     """Build a tidy DataFrame representing the ranked-trials summary table."""
     direction = "↑" if not rank_lower_is_better else "↓"
@@ -158,6 +159,14 @@ def _build_table_df(
         rec: dict = {"rank": f"#{rank}"}
         rec[metric_col] = f"{row['rank_val']:.4f}" if pd.notna(row.get("rank_val")) else "(no data)"
         rec["optuna"] = f"{row['score']:.4f}" if pd.notna(row.get("score")) else "-"
+        if show_estimate:
+            est_val = row.get("_estimated_value")
+            if est_val is not None and pd.notna(est_val):
+                rec["obj_estim"] = f"{est_val:.4f}"
+            elif pd.notna(row.get("score")):
+                rec["obj_estim"] = f"{row['score']:.4f}"
+            else:
+                rec["obj_estim"] = "-"
         rec["ep"] = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
         rec["state"] = str(row.get("state", ""))
         rec["trial"] = int(row["original_trial"])
@@ -204,6 +213,10 @@ def main() -> None:
     parser.add_argument("--xmax", type=float, default=None)
     parser.add_argument("--ymin", type=float, default=None)
     parser.add_argument("--ymax", type=float, default=None)
+    parser.add_argument("--estimate", action="store_true",
+                        help="Show polynomial extrapolation of the final-epoch objective: "
+                             "adds obj_estim column to the table and an x marker on each "
+                             "trial's curve at the projected target epoch.")
     args = parser.parse_args()
 
     metrics: list[str] = args.metrics or ["valid_action_accuracy"]
@@ -307,6 +320,29 @@ def main() -> None:
 
     top = all_trials.head(args.top).copy()
 
+    # --estimate: polynomial extrapolation to the final epoch for each trial.
+    # Key by (db_path, trial_number) to avoid collisions when multiple studies share
+    # the same study_name string stored in their study.db.
+    estimates: dict[tuple[str, int], dict] | None = None
+    if args.estimate:
+        from retrosynformer.models_optuna import connect as _orm_connect, estimate_incomplete_objectives
+        estimates = {}
+        for db_path in top["db_path"].unique():
+            session = _orm_connect(db_path, readonly=True)
+            try:
+                raw = estimate_incomplete_objectives(
+                    db_path, session,
+                    metric=rank_metric,
+                    states=None,  # include COMPLETE, FAIL, RUNNING
+                )
+            except Exception as exc:
+                print(f"  WARNING: estimate_incomplete_objectives failed for {db_path}: {exc}")
+                raw = {}
+            finally:
+                session.close()
+            for trial_num, est in raw.items():
+                estimates[(str(db_path), int(trial_num))] = est
+
     _run_cache: dict[str, dict[int, tuple[dict, list[str]]]] = {}
     for tbd in top["trial_base_dir"].unique():
         _run_cache[str(tbd)] = _load_run_params(str(tbd))
@@ -334,9 +370,20 @@ def main() -> None:
     extra_params = [c for c in top.columns if c not in _non_param and c not in present_params and c not in _HIDDEN_PARAMS]
     param_cols = present_params + extra_params
 
+    # Merge estimates into top so _build_table_df can access them as row values
+    if estimates is not None:
+        top["_estimated_value"] = top.apply(
+            lambda r: estimates.get((str(r["db_path"]), int(r["original_trial"])), {}).get("estimated_value"),
+            axis=1,
+        )
+        top["_target_epoch"] = top.apply(
+            lambda r: estimates.get((str(r["db_path"]), int(r["original_trial"])), {}).get("target_epoch"),
+            axis=1,
+        )
+
     rank_metric_short = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
     table_df = _build_table_df(top, rank_metric, rank_metric_short, rank_lower_is_better,
-                               param_cols, optuna_col_set)
+                               param_cols, optuna_col_set, show_estimate=estimates is not None)
     print(f"Top {len(top)} trials by {rank_metric}:")
     print(table_df.to_string(index=False))
     print()
@@ -396,6 +443,24 @@ def main() -> None:
             ))
 
         plotted += 1
+
+        # --estimate: add an x marker at the projected final-epoch value
+        if estimates is not None:
+            est_val = row.get("_estimated_value")
+            target_ep = row.get("_target_epoch")
+            if est_val is not None and pd.notna(est_val):
+                if target_ep is None or pd.isna(target_ep):
+                    target_ep = float(progress["epoch"].max())
+                est_label = f"#{rank} estimate ({float(est_val):.4f})"
+                fig.add_trace(go.Scatter(
+                    x=[float(target_ep)],
+                    y=[float(est_val)],
+                    name=est_label,
+                    legendgroup=f"trial_{rank}",
+                    showlegend=True,
+                    mode="markers",
+                    marker=dict(symbol="x", size=14, color=color, line=dict(width=2.5)),
+                ))
 
     if plotted == 0:
         sys.exit("No train_progress.jsonl files could be loaded for the top trials.")
