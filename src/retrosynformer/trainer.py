@@ -504,7 +504,7 @@ class RetroTrainer:
                             "valid_route_accuracy":   list(validation_route_accuracy),
                         },
                         n_epochs=n_epochs,
-                        epoch=epoch,
+                        eval_epoch=epoch,
                     )
                     self.results_eval.append({
                         "epoch": epoch,
@@ -632,7 +632,7 @@ class RetroTrainer:
                         "valid_route_accuracy":   list(validation_route_accuracy),
                     },
                     n_epochs=n_epochs,
-                    epoch=epoch,
+                    eval_epoch=epoch,
                 )
                 solved_routes = [r["route_solved"] for r in pred_routes]
                 fraction_targets_solved = sum(solved_routes) / len(solved_routes) if solved_routes else 0.0
