@@ -25,6 +25,8 @@ def main(
     batch_size=None,
 ):
     model_config_path = model_dir + "/config.yaml"
+    if not os.path.exists(model_config_path):
+        model_config_path = model_dir + "/model.config.yaml"
     model_config = read_config(model_config_path)
     model_path = model_config["train"]["results_path"] + "/model.pth"
 
