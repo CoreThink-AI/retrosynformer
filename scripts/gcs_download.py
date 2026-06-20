@@ -6,11 +6,16 @@ Reads pairs of env vars:
 
 Skips files that already exist (safe for container restarts when /tmp persists).
 
+GCS URIs ending in `.gz` are decompressed after download; the decompressed
+file is written to the local path specified by *_PATH (without the .gz suffix).
+
 Fallback: if the primary model weights are corrupt or missing, the script
 automatically downloads from FALLBACK_MODEL_WEIGHTS_GCS / FALLBACK_MODEL_CONFIG_GCS
 and overwrites the primary local paths so the app loads a known-good model.
 """
+import gzip
 import os
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -30,9 +35,20 @@ def _download(gcs_uri: str, local_path: str) -> None:
     blob = client.bucket(bucket_name).blob(blob_name)
     blob.reload()  # fetch metadata so blob.size is populated
     size_mb = blob.size / 1e6 if blob.size else 0.0
-    print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
-    blob.download_to_filename(local_path)
-    print(f"  Done ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+    if gcs_uri.endswith(".gz"):
+        gz_path = path.with_suffix(path.suffix + ".gz")
+        print(f"  {gcs_uri} → {gz_path} ({size_mb:.1f} MB compressed) ...", flush=True)
+        blob.download_to_filename(str(gz_path))
+        print(f"  Decompressing {gz_path} → {path} ...", flush=True)
+        with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        gz_path.unlink()
+        print(f"  Done ({path.stat().st_size / 1e6:.1f} MB decompressed)", flush=True)
+    else:
+        print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
+        blob.download_to_filename(local_path)
+        print(f"  Done ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
 
 
 def _download_if_missing(gcs_uri: str, local_path: str) -> None:
