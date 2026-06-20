@@ -574,6 +574,35 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
 
 
 # ---------------------------------------------------------------------------
+# Interrupt cleanup
+# ---------------------------------------------------------------------------
+
+def _backfill_failed_trials(results_base: str) -> None:
+    """Backfill Optuna objective values for FAIL trials that have training data.
+
+    Called automatically after a Ctrl-C stop so the interrupted trial's
+    progress is not lost from the TPE surrogate model.
+    """
+    from pathlib import Path
+    from retrosynformer.scripts.cleanup_study import cleanup_study
+
+    db_path = Path(results_base) / "study.db"
+    if not db_path.exists():
+        return
+    try:
+        records = cleanup_study(db_path, include_running=False, dry_run=False)
+        for rec in records:
+            if rec.get("estimated_value") is not None:
+                print(
+                    f"  [cleanup] trial #{rec['trial']} ({rec['state']}) "
+                    f"{rec['metric']}={rec['estimated_value']:.4f} "
+                    f"({rec.get('method', '')}) → {rec['action']}"
+                )
+    except Exception as exc:
+        print(f"  [cleanup] warning: could not backfill failed trials: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -677,6 +706,19 @@ def main():
         n_trials=args.n_trials,
         callbacks=[log_trial],
     )
+
+    # After any stop (Ctrl-C or study.stop()), backfill FAIL trials that have
+    # training data but no recorded objective value.  This lets Optuna's TPE
+    # sampler use the interrupted run's history for the next trial.
+    if _trainer_mod.is_interrupted():
+        _backfill_failed_trials(results_base)
+
+    complete_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if not complete_trials:
+        _write({"event": "study_end", "best": None}, run_jsonl)
+        if _trainer_mod.is_interrupted():
+            raise KeyboardInterrupt
+        return
 
     best = study.best_trial
     _write({
