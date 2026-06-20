@@ -86,7 +86,7 @@ class RoutePredictor:
         episode_length = 1
         batch_size = 1
 
-        actions.to(
+        actions = actions.to(
             device=self.device, dtype=torch.float32
         )  # (batch_size, episode_length, state_dim)
         rtgs_tensor = rtgs_tensor.to(
