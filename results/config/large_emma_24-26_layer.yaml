@@ -16,7 +16,7 @@ evaluation:
   batch_size: 150
   beam_width: 1
   eval_n_batches: 10
-  eval_routes_frequency: 25
+  eval_routes_frequency: 150
   max_depth: 6
   sort_on: trajectory_prob
   ted_exhaustive_limit: 64
@@ -77,6 +77,6 @@ train:
   early_stopping_patience: 10
   loss: crossEntropyLoss
   lr_scheduler_patience: 7
-  n_epochs: 200
+  n_epochs: 150
   resume: false
   start_epoch: 0
