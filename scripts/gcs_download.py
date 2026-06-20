@@ -6,33 +6,117 @@ Reads pairs of env vars:
 
 Skips files that already exist (safe for container restarts when /tmp persists).
 
+Chunked uploads: if a manifest file exists alongside the target blob
+(<gcs_uri>.manifest), the file was uploaded as parallel 50 MB chunks by
+scripts/upload_model_to_gcs.py.  This script downloads all chunks in parallel,
+reassembles them, and verifies the SHA-256.  No change to *_GCS env vars needed.
+
+GCS URIs ending in `.gz` are decompressed after download; the decompressed
+file is written to the local path specified by *_PATH (without the .gz suffix).
+
 Fallback: if the primary model weights are corrupt or missing, the script
 automatically downloads from FALLBACK_MODEL_WEIGHTS_GCS / FALLBACK_MODEL_CONFIG_GCS
 and overwrites the primary local paths so the app loads a known-good model.
 """
+import gzip
+import hashlib
 import os
+import shutil
 import sys
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+
+def _gcs_client():
+    try:
+        from google.cloud import storage
+    except ImportError:
+        sys.exit("google-cloud-storage is not installed; cannot fetch artifacts from GCS")
+    return storage.Client()
+
+
+def _has_manifest(bucket, blob_name: str) -> bool:
+    return bucket.blob(f"{blob_name}.manifest").exists()
+
+
+def _download_chunked(bucket, blob_name: str, local_path: Path) -> None:
+    """Download a file that was uploaded as chunks by upload_model_to_gcs.py."""
+    manifest_text = bucket.blob(f"{blob_name}.manifest").download_as_text()
+    parts = manifest_text.strip().split()
+    n_chunks, total_bytes, expected_sha = int(parts[0]), int(parts[1]), parts[2]
+    print(f"  Chunked download: {n_chunks} chunks, {total_bytes/1e9:.3f} GB total", flush=True)
+
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _fetch(idx: int) -> tuple[int, bytes]:
+        data = bucket.blob(f"{blob_name}.chunk.{idx:04d}").download_as_bytes()
+        print(f"  chunk {idx:04d}: {len(data)/1e6:.1f} MB", flush=True)
+        return idx, data
+
+    max_workers = min(n_chunks, 16)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch, i): i for i in range(n_chunks)}
+        chunks: dict[int, bytes] = {}
+        for fut in as_completed(futures):
+            idx, data = fut.result()
+            chunks[idx] = data
+
+    print(f"  Reassembling {n_chunks} chunks → {local_path} …", flush=True)
+    sha = hashlib.sha256()
+    with open(local_path, "wb") as f:
+        for i in range(n_chunks):
+            f.write(chunks[i])
+            sha.update(chunks[i])
+
+    actual_sha = sha.hexdigest()
+    if actual_sha != expected_sha:
+        local_path.unlink(missing_ok=True)
+        sys.exit(f"SHA-256 mismatch after reassembly: expected {expected_sha}, got {actual_sha}")
+
+    print(f"  SHA-256 verified. ({local_path.stat().st_size/1e6:.1f} MB)", flush=True)
 
 
 def _download(gcs_uri: str, local_path: str) -> None:
     path = Path(local_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        from google.cloud import storage
-    except ImportError:
-        sys.exit("google-cloud-storage is not installed; cannot fetch artifacts from GCS")
-
     assert gcs_uri.startswith("gs://"), f"Expected gs:// URI, got: {gcs_uri!r}"
     bucket_name, blob_name = gcs_uri[5:].split("/", 1)
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob(blob_name)
-    blob.reload()  # fetch metadata so blob.size is populated
+    client = _gcs_client()
+    bucket = client.bucket(bucket_name)
+
+    # --- Chunked path (upload_model_to_gcs.py wrote a manifest) ---
+    if _has_manifest(bucket, blob_name):
+        if gcs_uri.endswith(".gz"):
+            gz_path = path.with_suffix(path.suffix + ".gz")
+            _download_chunked(bucket, blob_name, gz_path)
+            print(f"  Decompressing {gz_path} → {path} …", flush=True)
+            with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            gz_path.unlink()
+            print(f"  Done ({path.stat().st_size/1e6:.1f} MB decompressed)", flush=True)
+        else:
+            _download_chunked(bucket, blob_name, path)
+        return
+
+    # --- Single-file path ---
+    blob = bucket.blob(blob_name)
+    blob.reload()
     size_mb = blob.size / 1e6 if blob.size else 0.0
-    print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
-    blob.download_to_filename(local_path)
-    print(f"  Done ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+    if gcs_uri.endswith(".gz"):
+        gz_path = path.with_suffix(path.suffix + ".gz")
+        print(f"  {gcs_uri} → {gz_path} ({size_mb:.1f} MB compressed) ...", flush=True)
+        blob.download_to_filename(str(gz_path))
+        print(f"  Decompressing {gz_path} → {path} ...", flush=True)
+        with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        gz_path.unlink()
+        print(f"  Done ({path.stat().st_size/1e6:.1f} MB decompressed)", flush=True)
+    else:
+        print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
+        blob.download_to_filename(local_path)
+        print(f"  Done ({path.stat().st_size/1e6:.1f} MB)", flush=True)
 
 
 def _download_if_missing(gcs_uri: str, local_path: str) -> None:
