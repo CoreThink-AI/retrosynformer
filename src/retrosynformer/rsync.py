@@ -24,7 +24,7 @@ def build_cmd(
     includes: Sequence[str] = DEFAULT_INCLUDES,
     *,
     archive: bool = True,
-    verbose: bool = True,
+    verbose: bool = False,
     dry_run: bool = False,
 ) -> list[str]:
     """Return the rsync argv list for syncing *includes* files under *src* → *dst*.
@@ -71,7 +71,7 @@ def sync(
     includes: Sequence[str] = DEFAULT_INCLUDES,
     *,
     archive: bool = True,
-    verbose: bool = True,
+    verbose: bool = False,
     dry_run: bool = False,
 ) -> int:
     """Run rsync to transfer *includes* files from *src* to *dst*.

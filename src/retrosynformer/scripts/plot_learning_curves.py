@@ -162,6 +162,7 @@ def main() -> None:
         except Exception as exc:
             print(f"  WARNING: could not load {db_path}: {exc}")
 
+    parts = [p for p in parts if not p.empty]
     if not parts:
         sys.exit("No completed trials found across all study.db files.")
 
