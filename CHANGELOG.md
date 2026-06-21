@@ -5,6 +5,14 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.32] — 2026-06-21
+
+**Auto-disable hipBLASLt on unsupported ROCm architectures.**
+
+- `retrosynformer/__init__.py`: new `_disable_hipblaslt_if_unsupported()` runs at package import time (before any submodule loads torch). Sets `TORCH_BLAS_PREFER_HIPBLASLT=0` when `HSA_OVERRIDE_GFX_VERSION` is present (non-standard arch such as Strix Halo) or when `rocminfo` reports a gfx name outside `{gfx90a, gfx940, gfx941, gfx942}`. No-ops if the env var is already set or `/opt/rocm` is absent.
+
+---
+
 ## [0.1.31] — 2026-06-21
 
 **Capture rsync output into `logger.info()` so `hplot` is silent by default.**
