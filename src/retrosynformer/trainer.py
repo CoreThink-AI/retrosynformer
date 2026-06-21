@@ -156,6 +156,8 @@ class RetroTrainer:
         actions_id_batch, actions_id_pred_batch, _action_preds_batch = [], [], []
 
         for i, data in enumerate(self.train_dataloader):
+            if i == 0:
+                print(f"[debug] train_one_epoch: first batch received", flush=True)
 
             (
                 states,
@@ -388,18 +390,24 @@ class RetroTrainer:
 
             _print_header()
 
+        print(f"[debug] entering epoch loop: start={start_epoch} end={n_epochs - 1} patience={patience} _es_metric={_es_metric} _es_best={_es_best:.6f}", flush=True)
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
+            print(f"[debug] epoch {epoch} start", flush=True)
 
             EpochLogger.begin_epoch(epoch)
+            print(f"[debug] epoch {epoch} train_one_epoch ...", flush=True)
             train_loss, train_action_accuracy, train_route_accuracy = (
                 self.train_one_epoch()
             )
+            print(f"[debug] epoch {epoch} train done: loss={train_loss:.5f} acc={train_action_accuracy:.4f}", flush=True)
             training_loss.append(train_loss)
             training_accuracy.append(train_action_accuracy)
             training_route_accuracy.append(train_route_accuracy)
 
+            print(f"[debug] epoch {epoch} eval ...", flush=True)
             valid_loss, valid_action_accuracy, valid_route_accuracy, _, _ = self.eval()
+            print(f"[debug] epoch {epoch} eval done: v_loss={valid_loss:.5f} v_acc={valid_action_accuracy:.4f}", flush=True)
             _metric_values = {
                 "valid_loss": valid_loss,
                 "valid_action_accuracy": valid_action_accuracy,
@@ -586,6 +594,7 @@ class RetroTrainer:
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
 
+            print(f"[debug] epoch {epoch} es_check: epochs_no_improve={epochs_no_improve} patience={patience} _es_val={_es_val:.6f} _es_best={_es_best:.6f}", flush=True)
             if patience > 0 and epochs_no_improve >= patience:
                 print(f"Early stopping: {_es_metric} has not improved for {patience} consecutive epochs.")
                 break
