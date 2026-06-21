@@ -1,13 +1,17 @@
 """hplot — dispatch to RetroSynFormer plot commands.
 
+On a CPU-only machine, syncs results/ from the remote GPU server (GPU_HOST in
+.env) before plotting so that train_progress.jsonl files are up to date.
+
 Usage
 -----
-    hplot learning [options]      # rs-plot-learning-curves
-    hplot training [options]      # rs-plot-learning-curves
-    hplot progress [options]      # rs-plot-learning-curves
-    hplot learn    [options]      # rs-plot-learning-curves
-    hplot train    [options]      # rs-plot-learning-curves
+    hplot [learning] [options]    # rs-plot-learning-curves (default subcommand)
+    hplot training   [options]    # rs-plot-learning-curves
+    hplot progress   [options]    # rs-plot-learning-curves
+    hplot learn      [options]    # rs-plot-learning-curves
+    hplot train      [options]    # rs-plot-learning-curves
 """
+import os
 import sys
 
 _LEARNING_CURVE_ALIASES = {
@@ -23,10 +27,49 @@ _LEARNING_CURVE_ALIASES = {
 _SUBCOMMANDS = _LEARNING_CURVE_ALIASES
 
 
+def _has_gpu() -> bool:
+    """Return True if a CUDA or ROCm GPU is available in this environment."""
+    try:
+        import torch
+        return torch.cuda.is_available() or bool(getattr(torch.version, "hip", None))
+    except ImportError:
+        return False
+
+
+def _sync_results_from_remote() -> None:
+    """Rsync results/ from GPU_HOST (set in .env) into the local results/ dir."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    gpu_host = os.environ.get("GPU_HOST", "").strip()
+    if not gpu_host:
+        print("hplot: GPU_HOST not set in .env — skipping remote sync", file=sys.stderr)
+        return
+
+    # GPU_HOST is an SCP-style remote path to the project root, e.g.
+    # hobs@taco:code/corethink/retrosynformer/
+    if not gpu_host.endswith("/"):
+        gpu_host += "/"
+    src = f"{gpu_host}results/"
+    dst = "results/"
+
+    print(f"hplot: CPU-only environment — syncing {src} → {dst}")
+    from retrosynformer.rsync import sync
+    rc = sync(src, dst)
+    if rc != 0:
+        print(f"hplot: rsync exited with code {rc} — proceeding with local data", file=sys.stderr)
+
+
 def main() -> None:
     # Strip a recognised subcommand; otherwise treat everything as learning-curves args (default).
     if len(sys.argv) > 1 and sys.argv[1] in _SUBCOMMANDS:
         sys.argv = [sys.argv[0]] + sys.argv[2:]
+
+    if not _has_gpu():
+        _sync_results_from_remote()
 
     from retrosynformer.scripts.plot_learning_curves import main as _main
     _main()
