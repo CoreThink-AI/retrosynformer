@@ -436,6 +436,10 @@ def main() -> None:
     rank_metric_short = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
     table_df = _build_table_df(top, rank_metric, rank_metric_short, rank_lower_is_better,
                                param_cols, optuna_col_set, show_estimate=estimates is not None)
+    _empty = {"", "-", "nan", "none", "null"}
+    table_df = table_df.loc[:, ~table_df.apply(
+        lambda col: col.map(lambda v: str(v).strip().lower() in _empty or (isinstance(v, float) and pd.isna(v))).all()
+    )]
     print(f"Top {len(top)} trials by {rank_metric}:")
     print(table_df.to_string(index=False))
     print()
