@@ -5,6 +5,21 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.28] — 2026-06-21
+
+**New `retrosynformer.dataframes` module consolidating trial/study DataFrame utilities.**
+
+- `src/retrosynformer/dataframes.py`: new shared module extracted from `plot_learning_curves` and deduplicated from `show_study` / `show_all_studies`.
+  - `load_jsonl`, `jsonl_rank_stats` — JSONL progress loading and per-trial metric extraction
+  - `jsonl_path`, `find_trial_base`, `load_run_params`, `trials_df_from_db` — trial directory helpers and enriched DB loader
+  - `build_trials_df`, `print_and_save_trials_table` — summary table construction and display
+  - `fmt_trial_value` — cell formatter (previously duplicated as `_fmt_value` in both show scripts)
+  - `SCIENTIFIC_COLS`, `SCORE_COLS`, `HIGHER_IS_BETTER`, `METRIC_COLS` — display constants (previously duplicated across show scripts)
+- `plot_learning_curves.py`: dropped ~130 lines; now imports from `dataframes`.
+- `show_study.py`, `show_all_studies.py`: dropped duplicate `_fmt_value` and display constants; import from `dataframes`.
+
+---
+
 ## [0.1.18] — 2026-06-18
 
 **Async metric extrapolation co-scheduled with route evaluation.**
