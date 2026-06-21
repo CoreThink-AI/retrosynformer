@@ -5,6 +5,19 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.30] — 2026-06-21
+
+**Logger migration across core library; `--debug`/`-v` flags on all `rs-*` commands.**
+
+- `scripts/__init__.py`: `add_log_args(parser)` and `configure_logging(args)` helpers; all 13 `rs-*` CLIs now accept `--debug` (DEBUG) and `-v/--verbose` (INFO); default remains WARNING.
+- `trainer.py`: replaced 13 `[debug] print()` calls with `logger.debug()`; moved Ctrl-C, init, save-folder, early-stopping, training-range, and route-eval-trigger prints to `logger.info/debug`.
+- `runner.py`: moved 36 status prints (overrides, milestones, data-split stats, resume messages) to `logger.info/debug`.
+- `inference.py`, `data.py`, `environment.py`, `dropout.py`, `rsync.py`, `utils/utils.py`, `utils/evaluation.py`, `dashboard/sync.py`: remaining status prints converted; new module loggers added where missing.
+- `plot_learning_curves.py`: filter empty DataFrames before `pd.concat` to fix `FutureWarning` about all-NA column dtype inference.
+- `rsync.py`: `verbose` default changed `True → False` in `build_cmd()` and `sync()` so rsync no longer prints every transferred filename by default.
+
+---
+
 ## [0.1.29] — 2026-06-21
 
 **Resume guard for `rs-train --resume` and `rs-hypertune --resume TRIAL` flag.**
