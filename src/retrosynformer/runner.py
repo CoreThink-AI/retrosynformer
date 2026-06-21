@@ -386,6 +386,27 @@ def main(
         print(f"Start epoch overridden to {derived_start_epoch}")
     start_epoch = derived_start_epoch
 
+    if resume and derived_start_epoch >= config["train"]["n_epochs"]:
+        configured_n = config["train"]["n_epochs"]
+        new_n = int(configured_n * 1.5)
+        print(
+            f"\nWARNING: Already trained {derived_start_epoch} epoch(s), but n_epochs={configured_n} in config.\n"
+            f"There is nothing left to train — the run will exit immediately.\n"
+            f"Suggested fix: increase n_epochs to {new_n} (1.5×)."
+        )
+        try:
+            answer = input(f"Update n_epochs from {configured_n} → {new_n} in {config_path}? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer == "y":
+            config["train"]["n_epochs"] = new_n
+            with open(config_path, "w") as _f:
+                yaml.dump(config, _f, default_flow_style=False)
+            print(f"Updated {config_path}: n_epochs={new_n}")
+        else:
+            print("Config unchanged. Exiting — pass -n/--n_epochs to override without editing the file.")
+            return
+
     # Write all effective values back into config before saving so that
     # model.config.yaml always reflects what was actually used.
     config["train"]["start_epoch"] = derived_start_epoch
