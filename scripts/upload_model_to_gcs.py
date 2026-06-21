@@ -23,24 +23,40 @@ import math
 import shutil
 import sys
 import tempfile
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-
 CHUNK_SIZE_DEFAULT = 50 * 1024 * 1024  # 50 MB
+
+_thread_local = threading.local()
 
 
 def _gcs_client(project: str | None = None):
-    """Return an authenticated GCS client using gcloud user token (bypasses stale ADC)."""
+    """Return a per-thread GCS client using gcloud user token.
+
+    Creates one client per thread so credential state is never shared across
+    concurrent uploads (sharing a Credentials(token=…) object across threads
+    triggers a refresh that fails because the object has no refresh_token).
+    """
     import subprocess
+
     from google.cloud import storage
     from google.oauth2.credentials import Credentials
+
+    key = f"client_{project}"
+    client = getattr(_thread_local, key, None)
+    if client is not None:
+        return client
     try:
         token = subprocess.check_output(
             ["gcloud", "auth", "print-access-token"], stderr=subprocess.PIPE
         ).decode().strip()
         creds = Credentials(token=token)
-        return storage.Client(credentials=creds, project=project)
+        client = storage.Client(credentials=creds, project=project)
+        setattr(_thread_local, key, client)
+        return client
     except Exception as e:
         sys.exit(f"Cannot get gcloud token (run `gcloud auth login`): {e}")
 
@@ -53,18 +69,61 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _upload_chunk(bucket, blob_prefix: str, idx: int, data: bytes, skip_existing: bool) -> tuple[int, int]:
+def _md5_b64(data: bytes) -> str:
+    """Return base64-encoded MD5 digest matching the format GCS stores in blob.md5_hash."""
+    import base64
+    return base64.b64encode(hashlib.md5(data).digest()).decode()
+
+
+_PROGRESS_CHUNK = 4 * 1024 * 1024  # GCS resumable-upload increment; controls progress granularity
+
+
+class _ProgressReader:
+    """File-like wrapper that prints per-chunk upload progress and rate as the GCS client reads it."""
+
+    def __init__(self, data: bytes, idx: int):
+        self._buf = io.BytesIO(data)
+        self._total = len(data)
+        self._idx = idx
+        self._sent = 0
+        self._t0 = time.perf_counter()
+
+    def read(self, n=-1):
+        block = self._buf.read(n)
+        self._sent += len(block)
+        elapsed = max(time.perf_counter() - self._t0, 1e-9)
+        rate = self._sent / elapsed / 1e6
+        pct = 100 * self._sent / self._total
+        print(f"    chunk {self._idx:04d}  {pct:5.1f}%  {self._sent/1e6:.0f}/{self._total/1e6:.0f} MB  {rate:.3f} MB/s", flush=True)
+        return block
+
+    def seek(self, pos, whence=0):
+        return self._buf.seek(pos, whence)
+
+    def tell(self):
+        return self._buf.tell()
+
+
+def _upload_chunk(bucket_name: str, blob_prefix: str, idx: int, data: bytes, skip_existing: bool) -> tuple[int, int]:
+    client = _gcs_client(project=bucket_name)
+    bucket = client.bucket(bucket_name)
     blob = bucket.blob(f"{blob_prefix}.chunk.{idx:04d}")
     if skip_existing:
         try:
             blob.reload()
-            if blob.size == len(data):
-                print(f"  chunk {idx:04d}: already present ({len(data)/1e6:.1f} MB), skipping", flush=True)
+            if blob.size == len(data) and blob.md5_hash == _md5_b64(data):
+                print(f"  chunk {idx:04d}: already present and verified ({len(data)/1e6:.1f} MB), skipping", flush=True)
                 return idx, len(data)
+            elif blob.size is not None:
+                print(f"  chunk {idx:04d}: exists but content differs (size={blob.size} md5 mismatch), re-uploading", flush=True)
         except Exception:
             pass
-    blob.upload_from_string(data, timeout=1800, retry=_retry_policy())
-    print(f"  chunk {idx:04d}: uploaded {len(data)/1e6:.1f} MB", flush=True)
+    blob.chunk_size = _PROGRESS_CHUNK  # forces resumable upload in 4 MB increments
+    reader = _ProgressReader(data, idx)
+    blob.upload_from_file(reader, size=len(data), timeout=1800, retry=_retry_policy())
+    elapsed = time.perf_counter() - reader._t0
+    rate = len(data) / elapsed / 1e6
+    print(f"  chunk {idx:04d}: done  {len(data)/1e6:.1f} MB  avg {rate:.3f} MB/s", flush=True)
     return idx, len(data)
 
 
@@ -114,9 +173,6 @@ def upload_chunked(
     sha = _sha256(source_path)
     print(f"SHA256: {sha}", flush=True)
 
-    client = _gcs_client(project=bucket_name)
-    bucket = client.bucket(bucket_name)
-
     # Read entire file into memory in chunks and upload in parallel.
     # For a 1.1 GB file this is fine; for larger models stream from disk.
     chunk_data = []
@@ -130,18 +186,26 @@ def upload_chunked(
     assert len(chunk_data) == n_chunks
 
     print(f"Uploading {n_chunks} chunks …", flush=True)
+    done_count = 0
+    bytes_uploaded = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_upload_chunk, bucket, blob_name, i, data, skip_existing): i
+            executor.submit(_upload_chunk, bucket_name, blob_name, i, data, skip_existing): i
             for i, data in enumerate(chunk_data)
         }
+        print(f"  {len(futures)} futures submitted, waiting …", flush=True)
         failed = []
         for fut in as_completed(futures):
+            idx = futures[fut]
             try:
-                fut.result()
+                _, nbytes = fut.result()
+                done_count += 1
+                bytes_uploaded += nbytes
+                pct = 100 * done_count / n_chunks
+                print(f"  [{done_count}/{n_chunks}  {pct:5.1f}%  {bytes_uploaded/1e9:.3f} GB]  chunk {idx:04d}: done", flush=True)
             except Exception as exc:
-                idx = futures[fut]
-                print(f"  chunk {idx:04d}: FAILED — {exc}", flush=True)
+                done_count += 1
+                print(f"  [{done_count}/{n_chunks}]  chunk {idx:04d}: FAILED — {exc}", flush=True)
                 failed.append(idx)
 
     if failed:
@@ -149,7 +213,8 @@ def upload_chunked(
 
     # Write manifest last — its presence signals a complete upload.
     manifest = f"{n_chunks}\n{total_bytes}\n{sha}\n"
-    bucket.blob(f"{blob_name}.manifest").upload_from_string(manifest, timeout=60)
+    client = _gcs_client(project=bucket_name)
+    client.bucket(bucket_name).blob(f"{blob_name}.manifest").upload_from_string(manifest, timeout=60)
     print(f"Manifest written: {blob_name}.manifest", flush=True)
     print(f"Done. {n_chunks} chunks, {total_bytes/1e9:.3f} GB total.", flush=True)
 

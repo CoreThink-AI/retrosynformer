@@ -93,8 +93,10 @@ class RetroTrainer:
         )
         lr_scheduler_patience = self.config["train"].get("lr_scheduler_patience", 10)
         lr_scheduler_factor = self.config["train"].get("lr_scheduler_factor", 0.1)
+        self._lr_metric = self.config["train"].get("lr_scheduler_metric", "valid_loss")
+        _lr_mode = "min" if "loss" in self._lr_metric else "max"
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, "min", patience=lr_scheduler_patience, factor=lr_scheduler_factor
+            self.optimizer, _lr_mode, patience=lr_scheduler_patience, factor=lr_scheduler_factor
         )
         self.loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
         self._n_lr_reductions = 0
@@ -154,6 +156,8 @@ class RetroTrainer:
         actions_id_batch, actions_id_pred_batch, _action_preds_batch = [], [], []
 
         for i, data in enumerate(self.train_dataloader):
+            if i == 0:
+                print(f"[debug] train_one_epoch: first batch received", flush=True)
 
             (
                 states,
@@ -316,7 +320,9 @@ class RetroTrainer:
             os.makedirs(save_folder)
             print("Directory created successfully.")
 
-        lowest_valid_loss = 1000
+        _es_metric = self.config["train"].get("early_stopping_metric", "valid_action_accuracy")
+        _es_minimize = "loss" in _es_metric
+        _es_best = float("inf") if _es_minimize else 0.0
         patience = self.config["train"].get("early_stopping_patience", 0)
         epochs_no_improve = 0
         fraction_targets_solved = None
@@ -346,8 +352,9 @@ class RetroTrainer:
                     restart_idx = i
             current_run = self.result_df.iloc[restart_idx:]
             current_run = current_run[current_run["epoch"] < start_epoch] if start_epoch > 0 else current_run
-            lowest_valid_loss = current_run["valid_loss"].min() if len(current_run) > 0 else 1000
-            print(f"Restored training history ({len(self.result_df)} epochs). Best valid loss (current run): {lowest_valid_loss:.6f}")
+            if len(current_run) > 0 and _es_metric in current_run.columns:
+                _es_best = current_run[_es_metric].min() if _es_minimize else current_run[_es_metric].max()
+            print(f"Restored training history ({len(self.result_df)} epochs). Best {_es_metric} (current run): {_es_best:.6f}")
         if os.path.exists(eval_path):
             with open(eval_path) as f:
                 self.results_eval = json.load(f)
@@ -383,20 +390,31 @@ class RetroTrainer:
 
             _print_header()
 
+        print(f"[debug] entering epoch loop: start={start_epoch} end={n_epochs - 1} patience={patience} _es_metric={_es_metric} _es_best={_es_best:.6f}", flush=True)
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
+            print(f"[debug] epoch {epoch} start", flush=True)
 
             EpochLogger.begin_epoch(epoch)
+            print(f"[debug] epoch {epoch} train_one_epoch ...", flush=True)
             train_loss, train_action_accuracy, train_route_accuracy = (
                 self.train_one_epoch()
             )
+            print(f"[debug] epoch {epoch} train done: loss={train_loss:.5f} acc={train_action_accuracy:.4f}", flush=True)
             training_loss.append(train_loss)
             training_accuracy.append(train_action_accuracy)
             training_route_accuracy.append(train_route_accuracy)
 
+            print(f"[debug] epoch {epoch} eval ...", flush=True)
             valid_loss, valid_action_accuracy, valid_route_accuracy, _, _ = self.eval()
+            print(f"[debug] epoch {epoch} eval done: v_loss={valid_loss:.5f} v_acc={valid_action_accuracy:.4f}", flush=True)
+            _metric_values = {
+                "valid_loss": valid_loss,
+                "valid_action_accuracy": valid_action_accuracy,
+                "valid_route_accuracy": valid_route_accuracy,
+            }
             lr_before_step = self.optimizer.param_groups[0]["lr"]
-            self.scheduler.step(valid_loss)
+            self.scheduler.step(_metric_values.get(self._lr_metric, valid_loss))
             current_lr = self.optimizer.param_groups[0]["lr"]
             if current_lr < lr_before_step:
                 self._n_lr_reductions += 1
@@ -420,10 +438,11 @@ class RetroTrainer:
 
             # When this epoch is the new best, copy model.last.pth → model.pth
             # atomically — avoids serialising state_dict a second time.
-            is_best = valid_loss < lowest_valid_loss
+            _es_val = _metric_values.get(_es_metric, valid_action_accuracy)
+            is_best = (_es_val < _es_best) if _es_minimize else (_es_val > _es_best)
             if is_best:
                 model_path = save_folder + "/model.pth"
-                lowest_valid_loss = valid_loss
+                _es_best = _es_val
                 tmp_fd2, tmp_path2 = tempfile.mkstemp(dir=save_folder, suffix=".pth.tmp")
                 try:
                     os.close(tmp_fd2)
@@ -575,8 +594,9 @@ class RetroTrainer:
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
 
+            print(f"[debug] epoch {epoch} es_check: epochs_no_improve={epochs_no_improve} patience={patience} _es_val={_es_val:.6f} _es_best={_es_best:.6f}", flush=True)
             if patience > 0 and epochs_no_improve >= patience:
-                print(f"Early stopping: valid_loss has not improved for {patience} consecutive epochs.")
+                print(f"Early stopping: {_es_metric} has not improved for {patience} consecutive epochs.")
                 break
 
             if _interrupted:

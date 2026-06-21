@@ -26,6 +26,7 @@ class PredictRequest(BaseModel):
 
     smiles: str
     beam_width: int = Field(default=10, ge=1, le=50)
+    max_depth: Optional[int] = Field(default=None, ge=1, le=20, description="Max retrosynthesis depth (overrides model config; default is config value, typically 6)")
     target_reward: float = Field(default=0.5, ge=0.0, le=1.0)
     sort_on: Literal["trajectory_prob", "total_reward"] = "trajectory_prob"
 

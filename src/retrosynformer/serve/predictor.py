@@ -172,6 +172,7 @@ class ModelPredictor:
         beam_width: int,
         target_reward: float,
         sort_on: str,
+        max_depth: int | None = None,
     ) -> dict:
         """Run beam search and return a plain dict matching PredictResponse (minus smiles).
 
@@ -180,7 +181,7 @@ class ModelPredictor:
         """
         t0 = time.perf_counter()
         with self._lock:
-            beams = self._predictor.predict_all_routes(smiles, beam_width, target_reward)
+            beams = self._predictor.predict_all_routes(smiles, beam_width, target_reward, max_depth=max_depth)
         elapsed = time.perf_counter() - t0
 
         if sort_on == "total_reward":
