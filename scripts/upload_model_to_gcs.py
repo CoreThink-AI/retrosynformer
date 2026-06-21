@@ -69,6 +69,12 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _md5_b64(data: bytes) -> str:
+    """Return base64-encoded MD5 digest matching the format GCS stores in blob.md5_hash."""
+    import base64
+    return base64.b64encode(hashlib.md5(data).digest()).decode()
+
+
 _PROGRESS_CHUNK = 4 * 1024 * 1024  # GCS resumable-upload increment; controls progress granularity
 
 
@@ -105,9 +111,11 @@ def _upload_chunk(bucket_name: str, blob_prefix: str, idx: int, data: bytes, ski
     if skip_existing:
         try:
             blob.reload()
-            if blob.size == len(data):
-                print(f"  chunk {idx:04d}: already present ({len(data)/1e6:.1f} MB), skipping", flush=True)
+            if blob.size == len(data) and blob.md5_hash == _md5_b64(data):
+                print(f"  chunk {idx:04d}: already present and verified ({len(data)/1e6:.1f} MB), skipping", flush=True)
                 return idx, len(data)
+            elif blob.size is not None:
+                print(f"  chunk {idx:04d}: exists but content differs (size={blob.size} md5 mismatch), re-uploading", flush=True)
         except Exception:
             pass
     blob.chunk_size = _PROGRESS_CHUNK  # forces resumable upload in 4 MB increments
