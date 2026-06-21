@@ -35,7 +35,7 @@ from retrosynformer.dataframes import (
     print_and_save_trials_table,
     trials_df_from_db,
 )
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 METRICS = [
     "valid_loss",
@@ -111,7 +111,9 @@ def main() -> None:
                         help="Show polynomial extrapolation of the final-epoch objective: "
                              "adds obj_estim column to the table and an x marker on each "
                              "trial's curve at the projected target epoch.")
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     raw_specs: list[str] = args.metrics or ["valid_action_accuracy"]
     metrics: list[str] = []

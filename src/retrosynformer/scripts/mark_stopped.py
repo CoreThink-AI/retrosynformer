@@ -23,7 +23,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 
 RESULTS_ROOT = "results"
@@ -182,7 +182,9 @@ def main() -> None:
         "--dry-run", "-n", action="store_true",
         help="Show what would be changed without writing anything",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     threshold = 0.0 if args.mark_all else args.threshold
     zombies = _find_zombies(threshold, args.study)

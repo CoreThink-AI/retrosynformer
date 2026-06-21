@@ -15,7 +15,7 @@ import sys
 import pandas as pd
 
 from retrosynformer.dataframes import HIGHER_IS_BETTER, METRIC_COLS, fmt_trial_value
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 from retrosynformer.study import (
     concat,
     dfs_to_trials_df,
@@ -46,7 +46,9 @@ def main():
         "--root", default=".",
         help="Root directory for the glob (default: current directory)",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     paths = sorted(glob.glob(os.path.join(args.root, args.pattern), recursive=True))
     if not paths:

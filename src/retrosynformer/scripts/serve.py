@@ -15,7 +15,7 @@ Required environment variables (set before running):
 
 import argparse
 import os
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 
 def main() -> None:
@@ -36,7 +36,9 @@ def main() -> None:
         default=1,
         help="Number of uvicorn worker processes (default: 1; GPU builds must use 1)",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     try:
         import uvicorn

@@ -15,7 +15,7 @@ import argparse
 import sys
 
 from retrosynformer.rsync import DEFAULT_INCLUDES, sync
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 DEFAULT_HOST = "taco"
 DEFAULT_REMOTE_PATH = "code/corethink/retrosynformer/results/"
@@ -51,7 +51,9 @@ def main() -> None:
         "--quiet", "-q", action="store_true",
         help="Suppress rsync file-by-file output",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     includes = list(DEFAULT_INCLUDES)
     if args.include:

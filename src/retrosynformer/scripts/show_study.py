@@ -13,7 +13,7 @@ import sys
 import pandas as pd
 
 from retrosynformer.dataframes import HIGHER_IS_BETTER, METRIC_COLS, fmt_trial_value
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 from retrosynformer.study import (
     dfs_to_trials_df,
     inject_estimated_scores,
@@ -34,7 +34,9 @@ def main():
         "--ascending", action=argparse.BooleanOptionalAction, default=None,
         help="Sort order (default: ascending for trial, descending for score).",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     if not os.path.exists(args.db):
         sys.exit(f"Not found: {args.db}")

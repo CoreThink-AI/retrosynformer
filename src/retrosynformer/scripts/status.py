@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from retrosynformer.rsync import sync
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 EXTRA_INCLUDES = [
     "pred_routes_train_progress.json",
@@ -169,7 +169,9 @@ def main() -> None:
                         help=f"Local results directory (default: {DEFAULT_LOCAL})")
     parser.add_argument("--top", type=int, default=None,
                         help="Show only the N most recently updated trials")
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     if not args.no_sync:
         from retrosynformer.rsync import DEFAULT_INCLUDES

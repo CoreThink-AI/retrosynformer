@@ -3,7 +3,7 @@
 import argparse
 
 from retrosynformer.runner import main as runner_main
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 
 def main():
@@ -71,7 +71,9 @@ def main():
         "--results-path", type=str, default=None, dest="results_path",
         help="Override train.results_path from config",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
     runner_main(
         config_path=args.config_path,
         resume=args.resume,

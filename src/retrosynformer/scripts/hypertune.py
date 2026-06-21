@@ -72,7 +72,7 @@ import retrosynformer.trainer as _trainer_mod
 from retrosynformer.etl import mask_dict_to_list
 from retrosynformer.runner import main as train
 from retrosynformer.runner import read_config
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 CONFIG_PATH_DEFAULT = "results/config.yaml"
 
@@ -661,7 +661,9 @@ def main():
             "resume the latest trial_NNN directory found on disk."
         ),
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     # Preprocess then validate config eagerly so bad configs fail before any study setup.
     _validate_config(_preprocess_optuna_config(read_config(args.config_path)), n_trials=args.n_trials)

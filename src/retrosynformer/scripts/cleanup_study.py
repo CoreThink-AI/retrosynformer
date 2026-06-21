@@ -33,7 +33,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 # ---------------------------------------------------------------------------
 # Metric extraction
@@ -317,7 +317,9 @@ def main() -> None:
         default=False,
         help="Show what would be changed but make no writes to study.db.",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     if args.study_dir is not None:
         db_paths = [args.study_dir / "study.db"]

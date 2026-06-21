@@ -3,7 +3,7 @@
 import argparse
 import json
 import time
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 
 def main():
@@ -13,7 +13,9 @@ def main():
         "jsonl", nargs="?", default="results/train_progress.jsonl",
         help="Path to train_progress.jsonl (default: results/train_progress.jsonl)",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     path = args.jsonl
     print(f"{'ep':>4}  {'train':>7}  {'valid':>7}  {'route':>7}  {'loss':>10}  {'secs':>5}")

@@ -12,7 +12,7 @@ Usage
 """
 import argparse
 import sys
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import configure_logging, print_banner
 
 
 def main() -> None:
@@ -37,8 +37,10 @@ def main() -> None:
                         help="Cloud Run service URL for health panel")
     parser.add_argument("--no-sync", action="store_true",
                         help="Skip initial sync on startup")
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--debug", action="store_true", help="Flask debug mode + log level DEBUG")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Set log level to INFO")
     args = parser.parse_args()
+    configure_logging(args)
 
     app = create_app(
         results_root=args.results_root,

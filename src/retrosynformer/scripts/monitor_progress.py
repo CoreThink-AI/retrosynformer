@@ -10,7 +10,7 @@ import json
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import pandas as pd
-from retrosynformer.scripts import print_banner
+from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 
 def main():
@@ -20,7 +20,9 @@ def main():
         "jsonl", nargs="?", default="results/train_progress.jsonl",
         help="Path to train_progress.jsonl (default: results/train_progress.jsonl)",
     )
+    add_log_args(parser)
     args = parser.parse_args()
+    configure_logging(args)
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
 
