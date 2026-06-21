@@ -12,9 +12,11 @@ Usage
 """
 import argparse
 import sys
+from retrosynformer.scripts import print_banner
 
 
 def main() -> None:
+    print_banner()
     try:
         from retrosynformer.dashboard import create_app
     except ImportError as e:

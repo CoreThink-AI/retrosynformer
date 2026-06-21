@@ -3,9 +3,11 @@
 import argparse
 
 from retrosynformer.runner import main as runner_main
+from retrosynformer.scripts import print_banner
 
 
 def main():
+    print_banner()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-c", "--config_path", type=str, required=True)
     parser.add_argument(

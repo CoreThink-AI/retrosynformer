@@ -23,6 +23,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from retrosynformer.scripts import print_banner
 
 
 RESULTS_ROOT = "results"
@@ -160,6 +161,7 @@ def _mark_dashboard_stopped(study_name: str, trial_number: int, now_str: str, dr
 
 
 def main() -> None:
+    print_banner()
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,

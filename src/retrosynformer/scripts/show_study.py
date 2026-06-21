@@ -12,6 +12,7 @@ import sys
 
 import pandas as pd
 
+from retrosynformer.scripts import print_banner
 from retrosynformer.study import (
     dfs_to_trials_df,
     inject_estimated_scores,
@@ -40,6 +41,7 @@ def _fmt_value(col: str, val) -> str:
 
 
 def main():
+    print_banner()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("db", help="Path to Optuna study.db SQLite file")
     parser.add_argument(

@@ -33,6 +33,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from retrosynformer.scripts import print_banner
 
 # ---------------------------------------------------------------------------
 # Metric extraction
@@ -278,6 +279,7 @@ def cleanup_study(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    print_banner()
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
