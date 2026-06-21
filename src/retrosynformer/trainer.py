@@ -88,6 +88,7 @@ class RetroTrainer:
         lr = self.config["optimizer"]["lr"]
         momentum = self.config["optimizer"]["momentum"]
         self.model = model.to(self.device)
+        print(f"[debug] trainer device={self.device}  model on {next(self.model.parameters()).device}", flush=True)
         self.optimizer = torch.optim.SGD(
             self.model.parameters(), lr=lr, momentum=momentum
         )
@@ -161,6 +162,7 @@ class RetroTrainer:
 
             (
                 states,
+
                 actions,
                 actions_id,
                 rewards,
@@ -169,9 +171,14 @@ class RetroTrainer:
                 rtgs,
             ), target_routes = self.unpack_data(data)
 
+            if i == 0:
+                print(f"[debug] batch 0 tensors: states={states.device} actions={actions.device} rtgs={rtgs.device}", flush=True)
+
             self.model.train(True)
             self.optimizer.zero_grad()
 
+            if i == 0:
+                print(f"[debug] batch 0: starting forward pass", flush=True)
             _, action_preds, _ = self.model(
                 states=states,
                 actions=actions,
@@ -182,10 +189,14 @@ class RetroTrainer:
                 attention_mask=attention_mask,
             )
 
+            if i == 0:
+                print(f"[debug] batch 0: forward done, starting backward", flush=True)
             actions_id_pred = action_preds.argmax(dim=-1)
 
             loss = self.loss_fn(action_preds, actions) / attention_mask.sum()
             loss.backward()
+            if i == 0:
+                print(f"[debug] batch 0: backward done", flush=True)
             # Compute gradient norm before the optimizer step clears the graph.
             # clip_grad_norm_ with inf max_norm returns the norm without clipping.
             total_grad_norm += torch.nn.utils.clip_grad_norm_(
