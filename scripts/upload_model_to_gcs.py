@@ -18,29 +18,43 @@ Usage (from repo root):
 import argparse
 import gzip
 import hashlib
-import io
 import math
 import shutil
 import sys
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-
 CHUNK_SIZE_DEFAULT = 50 * 1024 * 1024  # 50 MB
+
+_thread_local = threading.local()
 
 
 def _gcs_client(project: str | None = None):
-    """Return an authenticated GCS client using gcloud user token (bypasses stale ADC)."""
+    """Return a per-thread GCS client using gcloud user token.
+
+    Creates one client per thread so credential state is never shared across
+    concurrent uploads (sharing a Credentials(token=…) object across threads
+    triggers a refresh that fails because the object has no refresh_token).
+    """
     import subprocess
+
     from google.cloud import storage
     from google.oauth2.credentials import Credentials
+
+    key = f"client_{project}"
+    client = getattr(_thread_local, key, None)
+    if client is not None:
+        return client
     try:
         token = subprocess.check_output(
             ["gcloud", "auth", "print-access-token"], stderr=subprocess.PIPE
         ).decode().strip()
         creds = Credentials(token=token)
-        return storage.Client(credentials=creds, project=project)
+        client = storage.Client(credentials=creds, project=project)
+        setattr(_thread_local, key, client)
+        return client
     except Exception as e:
         sys.exit(f"Cannot get gcloud token (run `gcloud auth login`): {e}")
 
@@ -53,7 +67,9 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _upload_chunk(bucket, blob_prefix: str, idx: int, data: bytes, skip_existing: bool) -> tuple[int, int]:
+def _upload_chunk(bucket_name: str, blob_prefix: str, idx: int, data: bytes, skip_existing: bool) -> tuple[int, int]:
+    client = _gcs_client(project=bucket_name)
+    bucket = client.bucket(bucket_name)
     blob = bucket.blob(f"{blob_prefix}.chunk.{idx:04d}")
     if skip_existing:
         try:
@@ -114,9 +130,6 @@ def upload_chunked(
     sha = _sha256(source_path)
     print(f"SHA256: {sha}", flush=True)
 
-    client = _gcs_client(project=bucket_name)
-    bucket = client.bucket(bucket_name)
-
     # Read entire file into memory in chunks and upload in parallel.
     # For a 1.1 GB file this is fine; for larger models stream from disk.
     chunk_data = []
@@ -132,7 +145,7 @@ def upload_chunked(
     print(f"Uploading {n_chunks} chunks …", flush=True)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_upload_chunk, bucket, blob_name, i, data, skip_existing): i
+            executor.submit(_upload_chunk, bucket_name, blob_name, i, data, skip_existing): i
             for i, data in enumerate(chunk_data)
         }
         failed = []
@@ -149,7 +162,8 @@ def upload_chunked(
 
     # Write manifest last — its presence signals a complete upload.
     manifest = f"{n_chunks}\n{total_bytes}\n{sha}\n"
-    bucket.blob(f"{blob_name}.manifest").upload_from_string(manifest, timeout=60)
+    client = _gcs_client(project=bucket_name)
+    client.bucket(bucket_name).blob(f"{blob_name}.manifest").upload_from_string(manifest, timeout=60)
     print(f"Manifest written: {blob_name}.manifest", flush=True)
     print(f"Done. {n_chunks} chunks, {total_bytes/1e9:.3f} GB total.", flush=True)
 
