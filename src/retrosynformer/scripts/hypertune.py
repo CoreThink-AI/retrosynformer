@@ -578,6 +578,21 @@ def objective(trial: optuna.Trial, config_path: str, n_epochs: int, dataset: str
 # Interrupt cleanup
 # ---------------------------------------------------------------------------
 
+def _find_last_trial_number(results_base: str) -> int:
+    """Return the highest trial_NNN directory number found in results_base."""
+    import re
+    numbers = [
+        int(m.group(1))
+        for name in os.listdir(results_base)
+        if os.path.isdir(os.path.join(results_base, name))
+        for m in [re.fullmatch(r"trial_(\d+)", name)]
+        if m
+    ]
+    if not numbers:
+        raise ValueError(f"No trial_NNN directories found in {results_base}")
+    return max(numbers)
+
+
 def _backfill_failed_trials(results_base: str) -> None:
     """Backfill Optuna objective values for FAIL trials that have training data.
 
@@ -638,6 +653,14 @@ def main():
         "--storage", default=None,
         help="Optuna storage URL (default: sqlite:///results/hypertune-{study_name}/study.db)",
     )
+    parser.add_argument(
+        "--resume", type=int, nargs="?", const=-1, default=None, metavar="TRIAL",
+        help=(
+            "Resume a partially-trained trial before continuing the study. "
+            "Pass a trial number (e.g. --resume 3), or omit the number to "
+            "resume the latest trial_NNN directory found on disk."
+        ),
+    )
     args = parser.parse_args()
 
     # Preprocess then validate config eagerly so bad configs fail before any study setup.
@@ -679,6 +702,17 @@ def main():
                 study.enqueue_trial(combo)
         else:
             study.enqueue_trial(BASELINE_TRIAL)
+
+    if args.resume is not None:
+        trial_num = args.resume if args.resume >= 0 else _find_last_trial_number(results_base)
+        trial_config = os.path.join(results_base, f"trial_{trial_num:03d}", "model.config.yaml")
+        if not os.path.exists(trial_config):
+            raise FileNotFoundError(f"No config found for trial {trial_num}: {trial_config}")
+        print(f"\n### Resuming trial {trial_num} from {trial_config}")
+        _write({"event": "trial_resume", "trial": {"number": trial_num, "config": trial_config}}, run_jsonl)
+        train(config_path=trial_config, resume=True, eval_routes_at_end=True,
+              trial_number=trial_num, study_name=args.study_name)
+        _backfill_failed_trials(results_base)
 
     def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
         """Write a completion record to run.jsonl after each trial."""
