@@ -12,9 +12,13 @@ Paper converted to markdown: /home/hobs/code/corethink/retrosynformer/docs/d5dd0
 ## Setup
 
 ```bash
-uv sync --extra cpu            # CPU-only (or --extra rocm for AMD GPU)
+uv pip install --editable ".[cpu]"   # CPU-only
+uv pip install --editable ".[rocm]"  # AMD ROCm GPU (taco)
+uv pip install --editable ".[cuda]"  # NVIDIA CUDA GPU
 source .venv/bin/activate
 ```
+
+**Always use `uv pip install --editable` rather than `uv sync`.** The lockfile is generated on a non-ROCm machine and locks the CPU torch build; `uv sync --extra rocm` therefore installs CPU torch even on taco. `uv pip install` bypasses the lockfile and resolves torch from the correct index for the chosen extra.
 
 Python ≥ 3.10 required. Key pinned deps: `reaction-utils==1.9.3`, `rdchiral` (from git at `../rdchiral`). `torch` is **not** in base deps — must pick one extra: `cpu`, `rocm`, or `cuda`.
 

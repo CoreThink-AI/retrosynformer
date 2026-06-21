@@ -5,15 +5,14 @@ import shutil
 import signal
 import tempfile
 import time
-from datetime import datetime, timezone
-
-from .async_eval import AsyncRouteEvalPool
-from .epoch_logger import EpochLogger
+from datetime import datetime
 
 import pandas as pd
 import torch
 from sklearn.metrics import accuracy_score
 
+from .async_eval import AsyncRouteEvalPool
+from .epoch_logger import EpochLogger
 from .inference import RoutePredictor
 from .utils import utils
 
@@ -92,8 +91,8 @@ class RetroTrainer:
         self.optimizer = torch.optim.SGD(
             self.model.parameters(), lr=lr, momentum=momentum
         )
-        lr_scheduler_patience = self.config["train"].get("lr_scheduler_patience", 10)
-        lr_scheduler_factor = self.config["train"].get("lr_scheduler_factor", 0.1)
+        lr_scheduler_patience = self.config["train"].get("lr_scheduler_patience", 5)
+        lr_scheduler_factor = self.config["train"].get("lr_scheduler_factor", 0.75)
         self._lr_metric = self.config["train"].get("lr_scheduler_metric", "valid_loss")
         _lr_mode = "min" if "loss" in self._lr_metric else "max"
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -158,7 +157,7 @@ class RetroTrainer:
 
         for i, data in enumerate(self.train_dataloader):
             if i == 0:
-                print(f"[debug] train_one_epoch: first batch received", flush=True)
+                print("[debug] train_one_epoch: first batch received", flush=True)
 
             (
                 states,
@@ -178,7 +177,7 @@ class RetroTrainer:
             self.optimizer.zero_grad()
 
             if i == 0:
-                print(f"[debug] batch 0: starting forward pass", flush=True)
+                print("[debug] batch 0: starting forward pass", flush=True)
             _, action_preds, _ = self.model(
                 states=states,
                 actions=actions,
@@ -190,13 +189,13 @@ class RetroTrainer:
             )
 
             if i == 0:
-                print(f"[debug] batch 0: forward done, starting backward", flush=True)
+                print("[debug] batch 0: forward done, starting backward", flush=True)
             actions_id_pred = action_preds.argmax(dim=-1)
 
             loss = self.loss_fn(action_preds, actions) / attention_mask.sum()
             loss.backward()
             if i == 0:
-                print(f"[debug] batch 0: backward done", flush=True)
+                print("[debug] batch 0: backward done", flush=True)
             # Compute gradient norm before the optimizer step clears the graph.
             # clip_grad_norm_ with inf max_norm returns the norm without clipping.
             total_grad_norm += torch.nn.utils.clip_grad_norm_(
