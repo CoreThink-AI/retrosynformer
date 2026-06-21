@@ -6,8 +6,11 @@ DEFAULT_INCLUDES   list[str]   filenames included by default
 build_cmd(...)     -> list[str]   build the rsync argv list
 sync(...)          -> int          run rsync, return exit code
 """
+import logging
 import subprocess
 from typing import Sequence
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_INCLUDES: list[str] = [
     "study.db",
@@ -76,6 +79,6 @@ def sync(
     Returns the rsync exit code (0 = success).
     """
     cmd = build_cmd(src, dst, includes, archive=archive, verbose=verbose, dry_run=dry_run)
-    print("Running:", " ".join(cmd))
+    logger.info("Running: %s", " ".join(cmd))
     result = subprocess.run(cmd)
     return result.returncode

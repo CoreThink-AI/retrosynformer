@@ -48,7 +48,7 @@ def init_data(config):
         routes_data["depth"].values,
         reward_mapping,
     )
-    print("len(routes_data)", len(routes_data))
+    logger.debug("len(routes_data) %d", len(routes_data))
 
     # Split data into train, valid and test
     test_frac = config["evaluation"]["test_frac"]
@@ -70,42 +70,36 @@ def init_data(config):
         test_data = test_data.drop_duplicates(subset=["target"])
 
     elif config["dataset"]["valid_set"] == "n1+n5":
-        print("n1+n5")
+        logger.debug("n1+n5 split selected")
         test_data = routes_data[
             (routes_data["n1_target"]) | (routes_data["n5_target"])
         ]
-        print(
-            "len(test_data)",
-            len(test_data),
-            len(test_data.drop_duplicates(subset=["target"])),
-        )
+        logger.debug("len(test_data) %d (%d unique)", len(test_data), len(test_data.drop_duplicates(subset=["target"])))
         train_valid_data = routes_data[
             ~routes_data["target"].isin(test_data["target"].tolist())
         ]
         valid_data = train_valid_data.drop_duplicates(subset=["target"]).sample(
             n=n_test, random_state=config["context"]["random_state"]
         )
-        print("len(valid_data)", len(valid_data))
+        logger.debug("len(valid_data) %d", len(valid_data))
         train_data = train_valid_data[
             ~train_valid_data["target"].isin(valid_data["target"].tolist())
         ]
 
-    print("len train data", len(train_data))
+    logger.debug("len train data %d", len(train_data))
     if (
         "drop_duplicates" in config["dataset"].keys()
         and config["dataset"]["drop_duplicates"]
     ):
         train_data = train_data.drop_duplicates(subset=["target"])
-        print("drop_duplicates done: len train data", len(train_data))
+        logger.debug("drop_duplicates done: len train data %d", len(train_data))
     if (
         "train_fraction" in config["dataset"].keys()
         and config["dataset"]["train_fraction"] < 1
     ):
         n = int(len(train_data) * config["dataset"]["train_fraction"])
         train_data = train_data.sample(n=n, random_state=config["context"]["random_state"])
-        print(
-            f'Training on fraction: {config["dataset"]["train_fraction"]}. Len train data: {len(train_data)}'
-        )
+        logger.debug("Training on fraction: %.2f. Len train data: %d", config["dataset"]["train_fraction"], len(train_data))
 
     train_dataset = RouteDatasetTorch(
         train_data,
@@ -129,9 +123,9 @@ def init_data(config):
         drop_duplicates=False,
     )
 
-    print(f"Train dataset has {len(train_dataset)} routes.")
-    print(f"Valid dataset has {len(valid_dataset)} routes.")
-    print(f"Test dataset has {len(test_dataset)} routes.")
+    logger.info("Train dataset has %d routes.", len(train_dataset))
+    logger.info("Valid dataset has %d routes.", len(valid_dataset))
+    logger.info("Test dataset has %d routes.", len(test_dataset))
 
     return train_dataset, valid_dataset, test_dataset
 
@@ -237,7 +231,7 @@ def init_model(config, model_path=None):
         bottleneck = config["model"].get("structured_dropout_bottleneck", 128)
         rate = config["model"].get("structured_dropout_rate", 1.0)
         model = StructuredDropoutDecisionTransformer(dt_config, fp_dim, bottleneck, rate=rate)
-        print(f"Using StructuredDropoutDecisionTransformer (fp_dim={fp_dim}, bottleneck={bottleneck}, rate={rate})")
+        logger.info("Using StructuredDropoutDecisionTransformer (fp_dim=%d, bottleneck=%d, rate=%s)", fp_dim, bottleneck, rate)
     else:
         model = DecisionTransformerModel(dt_config)
 
@@ -253,9 +247,9 @@ def init_model(config, model_path=None):
         # Truncate list to actual layer count (list may be longer by design)
         flags = lsrd[:n_layers]
         if len(lsrd) > n_layers:
-            print(f"layer_shared_resid_dropout: truncating list from {len(lsrd)} → {n_layers} entries")
+            logger.info("layer_shared_resid_dropout: truncating list from %d → %d entries", len(lsrd), n_layers)
         n = apply_layer_shared_resid_dropout(model, p, flags=flags)
-        print(f"layer_shared_resid_dropout: tied resid masks in {n}/{n_layers} blocks (p={p})")
+        logger.info("layer_shared_resid_dropout: tied resid masks in %d/%d blocks (p=%s)", n, n_layers, p)
 
     return model
 
@@ -302,7 +296,7 @@ def main(
         trial_number=None,
         study_name=None):
     start_time = time.time()
-    print("Initiate training.")
+    logger.info("Initiate training.")
     config = read_config(config_path)
     if n_epochs is not None:
         config["train"]["n_epochs"] = n_epochs
@@ -312,32 +306,32 @@ def main(
         config["context"]["building_blocks"] = ds["building_blocks"]
         config["context"]["templates_path"] = ds["templates"]
         config["dataset"]["action_dim"] = ds["action_dim"]
-        print(f"Dataset override: {dataset} ({ds['action_dim']} templates)")
+        logger.info("Dataset override: %s (%d templates)", dataset, ds["action_dim"])
     if batch_size is not None:
         config["train"]["batch_size"] = batch_size
         config["evaluation"]["batch_size"] = batch_size
-        print(f"Batch size override: {batch_size}")
+        logger.info("Batch size override: %s", batch_size)
     if n_heads is not None:
         config["model"]["n_heads"] = n_heads
-        print(f"n_heads override: {n_heads}")
+        logger.info("n_heads override: %s", n_heads)
     if n_layers is not None:
         config["model"]["n_layers"] = n_layers
-        print(f"n_layers override: {n_layers}")
+        logger.info("n_layers override: %s", n_layers)
     if seed is not None:
         config["context"]["random_state"] = seed
-        print(f"seed override: {seed}")
+        logger.info("seed override: %s", seed)
     if head_dim is not None:
         config["model"]["head_dim"] = head_dim
-        print(f"head_dim override: {head_dim}")
+        logger.info("head_dim override: %s", head_dim)
     if results_path is not None:
         config["train"]["results_path"] = results_path
-        print(f"results_path override: {results_path}")
+        logger.info("results_path override: %s", results_path)
     if lr is not None:
         config["optimizer"]["lr"] = lr
-        print(f"lr override: {lr}")
+        logger.info("lr override: %s", lr)
     if momentum is not None:
         config["optimizer"]["momentum"] = momentum
-        print(f"momentum override: {momentum}")
+        logger.info("momentum override: %s", momentum)
     # if dropout is not None:
     #     config["model"]["attn_pdrop"] = dropout
     #     config["model"]["embd_pdrop"] = dropout
@@ -345,23 +339,23 @@ def main(
     #     print(f"dropout override: {dropout} (attn/embd/resid)")
     if attn_pdrop is not None:
         config["model"]["attn_pdrop"] = attn_pdrop
-        print(f"attn_pdrop override: {attn_pdrop}")
+        logger.info("attn_pdrop override: %s", attn_pdrop)
     if embd_pdrop is not None:
         config["model"]["embd_pdrop"] = embd_pdrop
-        print(f"embd_pdrop override: {embd_pdrop}")
+        logger.info("embd_pdrop override: %s", embd_pdrop)
     if resid_pdrop is not None:
         config["model"]["resid_pdrop"] = resid_pdrop
-        print(f"resid_pdrop override: {resid_pdrop}")
+        logger.info("resid_pdrop override: %s", resid_pdrop)
     if layer_shared_resid_dropout is not None:
         # May be a list (from Optuna categorical) or a bool (from CLI flag)
         if isinstance(layer_shared_resid_dropout, list):
             config["model"]["layer_shared_resid_dropout"] = layer_shared_resid_dropout
         else:
             config["model"]["layer_shared_resid_dropout"] = bool(layer_shared_resid_dropout)
-        print(f"layer_shared_resid_dropout override: {layer_shared_resid_dropout}")
+        logger.info("layer_shared_resid_dropout override: %s", layer_shared_resid_dropout)
     if eval_n_batches is not None:
         config["evaluation"]["eval_n_batches"] = eval_n_batches
-        print(f"eval_n_batches override: {eval_n_batches}")
+        logger.info("eval_n_batches override: %s", eval_n_batches)
     # if structured_dropout_bottleneck is not None:
     #     config["model"]["structured_dropout_bottleneck"] = int(structured_dropout_bottleneck)
     #     print(f"structured_dropout_bottleneck override: {structured_dropout_bottleneck}")
@@ -380,10 +374,10 @@ def main(
         if pd.io.common.file_exists(progress_path):
             prev = pd.read_json(progress_path, lines=True)
             derived_start_epoch = int(prev["epoch"].max()) + 1
-        print(f"Resuming from checkpoint: {model_path}, starting at epoch {derived_start_epoch}")
+        logger.info("Resuming from checkpoint: %s, starting at epoch %d", model_path, derived_start_epoch)
     if start_epoch is not None:
         derived_start_epoch = start_epoch
-        print(f"Start epoch overridden to {derived_start_epoch}")
+        logger.info("Start epoch overridden to %d", derived_start_epoch)
     start_epoch = derived_start_epoch
 
     if resume and derived_start_epoch >= config["train"]["n_epochs"]:
@@ -419,7 +413,7 @@ def main(
     effective_config_path = results_path + "/model.config.yaml"
     with open(effective_config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
-    print(f"Effective config saved to {effective_config_path}")
+    logger.info("Effective config saved to %s", effective_config_path)
 
     seed = config["context"]["random_state"]
     torch.manual_seed(seed)
@@ -429,12 +423,12 @@ def main(
         torch.cuda.manual_seed_all(seed + 3)
 
     model = init_model(config, model_path=model_path)
-    print("Model is loaded!")
+    logger.info("Model loaded.")
     datasets = init_data(config)
-    print("Dataset loaded!")
+    logger.info("Dataset loaded.")
     dataloaders = create_dataloaders(datasets, config, batch_size=batch_size)
     begin_train_time = time.time()
-    print("Begin training after: ", (begin_train_time - start_time) / 60, " minutes.")
+    logger.info("Begin training after %.1f minutes.", (begin_train_time - start_time) / 60)
     trainer = RetroTrainer(dataloaders, model, config)
     (
         validation_loss,
@@ -443,9 +437,9 @@ def main(
         fraction_targets_solved,
     ) = trainer.train(start_epoch=derived_start_epoch, eval_routes_at_end=eval_routes_at_end,
                        trial_number=trial_number, study_name=study_name)
-    print("Training is completed.")
+    logger.info("Training completed.")
     end_time = time.time()
-    print("Training took: ", (end_time - begin_train_time) / (60 * 60), " hours.")
+    logger.info("Training took %.2f hours.", (end_time - begin_train_time) / 3600)
     result_dir = config["train"]["results_path"]
     # Only run post-hoc evaluation when predicted_routes.json exists (written by
     # predict.py). pred_routes_train_progress.json is always written by the trainer

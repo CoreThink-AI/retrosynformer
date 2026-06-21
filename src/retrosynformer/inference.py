@@ -56,7 +56,7 @@ class RoutePredictor:
 
     def set_model(self, model):
         self.model = model
-        print("New model set.")
+        logger.debug("New model set.")
 
     def predict_route(self, target, beam_width, target_reward=0.5):
 

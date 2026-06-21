@@ -129,10 +129,10 @@ class RetroGymEnvironment:
 
     def _check_if_route_done(self):
         if self.route_done:
-            print("Route already done.")
+            logger.debug("Route already done.")
             route_done = True
         elif len(self.state) < 1:
-            print("State is empty. Route already done.")
+            logger.debug("State is empty. Route already done.")
             route_done = True
         else:
             route_done = False
@@ -159,10 +159,7 @@ class RetroGymEnvironment:
                 reactants = utils.apply_template(template, product_smiles)
             except Exception as exc:
                 logger.error(exc)
-                print(
-                    "reactants = apply_template(template, product_smiles) command failed"
-                )
-                print("product smiles: ", product_smiles, "template: ", template)
+                logger.debug("apply_template failed: product_smiles=%s template=%s", product_smiles, template)
 
             if len(reactants) > 0:
                 reactants = reactants[0]
@@ -191,10 +188,10 @@ class RetroGymEnvironment:
         """
         # Check if route is done or if we continue
         if self.route_done:
-            print("Route already done.")
+            logger.debug("Route already done.")
             return None, True
         if len(self.state) < 1:
-            print("State is empty. Route already done.")
+            logger.debug("State is empty. Route already done.")
             return self.rewards, True
 
         self.visited_intermediates_branch = self.state.pop()

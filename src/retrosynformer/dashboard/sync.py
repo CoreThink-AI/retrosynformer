@@ -4,12 +4,15 @@ The Optuna study.db and JSONL files are authoritative. The meta-DB is a
 derived cache rebuilt by sync_all() / sync_study().
 """
 import json
+import logging
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from .models import EpochRecord, Study, Trial, TrialHyperparams, db
 
@@ -304,7 +307,7 @@ def sync_all(root: str) -> dict:
                 skipped += 1
         except Exception as e:
             db.session.rollback()
-            print(f"[sync] ERROR {db_path}: {e}")
+            logger.error("[sync] ERROR %s: %s", db_path, e)
             errors += 1
     return {"synced": synced, "skipped": skipped, "errors": errors}
 

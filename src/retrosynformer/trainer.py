@@ -62,11 +62,7 @@ def _handle_sigint(signum, frame):
         raise KeyboardInterrupt
     _last_interrupt_time = now
     _interrupted = True
-    print(
-        "\n[trainer] Ctrl-C caught — finishing current epoch and running route "
-        "evaluation before stopping. Hit Ctrl-C again within 1 s to abort immediately.",
-        flush=True,
-    )
+    logger.info("[trainer] Ctrl-C caught — finishing current epoch and running route evaluation before stopping. Hit Ctrl-C again within 1 s to abort immediately.")
     if _stop_study_callback is not None:
         try:
             _stop_study_callback()
@@ -76,7 +72,7 @@ def _handle_sigint(signum, frame):
 
 class RetroTrainer:
     def __init__(self, dataloaders, model, config):
-        print("Initiating the trainer")
+        logger.info("Initiating the trainer")
 
         self.train_dataloader, self.valid_dataloader, self.test_dataloader = dataloaders
         self.config = config
@@ -328,10 +324,10 @@ class RetroTrainer:
         else:
             save_folder = f"results/{current_datetime.strftime('%Y-%m-%d-%H:%M:%S')}/"
 
-        print("Save result at: ", save_folder)
+        logger.info("Save result at: %s", save_folder)
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
-            print("Directory created successfully.")
+            logger.debug("Directory created successfully.")
 
         _es_metric = self.config["train"].get("early_stopping_metric", "valid_action_accuracy")
         _es_minimize = "loss" in _es_metric
@@ -367,7 +363,7 @@ class RetroTrainer:
             current_run = current_run[current_run["epoch"] < start_epoch] if start_epoch > 0 else current_run
             if len(current_run) > 0 and _es_metric in current_run.columns:
                 _es_best = current_run[_es_metric].min() if _es_minimize else current_run[_es_metric].max()
-            print(f"Restored training history ({len(self.result_df)} epochs). Best {_es_metric} (current run): {_es_best:.6f}")
+            logger.info("Restored training history (%d epochs). Best %s (current run): %.6f", len(self.result_df), _es_metric, _es_best)
         if os.path.exists(eval_path):
             with open(eval_path) as f:
                 self.results_eval = json.load(f)
@@ -390,7 +386,7 @@ class RetroTrainer:
             n_epochs=n_epochs,
         )
 
-        print(f"Training epochs {start_epoch} to {n_epochs - 1}.")
+        logger.info("Training epochs %d to %d.", start_epoch, n_epochs - 1)
         if verbose:
             _hdr_prefix = [f"{'trial':>5}"] if trial_number is not None else []
             _hdr_suffix = ["study"] if study_name is not None else []
@@ -534,7 +530,7 @@ class RetroTrainer:
                 if eval_due:
                     from .async_eval import _extrapolation_worker
                     eval_start_time = time.time()
-                    print(f"Epoch {epoch}: running route evaluation …", flush=True)
+                    logger.info("Epoch %d: running route evaluation …", epoch)
                     route_predictor.set_model(self.model)
                     pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)
                     extrap = _extrapolation_worker(
@@ -610,11 +606,11 @@ class RetroTrainer:
 
             logger.debug("epoch %d es_check: epochs_no_improve=%d patience=%d _es_val=%.6f _es_best=%.6f", epoch, epochs_no_improve, patience, _es_val, _es_best)
             if patience > 0 and epochs_no_improve >= patience:
-                print(f"Early stopping: {_es_metric} has not improved for {patience} consecutive epochs.")
+                logger.info("Early stopping: %s has not improved for %d consecutive epochs.", _es_metric, patience)
                 break
 
             if _interrupted:
-                print(f"[trainer] Stopped after epoch {epoch} (Ctrl-C). Running final route eval before exit.")
+                logger.info("[trainer] Stopped after epoch %d (Ctrl-C). Running final route eval before exit.", epoch)
                 eval_routes_at_end = True
                 break
 
@@ -626,7 +622,7 @@ class RetroTrainer:
                 # eval_routes_at_end forced a fresh run), submit one now and block.
                 _final_fresh = not async_pool.is_running()
                 if _final_fresh:
-                    print("[async_eval] Submitting final blocking route eval …", flush=True)
+                    logger.info("[async_eval] Submitting final blocking route eval …")
                     async_pool.submit(self.model, self.config, self.valid_dataloader, epoch)
                     async_pool.submit_extrapolation(
                         metric_histories={
@@ -640,7 +636,7 @@ class RetroTrainer:
                         epoch=epoch,
                     )
                 else:
-                    print("[async_eval] Waiting for in-flight eval to finish …", flush=True)
+                    logger.info("[async_eval] Waiting for in-flight eval to finish …")
                 async_result = async_pool.collect_blocking(timeout=900)
                 extrap_final = async_pool.collect_extrapolation_blocking(timeout=60)
                 async_pool.shutdown()
@@ -662,7 +658,7 @@ class RetroTrainer:
                     fraction_targets_solved = 0.0
             else:
                 from .async_eval import _extrapolation_worker
-                print("Running final route evaluation …")
+                logger.info("Running final route evaluation …")
                 eval_start_time = time.time()
                 route_predictor.set_model(self.model)
                 pred_routes = route_predictor.eval_predicted_routes(self.valid_dataloader)

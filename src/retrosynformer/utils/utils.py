@@ -24,9 +24,9 @@ def get_device() -> str:
     """
     import os
     cuda_ok = torch.cuda.is_available()
-    print(f"[debug] get_device: torch.cuda.is_available()={cuda_ok}  HSA_OVERRIDE_GFX_VERSION={os.environ.get('HSA_OVERRIDE_GFX_VERSION', 'NOT SET')}  torch.version.hip={getattr(torch.version, 'hip', None)}", flush=True)
+    logger.debug("get_device: torch.cuda.is_available()=%s  HSA_OVERRIDE_GFX_VERSION=%s  torch.version.hip=%s", cuda_ok, os.environ.get("HSA_OVERRIDE_GFX_VERSION", "NOT SET"), getattr(torch.version, "hip", None))
     if cuda_ok:
-        print(f"[debug] get_device: device_count={torch.cuda.device_count()}  device_name={torch.cuda.get_device_name(0)}", flush=True)
+        logger.debug("get_device: device_count=%d  device_name=%s", torch.cuda.device_count(), torch.cuda.get_device_name(0))
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"

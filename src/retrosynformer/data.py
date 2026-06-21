@@ -27,7 +27,7 @@ class RouteDatasetTorch(Dataset):
         drop_duplicates=True,
     ):
         self.data_full = data
-        print(self.data_full.columns)
+        logger.debug("data_full columns: %s", self.data_full.columns.tolist())
         if drop_duplicates:
             self.data = self.data_full.drop_duplicates(subset=["target"])
         else:
@@ -109,8 +109,8 @@ class RouteDataset:
         )
         self.templates_df = pd.read_pickle(templates_path)
         self.templates = list(self.templates_df["smiles"])
-        print("n templates: ", len(self.templates))
-        print("n templates_df: ", len(self.templates_df))
+        logger.debug("n templates: %d", len(self.templates))
+        logger.debug("n templates_df: %d", len(self.templates_df))
         template_library = pd.read_csv(template_library, sep="\t")
         self.template_library = template_library[
             template_library["template_hash_corr"].isin(list(self.templates_df["hash"]))
@@ -263,7 +263,7 @@ class RouteDataset:
                 logger.error(exc)
                 invalid_routes_count += 1
 
-        print("Faild to reconstruct ", invalid_routes_count, " routes.")
+        logger.warning("Failed to reconstruct %d routes.", invalid_routes_count)
 
         return pd.DataFrame(data=self.data)
 

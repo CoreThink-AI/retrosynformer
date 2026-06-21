@@ -19,16 +19,20 @@ Usage
 -----
     from retrosynformer.dropout import apply_layer_shared_resid_dropout
     n = apply_layer_shared_resid_dropout(model, p=config["model"]["resid_pdrop"])
-    print(f"Patched {n} blocks with layer-shared resid dropout")
+    logger.info("Patched %d blocks with layer-shared resid dropout", n)
 
 Config flag
 -----------
 Set ``model.layer_shared_resid_dropout: true`` in model.config.yaml.
 Optuna search: ``layer_shared_resid_dropout: [true, false]``.
 """
+import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 
 class SharedResidMaskDropout(nn.Module):

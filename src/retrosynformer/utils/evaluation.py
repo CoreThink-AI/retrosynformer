@@ -193,7 +193,7 @@ def plot_ted_distribution(df, save_as):
             "Route set": f"Unsolved, median={np.round(np.median(df_unsolved['TED to target']),2)}",
         }
     )
-    print(len(df_ted))
+    logger.debug("df_ted len: %d", len(df_ted))
     df_ted = pd.concat(
         [
             df_ted,
@@ -206,7 +206,7 @@ def plot_ted_distribution(df, save_as):
         ],
         ignore_index=True,
     )
-    print(len(df_ted))
+    logger.debug("df_ted len: %d", len(df_ted))
     fig = plt.figure()
     sns.histplot(df_ted, x="TED to target", hue="Route set", bins=10)
     plt.tight_layout()
@@ -346,30 +346,30 @@ def get_average_table(summary_paths):
         prop_values = []
         for df in dfs:
             prop_values.append(df[prop])
-        print(f"{prop} = {np.mean(prop_values)} +- {np.std(prop_values)}")
+        logger.debug("%s = %s +- %s", prop, np.mean(prop_values), np.std(prop_values))
 
 
 def main(result_dir, file_type="json", target_set=None):
-    print("in main: ", result_dir, target_set)
+    logger.info("in main: %s %s", result_dir, target_set)
     cfg_path = result_dir + "/config.yaml"
     if not os.path.exists(cfg_path):
         cfg_path = result_dir + "/model.config.yaml"
     config = utils.read_config(cfg_path)
     if file_type == "json":
         if target_set == "n1":
-            print("n1 loaded")
+            logger.debug("n1 loaded")
             routes_path = result_dir + "/predicted_routes_n1.json"
             df = pd.read_json(routes_path)
-            print("n1 loaded: ", len(df))
+            logger.debug("n1 loaded: %d", len(df))
         elif target_set == "n5":
             routes_path = result_dir + "/predicted_routes_n5.json"
             df = pd.read_json(routes_path)
-            print("n5 loaded: ", len(df))
+            logger.debug("n5 loaded: %d", len(df))
         else:
             try:
                 routes_path = result_dir + "/predicted_routes.json"
                 df = pd.read_json(routes_path)
-                print("test targets: ", len(df))
+                logger.debug("test targets: %d", len(df))
             except Exception as exc:
                 logger.error(exc)
                 routes_path = result_dir + "/pred_routes_train_progress.json"
@@ -394,12 +394,7 @@ def main(result_dir, file_type="json", target_set=None):
         else:
             pred_trees_corrected.append(None)
             is_solved.append(False)
-    print(
-        " solved in main",
-        sum(is_solved),
-        len(is_solved),
-        sum(is_solved) / len(is_solved),
-    )
+    logger.info("solved in main: %d/%d (%.3f)", sum(is_solved), len(is_solved), sum(is_solved) / len(is_solved))
     df.loc[:, "route_solved"] = is_solved
     # df = df.dropna()
     df.loc[:, "pred_tree"] = pred_trees_corrected
