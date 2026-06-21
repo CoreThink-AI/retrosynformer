@@ -5,6 +5,16 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.29] — 2026-06-21
+
+**Resume guard for `rs-train --resume` and `rs-hypertune --resume TRIAL` flag.**
+
+- `runner.py`: when `--resume` is passed and the checkpoint's epoch count already equals `n_epochs`, print a warning and interactively offer to increase `n_epochs` by 1.5× in the source config file before starting; exits cleanly if the user declines.
+- `trainer.py`: initialize `epoch = start_epoch - 1` before the training loop so the post-loop route-eval block never raises `UnboundLocalError` when the loop body never executes.
+- `scripts/hypertune.py`: new `--resume [TRIAL]` flag resumes a partially-trained trial (via `runner.main(..., resume=True, eval_routes_at_end=True)`) before the study's normal `optimize()` loop; auto-detects the highest `trial_NNN` directory on disk when no number is given; calls `_backfill_failed_trials()` afterwards so Optuna's TPE uses the resumed run's history.
+
+---
+
 ## [0.1.28] — 2026-06-21
 
 **New `retrosynformer.dataframes` module consolidating trial/study DataFrame utilities.**
