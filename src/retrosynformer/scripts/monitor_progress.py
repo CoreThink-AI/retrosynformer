@@ -10,9 +10,11 @@ import json
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import pandas as pd
+from retrosynformer.scripts import print_banner
 
 
 def main():
+    print_banner()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "jsonl", nargs="?", default="results/train_progress.jsonl",

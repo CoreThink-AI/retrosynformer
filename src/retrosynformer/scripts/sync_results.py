@@ -15,6 +15,7 @@ import argparse
 import sys
 
 from retrosynformer.rsync import DEFAULT_INCLUDES, sync
+from retrosynformer.scripts import print_banner
 
 DEFAULT_HOST = "taco"
 DEFAULT_REMOTE_PATH = "code/corethink/retrosynformer/results/"
@@ -22,6 +23,7 @@ DEFAULT_LOCAL_PATH = "results/"
 
 
 def main() -> None:
+    print_banner()
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(

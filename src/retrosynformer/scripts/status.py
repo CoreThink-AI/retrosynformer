@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from retrosynformer.rsync import sync
+from retrosynformer.scripts import print_banner
 
 EXTRA_INCLUDES = [
     "pred_routes_train_progress.json",
@@ -154,6 +155,7 @@ def print_table(rows: list[dict], top: int | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    print_banner()
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

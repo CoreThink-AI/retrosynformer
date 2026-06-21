@@ -15,9 +15,11 @@ Required environment variables (set before running):
 
 import argparse
 import os
+from retrosynformer.scripts import print_banner
 
 
 def main() -> None:
+    print_banner()
     parser = argparse.ArgumentParser(
         description="Start the RetroSynFormer FastAPI inference server."
     )

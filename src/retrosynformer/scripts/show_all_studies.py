@@ -14,6 +14,7 @@ import sys
 
 import pandas as pd
 
+from retrosynformer.scripts import print_banner
 from retrosynformer.study import (
     concat,
     dfs_to_trials_df,
@@ -42,6 +43,7 @@ def _fmt_value(col: str, val) -> str:
 
 
 def main():
+    print_banner()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "pattern",

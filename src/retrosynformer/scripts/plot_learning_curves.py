@@ -27,6 +27,7 @@ import plotly.graph_objects as go
 import plotly.colors as pc
 
 from retrosynformer.study import dfs_to_trials_df, to_dfs
+from retrosynformer.scripts import print_banner
 
 METRICS = [
     "valid_loss",
@@ -196,6 +197,7 @@ def _build_table_df(
 
 
 def main() -> None:
+    print_banner()
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
