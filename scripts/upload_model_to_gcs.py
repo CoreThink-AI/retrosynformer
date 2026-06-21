@@ -18,11 +18,13 @@ Usage (from repo root):
 import argparse
 import gzip
 import hashlib
+import io
 import math
 import shutil
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -67,6 +69,35 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+_PROGRESS_CHUNK = 4 * 1024 * 1024  # GCS resumable-upload increment; controls progress granularity
+
+
+class _ProgressReader:
+    """File-like wrapper that prints per-chunk upload progress and rate as the GCS client reads it."""
+
+    def __init__(self, data: bytes, idx: int):
+        self._buf = io.BytesIO(data)
+        self._total = len(data)
+        self._idx = idx
+        self._sent = 0
+        self._t0 = time.perf_counter()
+
+    def read(self, n=-1):
+        block = self._buf.read(n)
+        self._sent += len(block)
+        elapsed = max(time.perf_counter() - self._t0, 1e-9)
+        rate = self._sent / elapsed / 1e6
+        pct = 100 * self._sent / self._total
+        print(f"    chunk {self._idx:04d}  {pct:5.1f}%  {self._sent/1e6:.0f}/{self._total/1e6:.0f} MB  {rate:.1f} MB/s", flush=True)
+        return block
+
+    def seek(self, pos, whence=0):
+        return self._buf.seek(pos, whence)
+
+    def tell(self):
+        return self._buf.tell()
+
+
 def _upload_chunk(bucket_name: str, blob_prefix: str, idx: int, data: bytes, skip_existing: bool) -> tuple[int, int]:
     client = _gcs_client(project=bucket_name)
     bucket = client.bucket(bucket_name)
@@ -79,8 +110,12 @@ def _upload_chunk(bucket_name: str, blob_prefix: str, idx: int, data: bytes, ski
                 return idx, len(data)
         except Exception:
             pass
-    blob.upload_from_string(data, timeout=1800, retry=_retry_policy())
-    print(f"  chunk {idx:04d}: uploaded {len(data)/1e6:.1f} MB", flush=True)
+    blob.chunk_size = _PROGRESS_CHUNK  # forces resumable upload in 4 MB increments
+    reader = _ProgressReader(data, idx)
+    blob.upload_from_file(reader, size=len(data), timeout=1800, retry=_retry_policy())
+    elapsed = time.perf_counter() - reader._t0
+    rate = len(data) / elapsed / 1e6
+    print(f"  chunk {idx:04d}: done  {len(data)/1e6:.1f} MB  avg {rate:.1f} MB/s", flush=True)
     return idx, len(data)
 
 
@@ -143,18 +178,26 @@ def upload_chunked(
     assert len(chunk_data) == n_chunks
 
     print(f"Uploading {n_chunks} chunks …", flush=True)
+    done_count = 0
+    bytes_uploaded = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_upload_chunk, bucket_name, blob_name, i, data, skip_existing): i
             for i, data in enumerate(chunk_data)
         }
+        print(f"  {len(futures)} futures submitted, waiting …", flush=True)
         failed = []
         for fut in as_completed(futures):
+            idx = futures[fut]
             try:
-                fut.result()
+                _, nbytes = fut.result()
+                done_count += 1
+                bytes_uploaded += nbytes
+                pct = 100 * done_count / n_chunks
+                print(f"  [{done_count}/{n_chunks}  {pct:5.1f}%  {bytes_uploaded/1e9:.3f} GB]  chunk {idx:04d}: done", flush=True)
             except Exception as exc:
-                idx = futures[fut]
-                print(f"  chunk {idx:04d}: FAILED — {exc}", flush=True)
+                done_count += 1
+                print(f"  [{done_count}/{n_chunks}]  chunk {idx:04d}: FAILED — {exc}", flush=True)
                 failed.append(idx)
 
     if failed:
