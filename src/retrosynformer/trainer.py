@@ -1,11 +1,14 @@
 import hashlib
 import json
+import logging
 import os
 import shutil
 import signal
 import tempfile
 import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 import torch
@@ -87,7 +90,7 @@ class RetroTrainer:
         lr = self.config["optimizer"]["lr"]
         momentum = self.config["optimizer"]["momentum"]
         self.model = model.to(self.device)
-        print(f"[debug] trainer device={self.device}  model on {next(self.model.parameters()).device}", flush=True)
+        logger.debug("trainer device=%s  model on %s", self.device, next(self.model.parameters()).device)
         self.optimizer = torch.optim.SGD(
             self.model.parameters(), lr=lr, momentum=momentum
         )
@@ -157,7 +160,7 @@ class RetroTrainer:
 
         for i, data in enumerate(self.train_dataloader):
             if i == 0:
-                print("[debug] train_one_epoch: first batch received", flush=True)
+                logger.debug("train_one_epoch: first batch received")
 
             (
                 states,
@@ -171,13 +174,13 @@ class RetroTrainer:
             ), target_routes = self.unpack_data(data)
 
             if i == 0:
-                print(f"[debug] batch 0 tensors: states={states.device} actions={actions.device} rtgs={rtgs.device}", flush=True)
+                logger.debug("batch 0 tensors: states=%s actions=%s rtgs=%s", states.device, actions.device, rtgs.device)
 
             self.model.train(True)
             self.optimizer.zero_grad()
 
             if i == 0:
-                print("[debug] batch 0: starting forward pass", flush=True)
+                logger.debug("batch 0: starting forward pass")
             _, action_preds, _ = self.model(
                 states=states,
                 actions=actions,
@@ -189,13 +192,13 @@ class RetroTrainer:
             )
 
             if i == 0:
-                print("[debug] batch 0: forward done, starting backward", flush=True)
+                logger.debug("batch 0: forward done, starting backward")
             actions_id_pred = action_preds.argmax(dim=-1)
 
             loss = self.loss_fn(action_preds, actions) / attention_mask.sum()
             loss.backward()
             if i == 0:
-                print("[debug] batch 0: backward done", flush=True)
+                logger.debug("batch 0: backward done")
             # Compute gradient norm before the optimizer step clears the graph.
             # clip_grad_norm_ with inf max_norm returns the norm without clipping.
             total_grad_norm += torch.nn.utils.clip_grad_norm_(
@@ -400,25 +403,25 @@ class RetroTrainer:
 
             _print_header()
 
-        print(f"[debug] entering epoch loop: start={start_epoch} end={n_epochs - 1} patience={patience} _es_metric={_es_metric} _es_best={_es_best:.6f}", flush=True)
+        logger.debug("entering epoch loop: start=%d end=%d patience=%d _es_metric=%s _es_best=%.6f", start_epoch, n_epochs - 1, patience, _es_metric, _es_best)
         epoch = start_epoch - 1  # defined even when the loop body never executes
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
-            print(f"[debug] epoch {epoch} start", flush=True)
+            logger.debug("epoch %d start", epoch)
 
             EpochLogger.begin_epoch(epoch)
-            print(f"[debug] epoch {epoch} train_one_epoch ...", flush=True)
+            logger.debug("epoch %d train_one_epoch ...", epoch)
             train_loss, train_action_accuracy, train_route_accuracy = (
                 self.train_one_epoch()
             )
-            print(f"[debug] epoch {epoch} train done: loss={train_loss:.5f} acc={train_action_accuracy:.4f}", flush=True)
+            logger.debug("epoch %d train done: loss=%.5f acc=%.4f", epoch, train_loss, train_action_accuracy)
             training_loss.append(train_loss)
             training_accuracy.append(train_action_accuracy)
             training_route_accuracy.append(train_route_accuracy)
 
-            print(f"[debug] epoch {epoch} eval ...", flush=True)
+            logger.debug("epoch %d eval ...", epoch)
             valid_loss, valid_action_accuracy, valid_route_accuracy, _, _ = self.eval()
-            print(f"[debug] epoch {epoch} eval done: v_loss={valid_loss:.5f} v_acc={valid_action_accuracy:.4f}", flush=True)
+            logger.debug("epoch %d eval done: v_loss=%.5f v_acc=%.4f", epoch, valid_loss, valid_action_accuracy)
             _metric_values = {
                 "valid_loss": valid_loss,
                 "valid_action_accuracy": valid_action_accuracy,
@@ -605,7 +608,7 @@ class RetroTrainer:
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)
 
-            print(f"[debug] epoch {epoch} es_check: epochs_no_improve={epochs_no_improve} patience={patience} _es_val={_es_val:.6f} _es_best={_es_best:.6f}", flush=True)
+            logger.debug("epoch %d es_check: epochs_no_improve=%d patience=%d _es_val=%.6f _es_best=%.6f", epoch, epochs_no_improve, patience, _es_val, _es_best)
             if patience > 0 and epochs_no_improve >= patience:
                 print(f"Early stopping: {_es_metric} has not improved for {patience} consecutive epochs.")
                 break
