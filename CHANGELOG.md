@@ -5,6 +5,15 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.31] — 2026-06-21
+
+**Capture rsync output into `logger.info()` so `hplot` is silent by default.**
+
+- `rsync.sync()`: capture subprocess stdout/stderr with `PIPE`; emit each line via `logger.info()` / `logger.warning()` so rsync file lists are silent at WARNING (default) and visible with `-v`.
+- `hplot`: add `_configure_logging_from_argv()` to pre-parse `--debug`/`-v`/`--verbose` before `_sync_results_from_remote()` runs; convert status prints to `logger.info/warning`.
+
+---
+
 ## [0.1.30] — 2026-06-21
 
 **Logger migration across core library; `--debug`/`-v` flags on all `rs-*` commands.**
