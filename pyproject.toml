@@ -52,7 +52,11 @@ cpu = [
 ]
 
 # AMD ROCm GPU (Radeon / Strix Halo iGPU):
-#   uv sync --extra rocm
+#   uv pip install --editable ".[rocm]"
+# Use pip install, NOT uv sync --extra rocm: the lockfile is generated on a
+# non-ROCm machine so uv sync installs CPU torch even with --extra rocm.
+# pip install bypasses the lockfile and resolves torch from the pytorch-rocm
+# index, guaranteeing the ROCm build.
 # Pinned to torch 2.5.1+rocm6.2 — verified working on taco (Ubuntu 25.10,
 # kernel 6.17, Strix Halo iGPU). DO NOT upgrade to rocm6.4 or torch>=2.6 —
 # rocm6.4/torch>=2.7.0 crashes taco's Strix Halo iGPU.
