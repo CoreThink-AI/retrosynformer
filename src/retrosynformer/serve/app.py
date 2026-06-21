@@ -86,6 +86,7 @@ async def predict(req: PredictRequest) -> PredictResponse:
             req.beam_width,
             req.target_reward,
             req.sort_on,
+            req.max_depth,
         )
 
     return PredictResponse(smiles=req.smiles, **result)
