@@ -102,6 +102,7 @@ rs-mark-stopped         = "retrosynformer.scripts.mark_stopped:main"
 rs-serve                = "retrosynformer.scripts.serve:main"
 rs-status               = "retrosynformer.scripts.status:main"
 rs-dashboard            = "retrosynformer.scripts.dashboard:main"
+rs-cleanup-study        = "retrosynformer.scripts.cleanup_study:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

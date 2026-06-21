@@ -72,10 +72,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, relationship
-
 
 # ---------------------------------------------------------------------------
 # Declarative base
@@ -1076,6 +1074,7 @@ def estimate_incomplete_objectives(
                 **base,
                 "estimated_value": fit["estimate"],
                 "se": fit["se"],
+                "target_epoch": fit.get("target_epoch"),
                 "models": fit["models"],
                 "skipped": False,
                 "skip_reason": None,

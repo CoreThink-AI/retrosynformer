@@ -3,7 +3,6 @@ import logging
 import os
 
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.colors as clr
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +12,7 @@ from rdkit import Chem
 
 from . import utils
 
+matplotlib.use("Agg")
 logger = logging.getLogger(__name__)
 
 cmap1 = clr.LinearSegmentedColormap.from_list(

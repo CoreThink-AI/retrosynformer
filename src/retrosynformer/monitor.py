@@ -176,8 +176,8 @@ def evaluate_trial(
         ``n_routes``, ``beam_width``, ``n_batches``.  Final-epoch training
         metrics from ``train_progress.jsonl`` are included as ``final_*`` keys.
     """
-    from .runner import init_model, init_data, create_dataloaders
     from .inference import RoutePredictor
+    from .runner import create_dataloaders, init_data, init_model
 
     trial_dir = Path(trial_dir)
     config = _apply_overrides(_load_config(trial_dir), data_overrides)
