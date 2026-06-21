@@ -12,6 +12,7 @@ import sys
 
 import pandas as pd
 
+from retrosynformer.dataframes import HIGHER_IS_BETTER, METRIC_COLS, fmt_trial_value
 from retrosynformer.scripts import print_banner
 from retrosynformer.study import (
     dfs_to_trials_df,
@@ -19,25 +20,6 @@ from retrosynformer.study import (
     inject_train_metrics,
     to_dfs,
 )
-
-SCIENTIFIC_COLS = {"lr"}
-SCORE_COLS = {"score", "duration_min", "dropout", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
-HIGHER_IS_BETTER = {"score", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"}
-# Appear just before "score" in the output regardless of sort order.
-METRIC_COLS = ["n_epochs", "valid_action_accuracy", "valid_route_accuracy", "estimated_score"]
-
-
-def _fmt_value(col: str, val) -> str:
-    if pd.isna(val):
-        return "-"
-    if isinstance(val, float) and val == int(val) and col not in SCORE_COLS:
-        return str(int(val))
-    if col in SCIENTIFIC_COLS:
-        return f"{val:.2e}"
-    if isinstance(val, float):
-        prefix = "~" if col == "estimated_score" else ""
-        return f"{prefix}{val:.4f}"
-    return str(val)
 
 
 def main():
@@ -99,7 +81,7 @@ def main():
     # Build header
     col_widths = {}
     for c in ordered_cols:
-        values_str = [_fmt_value(c, v) for v in df[c]]
+        values_str = [fmt_trial_value(c, v) for v in df[c]]
         col_widths[c] = max(len(c), max(len(s) for s in values_str))
 
     header = "  ".join(c.ljust(col_widths[c]) for c in ordered_cols)
@@ -108,7 +90,7 @@ def main():
     print(sep)
     for _, row in df.iterrows():
         marker = " *" if row["trial"] == best_trial else "  "
-        line = "  ".join(_fmt_value(c, row[c]).ljust(col_widths[c]) for c in ordered_cols)
+        line = "  ".join(fmt_trial_value(c, row[c]).ljust(col_widths[c]) for c in ordered_cols)
         print(f"{line}{marker}")
 
     print()
@@ -120,7 +102,7 @@ def main():
         print(f"Mean score: {completed['score'].mean():.4f}  ± {completed['score'].std():.4f}")
         if best_trial is not None:
             best_row = completed.loc[completed["trial"] == best_trial].iloc[0]
-            best_params = {c: _fmt_value(c, best_row[c]) for c in param_cols if c in best_row}
+            best_params = {c: fmt_trial_value(c, best_row[c]) for c in param_cols if c in best_row}
             print(f"Best params: {best_params}")
 
 
