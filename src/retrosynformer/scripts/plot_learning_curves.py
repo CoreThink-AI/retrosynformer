@@ -128,8 +128,25 @@ def _build_table_df(
     direction = "↑" if not rank_lower_is_better else "↓"
     metric_col = rank_metric_short + direction
 
+    _ABBREV = {
+        "early_stopping_patience": "es_patience",
+        "eval_routes_frequency": "eval_freq",
+        "objective_metric": "obj_metric",
+        "batch_size": "bs",
+        "n_layers": "layers",
+        "n_heads": "heads",
+        "head_dim": "h_dim",
+        "n_in_state": "n_state",
+        "fp_dim": "fp",
+        "weight_decay": "wd",
+        "valid_set": "vset",
+        "beam_width": "bw",
+        "dropout": "drop",
+    }
+
     def _hdr(c: str) -> str:
-        return c + "*" if c in optuna_col_set else c
+        short = _ABBREV.get(c, c)
+        return short + "*" if c in optuna_col_set else short
 
     def _fmt(col: str, val) -> str:
         if isinstance(val, list):
