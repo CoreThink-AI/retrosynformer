@@ -401,6 +401,7 @@ class RetroTrainer:
             _print_header()
 
         print(f"[debug] entering epoch loop: start={start_epoch} end={n_epochs - 1} patience={patience} _es_metric={_es_metric} _es_best={_es_best:.6f}", flush=True)
+        epoch = start_epoch - 1  # defined even when the loop body never executes
         for epoch in range(start_epoch, n_epochs):
             epoch_start = time.time()
             print(f"[debug] epoch {epoch} start", flush=True)
