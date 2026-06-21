@@ -11,8 +11,11 @@ Usage
     hplot learn      [options]    # rs-plot-learning-curves
     hplot train      [options]    # rs-plot-learning-curves
 """
+import logging
 import os
 import sys
+
+logger = logging.getLogger(__name__)
 
 _LEARNING_CURVE_ALIASES = {
     "learning-curve",
@@ -58,12 +61,24 @@ def _load_dotenv_simple() -> None:
         path = parent
 
 
+def _configure_logging_from_argv() -> None:
+    """Set root log level from --debug / -v / --verbose in sys.argv before parse_args runs."""
+    argv = sys.argv[1:]
+    if "--debug" in argv:
+        level = logging.DEBUG
+    elif "-v" in argv or "--verbose" in argv:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+
+
 def _sync_results_from_remote() -> None:
     """Rsync results/ from GPU_HOST (set in .env) into the local results/ dir."""
     _load_dotenv_simple()
     gpu_host = os.environ.get("GPU_HOST", "").strip()
     if not gpu_host:
-        print("hplot: GPU_HOST not set in .env — skipping remote sync", file=sys.stderr)
+        logger.info("hplot: GPU_HOST not set in .env — skipping remote sync")
         return
 
     # GPU_HOST is an SCP-style remote path to the project root, e.g.
@@ -73,17 +88,20 @@ def _sync_results_from_remote() -> None:
     src = f"{gpu_host}results/"
     dst = "results/"
 
-    print(f"hplot: CPU-only environment — syncing {src} → {dst}", flush=True)
+    logger.info("hplot: CPU-only environment — syncing %s → %s", src, dst)
     from retrosynformer.rsync import sync
     rc = sync(src, dst)
     if rc != 0:
-        print(f"hplot: rsync exited with code {rc} — proceeding with local data", file=sys.stderr)
+        logger.warning("hplot: rsync exited with code %d — proceeding with local data", rc)
 
 
 def main() -> None:
     # Strip a recognised subcommand; otherwise treat everything as learning-curves args (default).
     if len(sys.argv) > 1 and sys.argv[1] in _SUBCOMMANDS:
         sys.argv = [sys.argv[0]] + sys.argv[2:]
+
+    # Configure logging before the sync so --verbose/-v controls rsync output.
+    _configure_logging_from_argv()
 
     if not _has_gpu():
         _sync_results_from_remote()

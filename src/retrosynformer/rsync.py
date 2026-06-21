@@ -76,9 +76,18 @@ def sync(
 ) -> int:
     """Run rsync to transfer *includes* files from *src* to *dst*.
 
+    stdout is captured and emitted via logger.info() so it is silent at the
+    default WARNING level and visible when the caller sets INFO or DEBUG.
+
     Returns the rsync exit code (0 = success).
     """
     cmd = build_cmd(src, dst, includes, archive=archive, verbose=verbose, dry_run=dry_run)
     logger.info("Running: %s", " ".join(cmd))
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    for line in result.stdout.splitlines():
+        if line.strip():
+            logger.info("%s", line)
+    for line in result.stderr.splitlines():
+        if line.strip():
+            logger.warning("%s", line)
     return result.returncode
