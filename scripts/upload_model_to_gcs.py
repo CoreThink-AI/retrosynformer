@@ -88,7 +88,7 @@ class _ProgressReader:
         elapsed = max(time.perf_counter() - self._t0, 1e-9)
         rate = self._sent / elapsed / 1e6
         pct = 100 * self._sent / self._total
-        print(f"    chunk {self._idx:04d}  {pct:5.1f}%  {self._sent/1e6:.0f}/{self._total/1e6:.0f} MB  {rate:.1f} MB/s", flush=True)
+        print(f"    chunk {self._idx:04d}  {pct:5.1f}%  {self._sent/1e6:.0f}/{self._total/1e6:.0f} MB  {rate:.3f} MB/s", flush=True)
         return block
 
     def seek(self, pos, whence=0):
@@ -115,7 +115,7 @@ def _upload_chunk(bucket_name: str, blob_prefix: str, idx: int, data: bytes, ski
     blob.upload_from_file(reader, size=len(data), timeout=1800, retry=_retry_policy())
     elapsed = time.perf_counter() - reader._t0
     rate = len(data) / elapsed / 1e6
-    print(f"  chunk {idx:04d}: done  {len(data)/1e6:.1f} MB  avg {rate:.1f} MB/s", flush=True)
+    print(f"  chunk {idx:04d}: done  {len(data)/1e6:.1f} MB  avg {rate:.3f} MB/s", flush=True)
     return idx, len(data)
 
 
