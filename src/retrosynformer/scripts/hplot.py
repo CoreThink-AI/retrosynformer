@@ -36,14 +36,31 @@ def _has_gpu() -> bool:
         return False
 
 
+def _load_dotenv_simple() -> None:
+    """Load KEY=VALUE pairs from the nearest .env file into os.environ (no-op if missing)."""
+    path = os.path.abspath(".")
+    for _ in range(6):  # search up to 6 levels up
+        candidate = os.path.join(path, ".env")
+        if os.path.isfile(candidate):
+            with open(candidate) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key = key.strip()
+                    val = val.strip().strip('"').strip("'")
+                    os.environ.setdefault(key, val)
+            return
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+
+
 def _sync_results_from_remote() -> None:
     """Rsync results/ from GPU_HOST (set in .env) into the local results/ dir."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
-
+    _load_dotenv_simple()
     gpu_host = os.environ.get("GPU_HOST", "").strip()
     if not gpu_host:
         print("hplot: GPU_HOST not set in .env — skipping remote sync", file=sys.stderr)
@@ -56,7 +73,7 @@ def _sync_results_from_remote() -> None:
     src = f"{gpu_host}results/"
     dst = "results/"
 
-    print(f"hplot: CPU-only environment — syncing {src} → {dst}")
+    print(f"hplot: CPU-only environment — syncing {src} → {dst}", flush=True)
     from retrosynformer.rsync import sync
     rc = sync(src, dst)
     if rc != 0:
