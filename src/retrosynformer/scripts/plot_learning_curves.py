@@ -41,6 +41,26 @@ METRICS = [
 _LINEDASHES = ["solid", "dash", "dot", "dashdot"]
 
 
+def _resolve_metrics(spec: str) -> list[str]:
+    """Expand a partial metric name to a list of full METRICS names.
+
+    Exact names pass through unchanged.  For partial names, substring-match
+    against METRICS; if the spec contains no 'train' qualifier, prefer the
+    valid_* variants when both exist (e.g. 'accuracy' → valid_action_accuracy +
+    valid_route_accuracy rather than all four accuracy metrics).
+    """
+    if spec in METRICS:
+        return [spec]
+    matches = [m for m in METRICS if spec in m]
+    if not matches:
+        return []
+    if "train" not in spec:
+        valid_only = [m for m in matches if m.startswith("valid_")]
+        if valid_only:
+            return valid_only
+    return matches
+
+
 def _load_jsonl(path: str) -> pd.DataFrame:
     rows = []
     with open(path) as f:
@@ -208,10 +228,12 @@ def main() -> None:
     )
     parser.add_argument("--top", type=int, default=10,
                         help="Number of top trials to plot (default: 10)")
-    parser.add_argument("--metric", action="append", dest="metrics",
-                        metavar="METRIC", choices=METRICS,
-                        help="Metric(s) to plot (repeat for multiple); trials are ranked by "
-                             "the first metric (default: valid_action_accuracy)")
+    parser.add_argument("-m", "--metric", action="append", dest="metrics",
+                        metavar="METRIC",
+                        help="Metric(s) to plot (repeat for multiple); partial names are expanded "
+                             "(e.g. 'accuracy' → valid_action_accuracy + valid_route_accuracy). "
+                             "Trials are ranked by the first metric (default: valid_action_accuracy). "
+                             f"Full names: {', '.join(METRICS)}")
     parser.add_argument("--also-train", action="store_true",
                         help="For each valid_* metric, also overlay the corresponding train_* metric")
     parser.add_argument("--xscale", default="linear", choices=["linear", "log"],
@@ -221,7 +243,7 @@ def main() -> None:
     parser.add_argument("--min-score", type=float, default=None,
                         help="For accuracy metrics: exclude trials below this threshold. "
                              "For loss metrics: exclude trials above this threshold.")
-    parser.add_argument("--study", metavar="STUDY_NAME", action="append", default=None,
+    parser.add_argument("-s", "--study", metavar="STUDY_NAME", action="append", default=None,
                         help="Only include trials from this study name (repeat for multiple studies)")
     parser.add_argument("--out", default=None,
                         help="Save to file (.html for interactive, .png/.svg for static image). "
@@ -238,7 +260,18 @@ def main() -> None:
                              "trial's curve at the projected target epoch.")
     args = parser.parse_args()
 
-    metrics: list[str] = args.metrics or ["valid_action_accuracy"]
+    raw_specs: list[str] = args.metrics or ["valid_action_accuracy"]
+    metrics: list[str] = []
+    _seen_metrics: set[str] = set()
+    for spec in raw_specs:
+        resolved = _resolve_metrics(spec)
+        if not resolved:
+            parser.error(f"Unknown metric {spec!r}. Full names: {', '.join(METRICS)}")
+        for m in resolved:
+            if m not in _seen_metrics:
+                metrics.append(m)
+                _seen_metrics.add(m)
+
     if args.also_train:
         extras = [
             m.replace("valid_", "train_") for m in metrics
@@ -438,23 +471,29 @@ def main() -> None:
         study_short = str(row["study_name"])
         if len(study_short) > 28:
             study_short = study_short[:25] + "..."
-        trial_label = f"#{rank} t{int(row['original_trial'])} {study_short}"
-        rank_val_str = f"{row['rank_val']:.4f}"
+        group_title = f"{study_short} t{int(row['original_trial'])}"
 
         for m_idx, metric in enumerate(metrics):
             if metric not in progress.columns:
                 print(f"  SKIP #{rank} {metric}: column missing in {jsonl}")
                 continue
             metric_short = metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+            lower = "loss" in metric
+            if args.xmax is not None and "epoch" in progress.columns:
+                _mask = progress["epoch"] <= args.xmax
+                _subset = progress[_mask] if _mask.any() else progress
+            else:
+                _subset = progress
+            best_val = float(_subset[metric].min() if lower else _subset[metric].max())
+            name = f"{metric_short} ({best_val:.4f})"
             dash = _LINEDASHES[m_idx % len(_LINEDASHES)]
             is_first = m_idx == 0
-            name = f"{trial_label} ({rank_val_str})" if is_first else f"{trial_label} {metric_short}"
             fig.add_trace(go.Scatter(
                 x=progress["epoch"],
                 y=progress[metric],
                 name=name,
                 legendgroup=f"trial_{rank}",
-                legendgrouptitle=dict(text=f"#{rank} t{int(row['original_trial'])}") if is_first else None,
+                legendgrouptitle=dict(text=group_title) if is_first else None,
                 showlegend=True,
                 line=dict(color=color, dash=dash, width=2.5 if is_first else 1.5),
                 opacity=0.75,
