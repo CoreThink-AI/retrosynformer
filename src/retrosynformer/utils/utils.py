@@ -22,7 +22,11 @@ def get_device() -> str:
     >>> get_device() in ("cuda", "mps", "cpu")
     True
     """
-    if torch.cuda.is_available():
+    import os
+    cuda_ok = torch.cuda.is_available()
+    print(f"[debug] get_device: torch.cuda.is_available()={cuda_ok}  HSA_OVERRIDE_GFX_VERSION={os.environ.get('HSA_OVERRIDE_GFX_VERSION', 'NOT SET')}  torch.version.hip={getattr(torch.version, 'hip', None)}", flush=True)
+    if cuda_ok:
+        print(f"[debug] get_device: device_count={torch.cuda.device_count()}  device_name={torch.cuda.get_device_name(0)}", flush=True)
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
