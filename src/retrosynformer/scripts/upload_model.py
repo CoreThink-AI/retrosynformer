@@ -384,11 +384,32 @@ def main():
     )
 
     if args.deploy:
+        # Auto-detect config alongside the model if not explicitly provided.
+        # Checks model.config.yaml then config.yaml in the same directory.
+        config_gcs_uri = args.deploy_config_gcs
+        if not config_gcs_uri:
+            model_dir = args.local_path.parent
+            gcs_dir = args.gcs_uri.rsplit("/", 1)[0]
+            for candidate in ("model.config.yaml", "config.yaml"):
+                local_cfg = model_dir / candidate
+                if local_cfg.exists():
+                    gcs_cfg = f"{gcs_dir}/config.yaml"
+                    print(f"Auto-uploading config {local_cfg} → {gcs_cfg}", flush=True)
+                    result = subprocess.run(
+                        ["gsutil", "cp", str(local_cfg), gcs_cfg],
+                        capture_output=True, text=True,
+                    )
+                    if result.returncode == 0:
+                        config_gcs_uri = gcs_cfg
+                    else:
+                        print(f"  Warning: config upload failed — {result.stderr.strip()}", flush=True)
+                    break
+
         deploy_to_cloud_run(
             gcs_uri=args.gcs_uri,
             service=args.deploy,
             region=args.deploy_region,
-            config_gcs_uri=args.deploy_config_gcs,
+            config_gcs_uri=config_gcs_uri,
         )
 
 
