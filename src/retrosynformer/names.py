@@ -1,19 +1,18 @@
-"""Canonical abbreviations for metric and config/hyperparameter names.
+"""Canonical abbreviations for all display names used across the codebase.
 
-Two public dicts:
-  NAME_ABBREV   — per-epoch metric names (valid_action_accuracy → v_a_acc, …)
-  PARAM_ABBREV  — model.config.yaml keys (n_heads → heads, attn_pdrop → a_pdrop, …)
+Single public dict:
+  ABBREV  — maps full names to short display labels for both per-epoch metrics
+            (valid_action_accuracy → v_a_acc) and model.config.yaml keys
+            (n_heads → heads, attn_pdrop → a_pdrop, …).
 
 Two helper functions:
-  abbrev(name)       — abbreviate a metric name (falls back to systematic rules)
-  param_abbrev(name) — abbreviate a config/hyper-parameter key (identity fallback)
+  abbrev(name)       — abbreviate any name; falls back to systematic rules for
+                       metric names not in ABBREV
+  param_abbrev(name) — abbreviate a config/hyperparameter key; identity fallback
 """
 
-# ---------------------------------------------------------------------------
-# Metric abbreviations (train_progress.jsonl column names)
-# ---------------------------------------------------------------------------
-
-NAME_ABBREV: dict[str, str] = {
+ABBREV: dict[str, str] = {
+    # Per-epoch metrics (train_progress.jsonl column names)
     "valid_action_accuracy": "v_a_acc",
     "valid_route_accuracy": "v_r_acc",
     "train_action_accuracy": "t_a_acc",
@@ -21,32 +20,7 @@ NAME_ABBREV: dict[str, str] = {
     "fraction_solved": "frac_solved",
     "valid_loss": "v_loss",
     "train_loss": "t_loss",
-}
-
-
-def abbrev(name: str) -> str:
-    """Return the abbreviated display name for a metric or column.
-
-    Falls back to a systematic shortening when the name is not in NAME_ABBREV.
-    """
-    if name in NAME_ABBREV:
-        return NAME_ABBREV[name]
-    return (
-        name
-        .replace("valid_", "v_")
-        .replace("train_", "t_")
-        .replace("action_accuracy", "a_acc")
-        .replace("route_accuracy", "r_acc")
-        .replace("_accuracy", "_acc")
-    )
-
-
-# ---------------------------------------------------------------------------
-# Parameter / model.config.yaml key abbreviations
-# ---------------------------------------------------------------------------
-
-PARAM_ABBREV: dict[str, str] = {
-    # Architecture
+    # Architecture (model.config.yaml keys)
     "n_heads": "heads",
     "n_layers": "layers",
     "head_dim": "h_dim",
@@ -70,9 +44,26 @@ PARAM_ABBREV: dict[str, str] = {
 }
 
 
+def abbrev(name: str) -> str:
+    """Return the abbreviated display name for a metric or column.
+
+    Falls back to a systematic shortening when the name is not in ABBREV.
+    """
+    if name in ABBREV:
+        return ABBREV[name]
+    return (
+        name
+        .replace("valid_", "v_")
+        .replace("train_", "t_")
+        .replace("action_accuracy", "a_acc")
+        .replace("route_accuracy", "r_acc")
+        .replace("_accuracy", "_acc")
+    )
+
+
 def param_abbrev(name: str) -> str:
     """Return the abbreviated display name for a config/hyperparameter key.
 
-    Returns *name* unchanged when not found in PARAM_ABBREV.
+    Returns *name* unchanged when not found in ABBREV.
     """
-    return PARAM_ABBREV.get(name, name)
+    return ABBREV.get(name, name)
