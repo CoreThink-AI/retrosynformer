@@ -359,6 +359,8 @@ def build_trials_df(
 
 def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric: str) -> pd.DataFrame:
     """Drop all-empty columns, print, and save the trials summary table; return the filtered DataFrame."""
+    from retrosynformer.training_display import format_epoch_header, format_epoch_row, iter_jsonl_rows
+
     _empty = {"", "-", "nan", "none", "null"}
     df = df.loc[:, ~df.apply(
         lambda col: col.map(lambda v: str(v).strip().lower() in _empty or (isinstance(v, float) and pd.isna(v))).all()
@@ -366,6 +368,35 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
     print(f"Top {len(top)} trials by {rank_metric}:")
     print(df.to_string(index=False))
     print()
+
+    # Show best-epoch row per trial in training-display format (same columns as
+    # the live terminal output during training).
+    _inc_study = "study_name" in top.columns
+    has_any_jsonl = False
+    for _, row in top.iterrows():
+        jp = str(row.get("jsonl_path", ""))
+        if not os.path.exists(jp):
+            continue
+        # Find the best-epoch record (highest rank_metric or lowest loss).
+        lower = "loss" in rank_metric
+        best_rec = None
+        best_val = float("inf") if lower else float("-inf")
+        for rec in iter_jsonl_rows(jp):
+            v = rec.get(rank_metric)
+            if v is None:
+                continue
+            if (lower and v < best_val) or (not lower and v > best_val):
+                best_val = v
+                best_rec = rec
+        if best_rec is None:
+            continue
+        if not has_any_jsonl:
+            print(format_epoch_header(include_trial=True, include_study=_inc_study))
+            has_any_jsonl = True
+        print(format_epoch_row(best_rec, include_trial=True, include_study=_inc_study))
+    if has_any_jsonl:
+        print()
+
     if not df.empty:
         top_study = str(top.iloc[0]["study_name"])
         top_base = str(top.iloc[0]["trial_base_dir"])
