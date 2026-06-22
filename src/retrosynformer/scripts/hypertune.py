@@ -713,7 +713,8 @@ def main():
         print(f"\n### Resuming trial {trial_num} from {trial_config}")
         _write({"event": "trial_resume", "trial": {"number": trial_num, "config": trial_config}}, run_jsonl)
         train(config_path=trial_config, resume=True, eval_routes_at_end=True,
-              trial_number=trial_num, study_name=args.study_name)
+              trial_number=trial_num, study_name=args.study_name,
+              n_epochs=args.n_epochs)
         _backfill_failed_trials(results_base)
 
     def log_trial(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:

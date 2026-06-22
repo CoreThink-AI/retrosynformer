@@ -20,6 +20,7 @@ and overwrites the primary local paths so the app loads a known-good model.
 """
 import gzip
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -40,8 +41,16 @@ def _has_manifest(bucket, blob_name: str) -> bool:
     return bucket.blob(f"{blob_name}.manifest").exists()
 
 
-def _download_chunked(bucket, blob_name: str, local_path: Path) -> None:
-    """Download a file that was uploaded as chunks by upload_model_to_gcs.py."""
+def _sha256_file(path: Path) -> str:
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            sha.update(block)
+    return sha.hexdigest()
+
+
+def _download_chunked(bucket, blob_name: str, local_path: Path) -> str:
+    """Download a file that was uploaded as chunks. Returns verified SHA-256 hex string."""
     manifest_text = bucket.blob(f"{blob_name}.manifest").download_as_text()
     parts = manifest_text.strip().split()
     n_chunks, total_bytes, expected_sha = int(parts[0]), int(parts[1]), parts[2]
@@ -75,6 +84,35 @@ def _download_chunked(bucket, blob_name: str, local_path: Path) -> None:
         sys.exit(f"SHA-256 mismatch after reassembly: expected {expected_sha}, got {actual_sha}")
 
     print(f"  SHA-256 verified. ({local_path.stat().st_size/1e6:.1f} MB)", flush=True)
+    return actual_sha
+
+
+def _write_metadata_sidecar(
+    local_path: Path,
+    gcs_uri: str,
+    blob,
+    sha256_hash: str | None = None,
+) -> None:
+    """Write a .metadata.json sidecar alongside local_path with GCS object metadata.
+
+    The sidecar is read by ModelPredictor to populate the /health endpoint with
+    the GCS source URI, upload timestamp, sha256 hash, and file size.
+    """
+    try:
+        stat = local_path.stat()
+        meta = {
+            "gcs_uri": gcs_uri,
+            "gcs_time_created": blob.time_created.isoformat() if blob.time_created else None,
+            "gcs_updated": blob.updated.isoformat() if blob.updated else None,
+            "gcs_size_bytes": blob.size,
+            "sha256": sha256_hash,
+            "file_size_bytes": stat.st_size,
+        }
+        sidecar = Path(str(local_path) + ".metadata.json")
+        sidecar.write_text(json.dumps(meta, indent=2))
+        print(f"  Metadata sidecar → {sidecar.name}", flush=True)
+    except Exception as exc:
+        print(f"  Warning: could not write metadata sidecar: {exc}", flush=True)
 
 
 def _download(gcs_uri: str, local_path: str) -> None:
@@ -89,14 +127,22 @@ def _download(gcs_uri: str, local_path: str) -> None:
     if _has_manifest(bucket, blob_name):
         if gcs_uri.endswith(".gz"):
             gz_path = path.with_suffix(path.suffix + ".gz")
-            _download_chunked(bucket, blob_name, gz_path)
+            chunk_sha = _download_chunked(bucket, blob_name, gz_path)
             print(f"  Decompressing {gz_path} → {path} …", flush=True)
             with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
             gz_path.unlink()
             print(f"  Done ({path.stat().st_size/1e6:.1f} MB decompressed)", flush=True)
+            # Compute sha256 of the decompressed model (what the server actually loads).
+            print(f"  Computing SHA-256 of decompressed model …", flush=True)
+            sha256 = _sha256_file(path)
+            print(f"  SHA-256: {sha256}", flush=True)
         else:
-            _download_chunked(bucket, blob_name, path)
+            sha256 = _download_chunked(bucket, blob_name, path)
+        # Use manifest blob's timeCreated as the canonical model release timestamp.
+        manifest_blob = bucket.blob(f"{blob_name}.manifest")
+        manifest_blob.reload()
+        _write_metadata_sidecar(path, gcs_uri, manifest_blob, sha256_hash=sha256)
         return
 
     # --- Single-file path ---
@@ -117,6 +163,10 @@ def _download(gcs_uri: str, local_path: str) -> None:
         print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
         blob.download_to_filename(local_path)
         print(f"  Done ({path.stat().st_size/1e6:.1f} MB)", flush=True)
+    print(f"  Computing SHA-256 …", flush=True)
+    sha256 = _sha256_file(path)
+    print(f"  SHA-256: {sha256}", flush=True)
+    _write_metadata_sidecar(path, gcs_uri, blob, sha256_hash=sha256)
 
 
 def _download_if_missing(gcs_uri: str, local_path: str) -> None:

@@ -94,6 +94,8 @@ class MoleculeConditionedMaskGenerator(nn.Module):
         >>> import torch
         >>> gen = MoleculeConditionedMaskGenerator(fp_dim=8, hidden_size=4, bottleneck=2)
         >>> _ = gen.eval()
+        >>> # Pin first-layer weights so zeros vs ones inputs reliably differ after ReLU.
+        >>> _ = torch.nn.init.constant_(gen.net[0].weight, 0.5)
         >>> mask = gen.get_mask(torch.zeros(1, 8))
         >>> mask.shape
         torch.Size([1, 1, 4])

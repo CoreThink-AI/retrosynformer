@@ -5,6 +5,76 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.38] — 2026-06-22
+
+**Server-side disconnect detection; evaluate retry on timeout; pass 1 timeout raised.**
+
+- `serve/app.py`: `/predict` and `/retrosynthesis` endpoints now poll `request.is_disconnected()` every 10 s while the beam-search executor thread runs. On disconnect, the semaphore is released immediately so the next request can start — prevents cascading timeouts from blocking the entire evaluation queue when a long computation outlasts the client timeout.
+- `evaluate.py`: pass 1 client timeout raised 240 s → 360 s to accommodate CUDA JIT warmup (~250 s) on the first request after a container restart.
+- `evaluate.py`: on a timeout exception the pass loop now `continue`s to the next pass (higher `max_routes`/`max_steps`/timeout) rather than `break`ing. Timed-out molecules are retried up to 3 passes before being marked as errors.
+
+---
+
+## [0.1.37] — 2026-06-21
+
+**Add `retrosynformer_version` to `/health` response.**
+
+- `serve/app.py`, `serve/schemas.py`: `/health` now returns `retrosynformer_version` (string, nullable) populated via `importlib.metadata.version("retrosynformer")` at import time. Reflects the version installed at container build time; `PackageNotFoundError`-safe.
+
+---
+
+## [0.1.36] — 2026-06-21
+
+**`rs-evaluate` progressive retry; `/health` endpoint model provenance; GCS metadata sidecar.**
+
+- `evaluate.py`: `rs-evaluate` now reads `RETROSYNFORMER_URL` and `RETROSYNFORMER_API_KEY` from `.env` (repo root or cwd) so `--endpoint` and `--api-key` can be omitted when running against the default deployment.
+- `evaluate.py`: progressive retry — molecules without a complete route (`all_leaves_purchasable=False`) are retried up to twice: pass 2 uses `max_routes=30, max_steps=10`; pass 3 uses `max_routes=50, max_steps=15`. Endpoint mode only (local model runs single pass). The YAML output and markdown report record `retrosynformer_solved_on_pass` and break out solved counts per pass.
+- `evaluate.py`: fix `/retrosynthesis` endpoint parameter names — request body now correctly uses `max_routes`/`max_steps` (was `beam_width` which the schema does not recognise).
+- `evaluate.py`: client-side request timeout now scales with search depth — 240s / 600s / 1500s for passes 1/2/3 (was hardcoded 180s).
+- Cloud Run `retrosynformer-inference-v3`: request timeout raised from 600s to 1800s to support deep beam searches in pass 3.
+- `serve/app.py`, `serve/predictor.py`, `serve/schemas.py`: `/health` endpoint now returns `model_path` (GCS URI from sidecar, not container path), `model_released_at` (GCS `timeCreated` from sidecar), `model_sha256_hash` (SHA-256 of decompressed local file), and `model_file_size_bytes` (decompressed file size).
+- `scripts/gcs_download.py`: after each artifact download, writes a `.metadata.json` sidecar alongside the local file containing GCS URI, `timeCreated`, `updated`, `gcs_size_bytes`, `sha256` (computed locally from the decompressed file), and `file_size_bytes`. SHA-256 computation is ~0.5-1 s for a 1-2 GB model — negligible vs. download time.
+
+---
+
+## [0.1.35] — 2026-06-22
+
+**`rs-upload --deploy` auto-uploads config; fixes subprocess import and flaky doctest.**
+
+- `upload_model.py`: `--deploy` now auto-detects `model.config.yaml` (or `config.yaml`) beside the local model, uploads it to `<gcs_dir>/config.yaml` via `gsutil cp`, and passes it as `MODEL_CONFIG_GCS` in the same `gcloud run services update` call. Prevents architecture mismatch crash when weights and config have different `hidden_size`/`n_layers`.
+- `upload_model.py`: add missing top-level `import subprocess` (was dropped from `_gcs_client` during auth-retry refactor).
+- `structured_dropout.py`: fix flaky `get_mask` doctest — pin `net[0].weight` to 0.5 so zeros vs ones inputs reliably diverge after ReLU regardless of random init.
+
+---
+
+## [0.1.34] — 2026-06-21
+
+**`rs-evaluate`, `rs-upload --deploy`, and upload robustness fixes.**
+
+- `scripts/evaluate.py` + `src/retrosynformer/scripts/evaluate.py`: new `rs-evaluate` CLI command. Runs retrosynthesis evaluation against all test molecules (reads `test_molecules.yml`), supports both HTTP endpoint mode (`--endpoint URL`) and local model mode (`--model path/to/model.pth`). Auto-detects study name and trial number from model path. Fills null fields (SMILES, InChI, InChIKey, CID) via PubChem API. Saves `data/test_molecules_retrosynformer_{study}-trial{trial}-routes.yml` and a markdown report.
+- `upload_model.py`: add `--deploy SERVICE` flag — after a successful upload, runs `gcloud run services update SERVICE --update-env-vars MODEL_WEIGHTS_GCS=<gcs_uri>` to redeploy the Cloud Run inference endpoint with the new model. `--deploy-config-gcs` also updates `MODEL_CONFIG_GCS`.
+- `upload_model.py`: auth-error retry — `_upload_chunk` catches credential expiry errors, refreshes the `gcloud auth print-access-token` token (clears per-thread cache), and retries the chunk once automatically.
+- `upload_model.py`: auto-retry failed chunks — after the main upload loop, any failed chunks are retried with `skip_existing=True` and a fresh auth token.
+- `upload_model.py`: deterministic gzip compression — use `gzip.GzipFile(mtime=0)` so repeated `--compress` runs on the same file produce identical bytes; fixes `--skip-existing` MD5 mismatches across invocations.
+
+---
+
+## [0.1.33] — 2026-06-21
+
+**`rs-hypertune --resume` now respects `--n-epochs`.**
+
+- `hypertune.py`: the `train()` call in the `--resume` block was missing `n_epochs=args.n_epochs`, so the saved `model.config.yaml` value was used instead of the CLI argument. Fixed by passing `n_epochs=args.n_epochs` through.
+
+---
+
+## [0.1.32] — 2026-06-21
+
+**Auto-disable hipBLASLt on unsupported ROCm architectures.**
+
+- `retrosynformer/__init__.py`: new `_disable_hipblaslt_if_unsupported()` runs at package import time (before any submodule loads torch). Sets `TORCH_BLAS_PREFER_HIPBLASLT=0` when `HSA_OVERRIDE_GFX_VERSION` is present (non-standard arch such as Strix Halo) or when `rocminfo` reports a gfx name outside `{gfx90a, gfx940, gfx941, gfx942}`. No-ops if the env var is already set or `/opt/rocm` is absent.
+
+---
+
 ## [0.1.31] — 2026-06-21
 
 **Capture rsync output into `logger.info()` so `hplot` is silent by default.**
