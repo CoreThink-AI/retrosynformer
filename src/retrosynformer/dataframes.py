@@ -266,14 +266,14 @@ def build_trials_df(
         return str(val)
 
     # Determine column headers for each table metric.
-    # The Optuna objective metric gets a "*" suffix; the rank metric gets "↑"/"↓".
+    # The Optuna objective metric gets a "^" suffix; the rank metric gets "↑"/"↓".
     # When a metric is both the rank metric and the Optuna objective, both markers apply.
     def _metric_col_hdr(m: str) -> str:
         short = _metric_short(m)
         if m == rank_metric:
             short += direction
         if m == optuna_objective_metric:
-            short += "*"
+            short += "^"
         return short
 
     # Determine whether to add a separate Optuna-objective column.
@@ -281,7 +281,7 @@ def build_trials_df(
     obj_col_name: str | None = None
     obj_col_hdr: str | None = None
     if optuna_objective_metric not in table_metrics:
-        obj_col_name = _metric_short(optuna_objective_metric) + "*"
+        obj_col_name = _metric_short(optuna_objective_metric) + "^"
         obj_col_hdr = obj_col_name
 
     rows = []
