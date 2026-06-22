@@ -5,6 +5,16 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.35] — 2026-06-22
+
+**`rs-upload --deploy` auto-uploads config; fixes subprocess import and flaky doctest.**
+
+- `upload_model.py`: `--deploy` now auto-detects `model.config.yaml` (or `config.yaml`) beside the local model, uploads it to `<gcs_dir>/config.yaml` via `gsutil cp`, and passes it as `MODEL_CONFIG_GCS` in the same `gcloud run services update` call. Prevents architecture mismatch crash when weights and config have different `hidden_size`/`n_layers`.
+- `upload_model.py`: add missing top-level `import subprocess` (was dropped from `_gcs_client` during auth-retry refactor).
+- `structured_dropout.py`: fix flaky `get_mask` doctest — pin `net[0].weight` to 0.5 so zeros vs ones inputs reliably diverge after ReLU regardless of random init.
+
+---
+
 ## [0.1.34] — 2026-06-21
 
 **`rs-evaluate`, `rs-upload --deploy`, and upload robustness fixes.**
