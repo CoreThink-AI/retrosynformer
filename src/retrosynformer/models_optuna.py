@@ -1120,11 +1120,15 @@ def _write_complete_trial(
     trial_num: int,
     value: float,
     datetime_complete,
+    *,
+    is_estimated: bool = False,
 ) -> None:
     """Write COMPLETE state + objective value to the SQLite DB.
 
     Only inserts a trial_values row when none exists for objective=0.
     Always updates trials.state and datetime_complete.
+    When *is_estimated* is True, writes a ``rs_estimated_objective`` user
+    attribute so callers can distinguish proxy-filled values from real ones.
     """
     con = sqlite3.connect(str(db_path))
     try:
@@ -1155,6 +1159,16 @@ def _write_complete_trial(
             "UPDATE trials SET state='COMPLETE', datetime_complete=? WHERE trial_id=?",
             (dt_str, trial_id),
         )
+
+        # Mark estimated (proxy-filled) objectives so the display table can
+        # distinguish them from objectives that were actually measured.
+        flag_val = '"1"' if is_estimated else '"0"'
+        con.execute(
+            "INSERT OR REPLACE INTO trial_user_attributes (trial_id, key, value_json)"
+            " VALUES (?, 'rs_estimated_objective', ?)",
+            (trial_id, flag_val),
+        )
+
         con.commit()
     finally:
         con.close()
@@ -1332,7 +1346,7 @@ def complete_stale_trials(
         }
 
         if not dry_run:
-            _write_complete_trial(db_path, trial_num, estimated_value, dt_complete)
+            _write_complete_trial(db_path, trial_num, estimated_value, dt_complete, is_estimated=True)
 
     return results
 
