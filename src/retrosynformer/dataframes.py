@@ -5,6 +5,7 @@ import sqlite3
 
 import pandas as pd
 
+from retrosynformer.names import abbrev
 from retrosynformer.study import dfs_to_trials_df, to_dfs
 
 # ---------------------------------------------------------------------------
@@ -235,20 +236,7 @@ def build_trials_df(
     if optuna_objective_metric is None:
         optuna_objective_metric = rank_metric
 
-    _METRIC_SHORT = {
-        "valid_action_accuracy": "v_a_acc",
-        "valid_route_accuracy": "v_r_acc",
-        "train_action_accuracy": "t_a_acc",
-        "train_route_accuracy": "t_r_acc",
-        "fraction_solved": "frac_solved",
-        "valid_loss": "v_loss",
-        "train_loss": "t_loss",
-    }
-
-    def _metric_short(m: str) -> str:
-        if m in _METRIC_SHORT:
-            return _METRIC_SHORT[m]
-        return m.replace("valid_", "v_").replace("train_", "t_").replace("action_accuracy", "a_acc").replace("route_accuracy", "r_acc").replace("_accuracy", "_acc")
+    _metric_short = abbrev
 
     _ABBREV = {
         "early_stopping_patience": "es_patience",
