@@ -233,6 +233,10 @@ def test_client():
     mock_pred.device = "cpu"
     mock_pred.action_dim = 589
     mock_pred.beam_width_default = 10
+    mock_pred.model_path = "gs://fake-bucket/fake/model.pth.gz"
+    mock_pred.model_released_at = "2026-01-01T00:00:00"
+    mock_pred.model_sha256_hash = "a" * 64
+    mock_pred.model_file_size_bytes = 1_234_567_890
     mock_pred.predict_sync.return_value = _FAKE_PREDICT_RESULT
 
     env_patch = {

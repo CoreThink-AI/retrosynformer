@@ -26,6 +26,15 @@ from typing import Any
 _PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound"
 _PUBCHEM_PROPS = "IsomericSMILES,CanonicalSMILES,InChI,InChIKey,MolecularWeight"
 
+# Progressive retry passes: (max_routes, max_steps, client_timeout_s, label).
+# max_routes ≤ 50, max_steps ≤ 20 (endpoint schema limits).
+# Client timeouts should be < Cloud Run request timeout (see rs-upload --deploy).
+_RETRY_PASSES = [
+    (10,  6,  240,  "pass 1"),
+    (30, 10,  600,  "pass 2"),
+    (50, 15, 1500,  "pass 3"),
+]
+
 
 # ── PubChem lookup ────────────────────────────────────────────────────────────
 
@@ -92,7 +101,13 @@ def smiles_valid(smiles: str | None) -> bool:
 # ── Route-fetching: endpoint mode ─────────────────────────────────────────────
 
 def fetch_routes_endpoint(
-    smiles: str, endpoint: str, api_key: str | None, beam_width: int, top_routes: int
+    smiles: str,
+    endpoint: str,
+    api_key: str | None,
+    max_routes: int,
+    top_routes: int,
+    max_steps: int = 6,
+    timeout: int = 240,
 ) -> list[dict]:
     import requests
     headers = {}
@@ -100,9 +115,9 @@ def fetch_routes_endpoint(
         headers["X-API-Key"] = api_key
     resp = requests.post(
         f"{endpoint.rstrip('/')}/retrosynthesis",
-        json={"smiles": smiles, "beam_width": beam_width},
+        json={"smiles": smiles, "max_routes": max_routes, "max_steps": max_steps},
         headers=headers,
-        timeout=180,
+        timeout=timeout,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -274,14 +289,21 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
     depths = [br["depth"] for m in molecules if (br := best_route(m)) and br and br["depth"] > 0]
     avg_depth = sum(depths) / len(depths) if depths else 0
 
+    pass_counts = [0, 0, 0]
+    for m in molecules:
+        p = m.get("retrosynformer_solved_on_pass")
+        if p and 1 <= p <= 3:
+            pass_counts[p - 1] += 1
+
     lines = [
         f"# RetroSynFormer Evaluation Report",
         f"",
         f"**Date:** {meta['date']}  ",
         f"**Study:** {meta['study_name']}  Trial: {meta['trial_num']}  ",
         f"**Mode:** {meta['mode']}  ",
-        f"**Beam width:** {meta['beam_width']}  ",
-        f"**Top routes saved:** {meta['top_routes']}",
+        f"**Initial beam width (max_routes):** {meta['beam_width']}  ",
+        f"**Top routes saved:** {meta['top_routes']}  ",
+        f"**Progressive retry:** pass 1 ({meta['beam_width']}/6), pass 2 (30/10), pass 3 (50/15)",
         f"",
         f"---",
         f"",
@@ -292,6 +314,9 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
         f"| Molecules tested | {valid} |",
         f"| Skipped (no SMILES / error) | {errors} |",
         f"| **Solved** (all_leaves_purchasable) | **{solved}/{valid}** |",
+        f"| Solved on pass 1 (max_routes={meta['beam_width']}, max_steps=6) | {pass_counts[0]} |",
+        f"| Solved on pass 2 (max_routes=30, max_steps=10) | {pass_counts[1]} |",
+        f"| Solved on pass 3 (max_routes=50, max_steps=15) | {pass_counts[2]} |",
         f"| Trivially solved (depth=0, is a building block) | {trivial} |",
         f"| Cyclic best route | {cyclic_count} |",
         f"| Avg depth of non-trivial best route | {avg_depth:.1f} |",
@@ -300,8 +325,8 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
         f"",
         f"## Per-Molecule Results",
         f"",
-        f"| Molecule | Complexity | Routes | Best depth | Solved | Cyclic | Leaves (purch/total) | Score |",
-        f"|----------|-----------|--------|-----------|--------|--------|----------------------|-------|",
+        f"| Molecule | Complexity | Routes | Best depth | Solved | Pass | Cyclic | Leaves (purch/total) | Score |",
+        f"|----------|-----------|--------|-----------|--------|------|--------|----------------------|-------|",
     ]
 
     for mol in molecules:
@@ -309,19 +334,23 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
         cplx = mol.get("complexity", "—")
         err = mol.get("retrosynformer_error")
         if err:
-            lines.append(f"| {name} | {cplx} | — | — | — | — | — | *{err}* |")
+            lines.append(f"| {name} | {cplx} | — | — | — | — | — | — | *{err}* |")
             continue
         routes = mol.get("retrosynformer_routes") or []
         br = routes[0] if routes else None
         n_routes = len(routes)
         depth = br["depth"] if br else "—"
         solved_icon = "✓" if br and br.get("all_leaves_purchasable") else "✗"
+        pass_icon = str(mol.get("retrosynformer_solved_on_pass") or "—")
         cyclic_icon = "⚠" if br and _is_cyclic(br) else ""
         leaves = br.get("leaf_molecules", []) if br else []
         purch = sum(1 for l in leaves if l.get("purchasable"))
         leaf_str = f"{purch}/{len(leaves)}"
         score = f"{br['score']:.4f}" if br else "—"
-        lines.append(f"| {name} | {cplx} | {n_routes} | {depth} | {solved_icon} | {cyclic_icon} | {leaf_str} | {score} |")
+        lines.append(
+            f"| {name} | {cplx} | {n_routes} | {depth} | {solved_icon} | {pass_icon} | "
+            f"{cyclic_icon} | {leaf_str} | {score} |"
+        )
 
     lines += ["", "---", "", "## Per-Molecule Route Details", ""]
 
@@ -406,32 +435,91 @@ def _is_cyclic(route: dict) -> bool:
     return False
 
 
+# ── .env loader ──────────────────────────────────────────────────────────────
+
+def _load_dotenv_defaults() -> dict[str, str]:
+    """Read RETROSYNFORMER_URL and RETROSYNFORMER_API_KEY from .env files.
+
+    Searches in order: cwd, repo root (parents[3] relative to this file),
+    then the adjacent synthesis-routes-generator directory.  First value wins.
+    """
+    want = {"RETROSYNFORMER_URL", "RETROSYNFORMER_API_KEY"}
+    found: dict[str, str] = {}
+    candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).parents[3] / ".env",  # repo root
+        Path(__file__).parents[4] / "synthesis-routes-generator" / ".env",
+    ]
+    for env_path in candidates:
+        if not env_path.exists():
+            continue
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key = key.strip()
+                    if key not in want:
+                        continue
+                    val = val.strip().strip('"').strip("'")
+                    found.setdefault(key, val)
+        except OSError:
+            pass
+        if found.keys() >= want:
+            break
+    return found
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     import datetime
+
+    dotenv = _load_dotenv_defaults()
+    default_endpoint = os.environ.get("RETROSYNFORMER_URL") or dotenv.get("RETROSYNFORMER_URL")
+    default_api_key = os.environ.get("RETROSYNFORMER_API_KEY") or dotenv.get("RETROSYNFORMER_API_KEY")
 
     parser = argparse.ArgumentParser(
         description="Evaluate RetroSynFormer routes against test molecules.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  # Endpoint mode\n"
+            "  # Endpoint mode (URL defaults to RETROSYNFORMER_URL in .env)\n"
+            "  rs-evaluate --study-name v3\n\n"
+            "  # Override endpoint explicitly\n"
             "  rs-evaluate --endpoint https://retrosynformer-inference-v3-knq67derjq-uc.a.run.app"
             " --study-name v3\n\n"
             "  # Local model mode\n"
-            "  rs-evaluate --model results/hypertune-large-23-layer/trial_000/model.pth\n"
+            "  rs-evaluate --model results/hypertune-large-23-layer/trial_000/model.pth\n\n"
+            "  Progressive retry (endpoint mode only):\n"
+            "    Pass 1: max_routes=10, max_steps=6\n"
+            "    Pass 2: max_routes=30, max_steps=10  (if not solved)\n"
+            "    Pass 3: max_routes=50, max_steps=15  (if still not solved)\n"
         ),
     )
-    parser.add_argument("--endpoint", help="HTTP endpoint base URL (e.g. https://...run.app)")
+    parser.add_argument(
+        "--endpoint",
+        default=default_endpoint,
+        help=(
+            "HTTP endpoint base URL (default: RETROSYNFORMER_URL from .env or env var; "
+            f"currently: {default_endpoint or 'not set'})"
+        ),
+    )
     parser.add_argument("--model", type=Path, help="Path to local model.pth")
     parser.add_argument("--config", type=Path, help="Config YAML for local model (auto-detected if omitted)")
-    parser.add_argument("--api-key", help="API key for endpoint (default: $RETROSYNFORMER_API_KEY)")
+    parser.add_argument(
+        "--api-key",
+        default=default_api_key,
+        help="API key for endpoint (default: RETROSYNFORMER_API_KEY from .env or env var)",
+    )
     parser.add_argument(
         "--test-molecules", type=Path,
         help="Path to test_molecules.yml (default: searches standard locations)",
     )
-    parser.add_argument("--beam-width", type=int, default=10, help="Beam width (default: 10)")
+    parser.add_argument("--beam-width", type=int, default=10,
+                        help="Initial max_routes for pass 1 (default: 10); passes 2/3 use 30 and 50")
     parser.add_argument("--top-routes", type=int, default=3, help="Routes per molecule to save (default: 3)")
     parser.add_argument("--output-dir", type=Path, default=Path("data"), help="Output directory (default: data/)")
     parser.add_argument("--study-name", help="Override auto-detected study name")
@@ -444,10 +532,13 @@ def main():
     parser.add_argument("--no-report", dest="report", action="store_false")
     args = parser.parse_args()
 
+    if args.model:
+        args.endpoint = None  # --model takes precedence
     if not args.endpoint and not args.model:
-        parser.error("Provide either --endpoint URL or --model path/to/model.pth")
-    if args.endpoint and args.model:
-        parser.error("Provide either --endpoint or --model, not both")
+        parser.error(
+            "Provide either --endpoint URL or --model path/to/model.pth, "
+            "or set RETROSYNFORMER_URL in .env"
+        )
 
     # Auto-detect study name and trial number
     model_path = args.model
@@ -464,7 +555,7 @@ def main():
     test_mol_path = args.test_molecules
     if test_mol_path is None:
         candidates = [
-            Path(__file__).parents[5] / "synthesis-routes-generator" / "eval" / "test_molecules.yml",
+            Path(__file__).parents[4] / "synthesis-routes-generator" / "eval" / "test_molecules.yml",
             Path("test_molecules.yml"),
             Path("data/test_molecules.yml"),
             Path("eval/test_molecules.yml"),
@@ -517,7 +608,14 @@ def main():
     print(f"Mode: {mode}", flush=True)
     print(f"Output: {out_yaml}", flush=True)
 
-    # Evaluate each molecule
+    # Build pass config: honour --beam-width for pass 1, then fixed escalation.
+    # Each entry: (max_routes, max_steps, client_timeout_s, label)
+    pass_config = [
+        (args.beam_width, _RETRY_PASSES[0][1], _RETRY_PASSES[0][2], _RETRY_PASSES[0][3]),
+        *_RETRY_PASSES[1:],
+    ]
+
+    # Evaluate each molecule (progressive retry in endpoint mode)
     results: list[dict] = []
     n = len(molecules)
     for i, mol in enumerate(molecules):
@@ -528,7 +626,7 @@ def main():
 
         # PubChem lookup for missing fields
         if args.pubchem and (not smiles or not mol.get("inchikey")):
-            print(f"  Looking up PubChem …", flush=True)
+            print("  Looking up PubChem …", flush=True)
             mol = pubchem_lookup(mol)
             smiles = mol.get("smiles")
 
@@ -541,36 +639,57 @@ def main():
             results.append(mol)
             continue
 
-        t0 = time.perf_counter()
-        try:
-            if args.endpoint:
-                routes = fetch_routes_endpoint(
-                    smiles, args.endpoint, api_key, args.beam_width, args.top_routes
+        routes: list[dict] = []
+        solved_on_pass: int | None = None
+        pass_error: str | None = None
+
+        passes = pass_config if args.endpoint else [pass_config[0]]
+        for pass_num, (max_routes, max_steps, req_timeout, pass_label) in enumerate(passes, 1):
+            if pass_num > 1:
+                print(
+                    f"  → {pass_label}: max_routes={max_routes} max_steps={max_steps} "
+                    f"timeout={req_timeout}s",
+                    flush=True,
                 )
-            else:
-                routes = fetch_routes_local(
-                    smiles, model_path, config_path, args.beam_width, args.top_routes
+            t0 = time.perf_counter()
+            try:
+                if args.endpoint:
+                    routes = fetch_routes_endpoint(
+                        smiles, args.endpoint, api_key, max_routes, args.top_routes,
+                        max_steps, req_timeout,
+                    )
+                else:
+                    routes = fetch_routes_local(
+                        smiles, model_path, config_path, max_routes, args.top_routes
+                    )
+                elapsed = time.perf_counter() - t0
+                br = routes[0] if routes else None
+                solved = bool(br and br.get("all_leaves_purchasable"))
+                depth = br["depth"] if br else "—"
+                cyclic = _is_cyclic(br) if br else False
+                print(
+                    f"  {pass_label}: {len(routes)} route(s)  depth={depth}  solved={solved}  "
+                    f"{'⚠cyclic ' if cyclic else ''}{elapsed:.1f}s",
+                    flush=True,
                 )
-            elapsed = time.perf_counter() - t0
-            br = routes[0] if routes else None
-            solved = br and br.get("all_leaves_purchasable")
-            depth = br["depth"] if br else "—"
-            cyclic = _is_cyclic(br) if br else False
-            print(
-                f"  {len(routes)} route(s)  depth={depth}  solved={solved}  "
-                f"{'⚠cyclic ' if cyclic else ''}{elapsed:.1f}s",
-                flush=True,
-            )
-            mol = dict(mol)
-            mol["retrosynformer_routes"] = routes
-            results.append(mol)
-        except Exception as exc:
-            elapsed = time.perf_counter() - t0
-            print(f"  ERROR ({elapsed:.1f}s): {exc}", flush=True)
-            mol = dict(mol)
+                if solved:
+                    solved_on_pass = pass_num
+                    break
+                pass_error = None  # reset any earlier error
+            except Exception as exc:
+                elapsed = time.perf_counter() - t0
+                print(f"  ERROR ({elapsed:.1f}s): {exc}", flush=True)
+                pass_error = f"API error: {exc}"
+                break  # don't retry on hard errors
+
+        mol = dict(mol)
+        if pass_error and not routes:
             mol["retrosynformer_routes"] = None
-            mol["retrosynformer_error"] = f"API error: {exc}"
-            results.append(mol)
+            mol["retrosynformer_error"] = pass_error
+        else:
+            mol["retrosynformer_routes"] = routes
+            mol["retrosynformer_solved_on_pass"] = solved_on_pass
+        results.append(mol)
 
     # Write YAML
     import datetime as dt
@@ -580,7 +699,9 @@ def main():
         f"Generated: {today}",
         f"Study: {study_name}  Trial: {trial_num}",
         f"Mode: {mode}",
-        f"beam_width: {args.beam_width}  top_routes: {args.top_routes}",
+        f"pass1: max_routes={args.beam_width} max_steps=6  "
+        f"pass2: max_routes=30 max_steps=10  "
+        f"pass3: max_routes=50 max_steps=15  top_routes: {args.top_routes}",
     ]
     print(f"\nWriting {out_yaml} …", flush=True)
     try:
@@ -588,14 +709,16 @@ def main():
 
         # Merge results back into YAML preserving original field order
         out_mols = []
+        _route_keys = {"retrosynformer_routes", "retrosynformer_error", "retrosynformer_solved_on_pass"}
         for mol in results:
-            d = {k: v for k, v in mol.items()
-                 if k not in ("retrosynformer_routes", "retrosynformer_error")}
+            d = {k: v for k, v in mol.items() if k not in _route_keys}
             if mol.get("retrosynformer_error"):
                 d["retrosynformer_routes"] = None
                 d["retrosynformer_error"] = mol["retrosynformer_error"]
             else:
                 d["retrosynformer_routes"] = mol.get("retrosynformer_routes")
+                if mol.get("retrosynformer_solved_on_pass") is not None:
+                    d["retrosynformer_solved_on_pass"] = mol["retrosynformer_solved_on_pass"]
             out_mols.append(d)
 
         header_str = "\n".join(f"# {l}" for l in header)

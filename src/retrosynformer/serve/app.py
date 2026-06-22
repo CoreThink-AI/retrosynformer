@@ -63,6 +63,10 @@ def health() -> HealthResponse:
         device=predictor.device if predictor else "unknown",
         beam_width_default=predictor.beam_width_default if predictor else 0,
         action_dim=predictor.action_dim if predictor else 0,
+        model_path=predictor.model_path if predictor else None,
+        model_released_at=predictor.model_released_at if predictor else None,
+        model_sha256_hash=predictor.model_sha256_hash if predictor else None,
+        model_file_size_bytes=predictor.model_file_size_bytes if predictor else None,
     )
 
 

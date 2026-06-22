@@ -5,6 +5,20 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.36] — 2026-06-21
+
+**`rs-evaluate` progressive retry; `/health` endpoint model provenance; GCS metadata sidecar.**
+
+- `evaluate.py`: `rs-evaluate` now reads `RETROSYNFORMER_URL` and `RETROSYNFORMER_API_KEY` from `.env` (repo root or cwd) so `--endpoint` and `--api-key` can be omitted when running against the default deployment.
+- `evaluate.py`: progressive retry — molecules without a complete route (`all_leaves_purchasable=False`) are retried up to twice: pass 2 uses `max_routes=30, max_steps=10`; pass 3 uses `max_routes=50, max_steps=15`. Endpoint mode only (local model runs single pass). The YAML output and markdown report record `retrosynformer_solved_on_pass` and break out solved counts per pass.
+- `evaluate.py`: fix `/retrosynthesis` endpoint parameter names — request body now correctly uses `max_routes`/`max_steps` (was `beam_width` which the schema does not recognise).
+- `evaluate.py`: client-side request timeout now scales with search depth — 240s / 600s / 1500s for passes 1/2/3 (was hardcoded 180s).
+- Cloud Run `retrosynformer-inference-v3`: request timeout raised from 600s to 1800s to support deep beam searches in pass 3.
+- `serve/app.py`, `serve/predictor.py`, `serve/schemas.py`: `/health` endpoint now returns `model_path` (GCS URI from sidecar, not container path), `model_released_at` (GCS `timeCreated` from sidecar), `model_sha256_hash` (SHA-256 of decompressed local file), and `model_file_size_bytes` (decompressed file size).
+- `scripts/gcs_download.py`: after each artifact download, writes a `.metadata.json` sidecar alongside the local file containing GCS URI, `timeCreated`, `updated`, `gcs_size_bytes`, `sha256` (computed locally from the decompressed file), and `file_size_bytes`. SHA-256 computation is ~0.5-1 s for a 1-2 GB model — negligible vs. download time.
+
+---
+
 ## [0.1.35] — 2026-06-22
 
 **`rs-upload --deploy` auto-uploads config; fixes subprocess import and flaky doctest.**

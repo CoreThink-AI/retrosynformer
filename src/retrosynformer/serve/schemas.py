@@ -177,9 +177,17 @@ class HealthResponse(BaseModel):
     ...     device="cpu",
     ...     beam_width_default=10,
     ...     action_dim=589,
+    ...     model_path="gs://bucket/retrosynformer/v3/model.pth.gz",
+    ...     model_released_at="2026-06-21T12:00:00",
+    ...     model_sha256_hash="abc123",
+    ...     model_file_size_bytes=1_200_000_000,
     ... )
     >>> h.status
     'ok'
+    >>> h.model_path
+    'gs://bucket/retrosynformer/v3/model.pth.gz'
+    >>> h.model_file_size_bytes
+    1200000000
     """
 
     status: Literal["ok", "loading", "error"]
@@ -187,3 +195,7 @@ class HealthResponse(BaseModel):
     device: str
     beam_width_default: int
     action_dim: int
+    model_path: Optional[str] = None
+    model_released_at: Optional[str] = None
+    model_sha256_hash: Optional[str] = None
+    model_file_size_bytes: Optional[int] = None

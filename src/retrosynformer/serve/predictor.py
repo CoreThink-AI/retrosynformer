@@ -1,8 +1,11 @@
 """ModelPredictor: loads the model once at startup and exposes predict_sync for thread-pool use."""
 
 import hashlib
+import os
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 
 import torch
 
@@ -154,6 +157,7 @@ class ModelPredictor:
         self._predictor = RoutePredictor(model, config)
         self._config = config
         self.device = device
+        self._model_path = model_path
         # Serialise inference calls — predict_all_routes mutates self.env on the
         # RoutePredictor instance, so concurrent calls from the thread pool must queue.
         self._lock = threading.Lock()
@@ -165,6 +169,54 @@ class ModelPredictor:
     @property
     def beam_width_default(self) -> int:
         return int(self._config["evaluation"].get("beam_width", 10))
+
+    def _read_model_metadata(self) -> dict:
+        """Read the .metadata.json sidecar written by gcs_download.py, if present."""
+        try:
+            import json
+            sidecar = Path(self._model_path + ".metadata.json")
+            if sidecar.exists():
+                return json.loads(sidecar.read_text())
+        except Exception:
+            pass
+        return {}
+
+    @property
+    def model_path(self) -> str:
+        """GCS URI from sidecar, or container-local path as fallback."""
+        meta = self._read_model_metadata()
+        return (
+            meta.get("gcs_uri")
+            or os.environ.get("MODEL_WEIGHTS_GCS")
+            or self._model_path
+        )
+
+    @property
+    def model_released_at(self) -> str | None:
+        """GCS object timeCreated from sidecar, or local file mtime as fallback."""
+        meta = self._read_model_metadata()
+        if meta.get("gcs_time_created"):
+            return meta["gcs_time_created"]
+        try:
+            mtime = os.path.getmtime(self._model_path)
+            return datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+        except OSError:
+            return None
+
+    @property
+    def model_sha256_hash(self) -> str | None:
+        return self._read_model_metadata().get("sha256")
+
+    @property
+    def model_file_size_bytes(self) -> int | None:
+        meta = self._read_model_metadata()
+        val = meta.get("file_size_bytes")
+        if val is not None:
+            return int(val)
+        try:
+            return os.path.getsize(self._model_path)
+        except OSError:
+            return None
 
     def predict_sync(
         self,
