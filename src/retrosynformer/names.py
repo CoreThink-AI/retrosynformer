@@ -37,6 +37,8 @@ ABBREV: dict[str, str] = {
     "early_stopping_patience": "es_pat",
     "eval_routes_frequency": "eval_freq",
     "beam_width": "bw",
+    # Epoch counts
+    "n_epochs": "epochs",
     # Dataset / study
     "valid_set": "vset",
     "objective_metric": "obj_metric",

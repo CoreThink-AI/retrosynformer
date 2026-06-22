@@ -318,7 +318,7 @@ def build_trials_df(
             else:
                 rec["obj_estim"] = "-"
 
-        rec["epoch"] = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
+        rec[abbreviate("n_epochs")] = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
         rec["state"] = str(row.get("state", ""))
         rec["trial"] = int(row["original_trial"])
         rec["study"] = str(row["study_name"])
@@ -337,8 +337,7 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
     occupies exactly one row.  Columns that appear in both tables (trial,
     study, valid_action_accuracy, valid_route_accuracy) are kept from the
     Optuna summary side and dropped from the training-metrics side.  The
-    Optuna summary's ``epoch`` column (n_epochs trained) is renamed to
-    ``n_ep`` to make room for the best-epoch number from the jsonl.
+    leading columns are reordered to: study, dataset, trial, epochs.
     """
     from retrosynformer.training_display import EPOCH_TABLE_COLS, iter_jsonl_rows
 
@@ -385,13 +384,14 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
                     t2_row[hdr] = str(val)
         t2_rows.append(t2_row)
 
-    # Rename df's "epoch" (= n_epochs trained) so it doesn't collide with
-    # the best-epoch number coming from the jsonl.
-    df = df.rename(columns={"epoch": "n_ep"})
-
     # Concatenate column-wise: summary columns first, then unique training cols.
     t2_df = pd.DataFrame(t2_rows, index=df.index)
     df = pd.concat([df, t2_df], axis=1)
+
+    # Reorder leading columns: study, dataset, trial, epochs.
+    _LEAD = ["study", "dataset", "trial", "epochs"]
+    _rest = [c for c in df.columns if c not in _LEAD]
+    df = df[[c for c in _LEAD if c in df.columns] + _rest]
 
     # Drop all-empty columns.
     _empty = {"", "-", "nan", "none", "null"}
