@@ -236,10 +236,10 @@ def build_trials_df(
         optuna_objective_metric = rank_metric
 
     _METRIC_SHORT = {
-        "valid_action_accuracy": "v_action_acc",
-        "valid_route_accuracy": "v_route_acc",
-        "train_action_accuracy": "t_action_acc",
-        "train_route_accuracy": "t_route_acc",
+        "valid_action_accuracy": "v_a_acc",
+        "valid_route_accuracy": "v_r_acc",
+        "train_action_accuracy": "t_a_acc",
+        "train_route_accuracy": "t_r_acc",
         "fraction_solved": "frac_solved",
         "valid_loss": "v_loss",
         "train_loss": "t_loss",
@@ -248,7 +248,7 @@ def build_trials_df(
     def _metric_short(m: str) -> str:
         if m in _METRIC_SHORT:
             return _METRIC_SHORT[m]
-        return m.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+        return m.replace("valid_", "v_").replace("train_", "t_").replace("action_accuracy", "a_acc").replace("route_accuracy", "r_acc").replace("_accuracy", "_acc")
 
     _ABBREV = {
         "early_stopping_patience": "es_patience",
@@ -346,7 +346,7 @@ def build_trials_df(
             else:
                 rec["obj_estim"] = "-"
 
-        rec["ep"] = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
+        rec["epoch"] = int(row["n_epochs"]) if pd.notna(row.get("n_epochs")) else 0
         rec["state"] = str(row.get("state", ""))
         rec["trial"] = int(row["original_trial"])
         rec["study"] = str(row["study_name"])

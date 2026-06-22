@@ -318,7 +318,7 @@ def main() -> None:
             axis=1,
         )
 
-    rank_metric_short = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+    rank_metric_short = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("action_accuracy", "a_acc").replace("route_accuracy", "r_acc").replace("_accuracy", "_acc")
     df = build_trials_df(
         top, rank_metric, rank_metric_short, rank_lower_is_better,
         param_cols, optuna_col_set,
@@ -356,7 +356,7 @@ def main() -> None:
             if metric not in progress.columns:
                 print(f"  SKIP #{rank} {metric}: column missing in {jsonl}")
                 continue
-            metric_short = metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+            metric_short = metric.replace("valid_", "v_").replace("train_", "t_").replace("action_accuracy", "a_acc").replace("route_accuracy", "r_acc").replace("_accuracy", "_acc")
             lower = "loss" in metric
             if args.xmax is not None and "epoch" in progress.columns:
                 _mask = progress["epoch"] <= args.xmax
