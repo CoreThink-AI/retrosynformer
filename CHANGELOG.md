@@ -5,6 +5,16 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.38] — 2026-06-22
+
+**Server-side disconnect detection; evaluate retry on timeout; pass 1 timeout raised.**
+
+- `serve/app.py`: `/predict` and `/retrosynthesis` endpoints now poll `request.is_disconnected()` every 10 s while the beam-search executor thread runs. On disconnect, the semaphore is released immediately so the next request can start — prevents cascading timeouts from blocking the entire evaluation queue when a long computation outlasts the client timeout.
+- `evaluate.py`: pass 1 client timeout raised 240 s → 360 s to accommodate CUDA JIT warmup (~250 s) on the first request after a container restart.
+- `evaluate.py`: on a timeout exception the pass loop now `continue`s to the next pass (higher `max_routes`/`max_steps`/timeout) rather than `break`ing. Timed-out molecules are retried up to 3 passes before being marked as errors.
+
+---
+
 ## [0.1.37] — 2026-06-21
 
 **Add `retrosynformer_version` to `/health` response.**

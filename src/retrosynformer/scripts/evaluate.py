@@ -30,7 +30,7 @@ _PUBCHEM_PROPS = "IsomericSMILES,CanonicalSMILES,InChI,InChIKey,MolecularWeight"
 # max_routes ≤ 50, max_steps ≤ 20 (endpoint schema limits).
 # Client timeouts should be < Cloud Run request timeout (see rs-upload --deploy).
 _RETRY_PASSES = [
-    (10,  6,  240,  "pass 1"),
+    (10,  6,  360,  "pass 1"),
     (30, 10,  600,  "pass 2"),
     (50, 15, 1500,  "pass 3"),
 ]
@@ -678,8 +678,11 @@ def main():
                 pass_error = None  # reset any earlier error
             except Exception as exc:
                 elapsed = time.perf_counter() - t0
+                is_timeout = "Timeout" in type(exc).__name__ or "timed out" in str(exc).lower()
                 print(f"  ERROR ({elapsed:.1f}s): {exc}", flush=True)
                 pass_error = f"API error: {exc}"
+                if is_timeout:
+                    continue  # timeout → escalate to next pass with more time
                 break  # don't retry on hard errors
 
         mol = dict(mol)

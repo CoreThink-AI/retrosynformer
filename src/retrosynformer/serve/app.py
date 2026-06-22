@@ -10,7 +10,7 @@ try:
 except PackageNotFoundError:
     _RETROSYNFORMER_VERSION = None
 
-from fastapi import FastAPI, HTTPException, Security, status
+from fastapi import FastAPI, HTTPException, Request, Security, status
 from fastapi.security.api_key import APIKeyHeader
 from rdkit import Chem
 
@@ -78,7 +78,7 @@ def health() -> HealthResponse:
 
 
 @app.post("/predict", response_model=PredictResponse, dependencies=[Security(_verify_key)])
-async def predict(req: PredictRequest) -> PredictResponse:
+async def predict(request: Request, req: PredictRequest) -> PredictResponse:
     """Run beam search for a target molecule SMILES and return all terminal routes."""
     predictor: ModelPredictor | None = _state.get("predictor")
     if predictor is None:
@@ -90,7 +90,7 @@ async def predict(req: PredictRequest) -> PredictResponse:
     loop = asyncio.get_event_loop()
     sem: asyncio.Semaphore = _state["sem"]
     async with sem:
-        result = await loop.run_in_executor(
+        future = loop.run_in_executor(
             None,
             predictor.predict_sync,
             req.smiles,
@@ -99,12 +99,20 @@ async def predict(req: PredictRequest) -> PredictResponse:
             req.sort_on,
             req.max_depth,
         )
+        while not future.done():
+            if await request.is_disconnected():
+                # Release the semaphore immediately so the next request is not
+                # blocked.  The executor thread continues on the GPU until it
+                # finishes naturally, but it no longer holds the lock.
+                raise HTTPException(status_code=499, detail="Client disconnected")
+            await asyncio.sleep(10)
+        result = future.result()
 
     return PredictResponse(smiles=req.smiles, **result)
 
 
 @app.post("/retrosynthesis", response_model=RetrosynthesisResponse, dependencies=[Security(_verify_key)])
-async def retrosynthesis(req: RetrosynthesisRequest) -> RetrosynthesisResponse:
+async def retrosynthesis(request: Request, req: RetrosynthesisRequest) -> RetrosynthesisResponse:
     """Retrosynthesis endpoint with the same request/response contract as synthesis-routes-generator.
 
     Routes are placed in ``ai_routes``; ``literature_routes`` is always empty
@@ -124,13 +132,18 @@ async def retrosynthesis(req: RetrosynthesisRequest) -> RetrosynthesisResponse:
     loop = asyncio.get_event_loop()
     sem: asyncio.Semaphore = _state["sem"]
     async with sem:
-        route_dicts = await loop.run_in_executor(
+        future = loop.run_in_executor(
             None,
             predictor.predict_retrosynthesis_sync,
             req.smiles,
             req.max_routes,
             req.max_steps,
         )
+        while not future.done():
+            if await request.is_disconnected():
+                raise HTTPException(status_code=499, detail="Client disconnected")
+            await asyncio.sleep(10)
+        route_dicts = future.result()
 
     ai_routes = [RouteResponse(**d) for d in route_dicts]
     return RetrosynthesisResponse(
