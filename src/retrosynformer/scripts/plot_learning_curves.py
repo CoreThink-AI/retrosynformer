@@ -36,7 +36,7 @@ from retrosynformer.dataframes import (
     print_and_save_trials_table,
     trials_df_from_db,
 )
-from retrosynformer.names import abbrev
+from retrosynformer.names import abbreviate
 from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 METRICS = [
@@ -319,7 +319,7 @@ def main() -> None:
             axis=1,
         )
 
-    rank_metric_short = abbrev(rank_metric)
+    rank_metric_short = abbreviate(rank_metric)
     df = build_trials_df(
         top, rank_metric, rank_metric_short, rank_lower_is_better,
         param_cols, optuna_col_set,
@@ -357,7 +357,7 @@ def main() -> None:
             if metric not in progress.columns:
                 print(f"  SKIP #{rank} {metric}: column missing in {jsonl}")
                 continue
-            metric_short = abbrev(metric)
+            metric_short = abbreviate(metric)
             lower = "loss" in metric
             if args.xmax is not None and "epoch" in progress.columns:
                 _mask = progress["epoch"] <= args.xmax

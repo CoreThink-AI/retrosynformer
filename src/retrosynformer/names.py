@@ -5,10 +5,9 @@ Single public dict:
             (valid_action_accuracy → v_a_acc) and model.config.yaml keys
             (n_heads → heads, attn_pdrop → a_pdrop, …).
 
-Two helper functions:
-  abbrev(name)       — abbreviate any name; falls back to systematic rules for
-                       metric names not in ABBREV
-  param_abbrev(name) — abbreviate a config/hyperparameter key; identity fallback
+Single helper function:
+  abbreviate(name) — look up ABBREV, then fall back to systematic rules for
+                     metric-style names, then return *name* unchanged.
 """
 
 ABBREV: dict[str, str] = {
@@ -44,14 +43,17 @@ ABBREV: dict[str, str] = {
 }
 
 
-def abbrev(name: str) -> str:
-    """Return the abbreviated display name for a metric or column.
+def abbreviate(name: str) -> str:
+    """Return the abbreviated display name for any metric or config key.
 
-    Falls back to a systematic shortening when the name is not in ABBREV.
+    Lookup order:
+    1. ABBREV exact match.
+    2. Systematic metric-name shortening (valid_/train_ prefixes, *_accuracy suffix).
+    3. *name* unchanged.
     """
     if name in ABBREV:
         return ABBREV[name]
-    return (
+    shortened = (
         name
         .replace("valid_", "v_")
         .replace("train_", "t_")
@@ -59,11 +61,4 @@ def abbrev(name: str) -> str:
         .replace("route_accuracy", "r_acc")
         .replace("_accuracy", "_acc")
     )
-
-
-def param_abbrev(name: str) -> str:
-    """Return the abbreviated display name for a config/hyperparameter key.
-
-    Returns *name* unchanged when not found in ABBREV.
-    """
-    return ABBREV.get(name, name)
+    return shortened

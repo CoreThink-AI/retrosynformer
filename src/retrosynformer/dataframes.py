@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from retrosynformer.names import abbrev, param_abbrev
+from retrosynformer.names import abbreviate
 from retrosynformer.study import dfs_to_trials_df, to_dfs
 
 # ---------------------------------------------------------------------------
@@ -236,10 +236,10 @@ def build_trials_df(
     if optuna_objective_metric is None:
         optuna_objective_metric = rank_metric
 
-    _metric_short = abbrev
+    _metric_short = abbreviate
 
     def _hdr(c: str) -> str:
-        short = param_abbrev(c)
+        short = abbreviate(c)
         return short + "*" if c in optuna_col_set else short
 
     def _fmt(col: str, val) -> str:
