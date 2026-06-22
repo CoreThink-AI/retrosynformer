@@ -36,15 +36,15 @@ _COL_SEP = "  "
 
 EPOCH_TABLE_COLS: list[tuple[str, str, str, object]] = [
     # (display_hdr, jsonl_key, hdr_fmt_spec, value_fmt_fn)
-    ("epoch",  "epoch",                    ">5",  lambda v: f"{int(v):>5}"),
-    ("t_loss", "train_loss",               ">7",  lambda v: f"{v:>7.5f}"),
-    ("t_acc",  "train_action_accuracy",    ">7",  lambda v: f"{v:>7.5f}"),
-    ("t_racc", "train_route_accuracy",     ">7",  lambda v: f"{v:>7.5f}"),
-    ("v_loss", "valid_loss",               ">7",  lambda v: f"{v:>7.5f}"),
-    ("v_acc",  "valid_action_accuracy",    ">7",  lambda v: f"{v:>7.5f}"),
-    ("v_racc", "valid_route_accuracy",     ">7",  lambda v: f"{v:>7.5f}"),
-    ("s/ep",   "seconds_per_epoch",        ">6",  lambda v: f"{v:>6.1f}"),
-    ("note",   "is_best",                  "<4",  lambda v: f"{'*' if v else '':<4}"),
+    ("epoch",   "epoch",                    ">5",  lambda v: f"{int(v):>5}"),
+    ("t_loss",  "train_loss",               ">7",  lambda v: f"{v:>7.5f}"),
+    ("t_a_acc", "train_action_accuracy",    ">7",  lambda v: f"{v:>7.5f}"),
+    ("t_r_acc", "train_route_accuracy",     ">7",  lambda v: f"{v:>7.5f}"),
+    ("v_loss",  "valid_loss",               ">7",  lambda v: f"{v:>7.5f}"),
+    ("v_a_acc", "valid_action_accuracy",    ">7",  lambda v: f"{v:>7.5f}"),
+    ("v_r_acc", "valid_route_accuracy",     ">7",  lambda v: f"{v:>7.5f}"),
+    ("s/epch",  "seconds_per_epoch",        ">6",  lambda v: f"{v:>6.1f}"),
+    ("note",    "is_best",                  "<4",  lambda v: f"{'*' if v else '':<4}"),
 ]
 
 _TRIAL_COL  = ("trial", "trial_number", ">5",  lambda v: f"{int(v):>5}")
