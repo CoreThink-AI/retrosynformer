@@ -5,6 +5,14 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.37] — 2026-06-21
+
+**Add `retrosynformer_version` to `/health` response.**
+
+- `serve/app.py`, `serve/schemas.py`: `/health` now returns `retrosynformer_version` (string, nullable) populated via `importlib.metadata.version("retrosynformer")` at import time. Reflects the version installed at container build time; `PackageNotFoundError`-safe.
+
+---
+
 ## [0.1.36] — 2026-06-21
 
 **`rs-evaluate` progressive retry; `/health` endpoint model provenance; GCS metadata sidecar.**
