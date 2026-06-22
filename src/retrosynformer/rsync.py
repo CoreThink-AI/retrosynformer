@@ -2,12 +2,15 @@
 
 Public API
 ----------
-DEFAULT_INCLUDES   list[str]   filenames included by default
-build_cmd(...)     -> list[str]   build the rsync argv list
-sync(...)          -> int          run rsync, return exit code
+DEFAULT_INCLUDES        list[str]   filenames included by default
+build_cmd(...)          -> list[str]   build the rsync argv list
+sync(...)               -> int          run rsync, return exit code
+cleanup_stale(path)     -> None         mark stale RUNNING trials COMPLETE after sync
 """
+import glob
 import logging
 import subprocess
+from pathlib import Path
 from typing import Sequence
 
 logger = logging.getLogger(__name__)
@@ -91,3 +94,40 @@ def sync(
         if line.strip():
             logger.warning("%s", line)
     return result.returncode
+
+
+def cleanup_stale(local_path: str, *, dry_run: bool = False) -> None:
+    """Mark stale RUNNING/FAILED/CANCELED trials COMPLETE in every study.db under *local_path*.
+
+    Called automatically after a successful sync.  Safe to run repeatedly —
+    trials that already have an objective value are skipped.
+    """
+    try:
+        from retrosynformer.models_optuna import complete_stale_trials
+    except Exception as exc:
+        logger.warning("Stale-trial cleanup unavailable: %s", exc)
+        return
+
+    dbs = glob.glob(str(Path(local_path) / "**" / "study.db"), recursive=True)
+    for db in sorted(dbs):
+        try:
+            results = complete_stale_trials(db, dry_run=dry_run)
+        except Exception as exc:
+            logger.warning("complete_stale_trials failed for %s: %s", db, exc)
+            continue
+
+        study_name = Path(db).parent.name
+        for trial_num, r in sorted(results.items()):
+            if r["action"] == "skipped":
+                logger.info(
+                    "[%s] trial %03d: skipped (%s)",
+                    study_name, trial_num, r["skip_reason"],
+                )
+            else:
+                verb = "would complete" if dry_run else "completed"
+                logger.info(
+                    "[%s] trial %03d: %s  metric=%s  estimate=%.4f ± %.4f  n_obs=%d",
+                    study_name, trial_num, verb,
+                    r["metric_used"], r["estimated_value"], r["se"] or 0.0,
+                    r["n_epochs_observed"],
+                )

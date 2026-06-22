@@ -4,18 +4,28 @@
 Transfers only study.db and train_progress.jsonl files (plus any extra
 files passed via --include) while preserving the remote directory structure.
 
+After a successful sync, stale RUNNING/FAILED/CANCELED trials (those with no
+objective value recorded) are automatically repaired by extrapolating their
+training curves and marking them COMPLETE.  This is idempotent: trials that
+already have an objective value are left untouched, so a genuinely completed
+trial on the remote is never overwritten.  Pass --no-cleanup-stale to skip.
+
 Usage
 -----
     rs-sync-results
     rs-sync-results --host taco --dry-run
     rs-sync-results --include run.jsonl --include "*.png"
     rs-sync-results --remote-path code/corethink/retrosynformer/results/
+    rs-sync-results --no-cleanup-stale
 """
 import argparse
+import logging
 import sys
 
-from retrosynformer.rsync import DEFAULT_INCLUDES, sync
+from retrosynformer.rsync import DEFAULT_INCLUDES, cleanup_stale, sync
 from retrosynformer.scripts import add_log_args, configure_logging, print_banner
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "taco"
 DEFAULT_REMOTE_PATH = "code/corethink/retrosynformer/results/"
@@ -51,6 +61,10 @@ def main() -> None:
         "--quiet", "-q", action="store_true",
         help="Suppress rsync file-by-file output",
     )
+    parser.add_argument(
+        "--no-cleanup-stale", dest="cleanup_stale", action="store_false", default=True,
+        help="Skip post-sync stale-trial cleanup (default: cleanup is enabled)",
+    )
     add_log_args(parser)
     args = parser.parse_args()
     configure_logging(args)
@@ -67,6 +81,10 @@ def main() -> None:
         verbose=not args.quiet,
         dry_run=args.dry_run,
     )
+
+    if rc == 0 and args.cleanup_stale:
+        cleanup_stale(args.local_path, dry_run=args.dry_run)
+
     sys.exit(rc)
 
 
