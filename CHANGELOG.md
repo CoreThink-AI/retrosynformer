@@ -5,6 +5,18 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.34] — 2026-06-21
+
+**`rs-evaluate`, `rs-upload --deploy`, and upload robustness fixes.**
+
+- `scripts/evaluate.py` + `src/retrosynformer/scripts/evaluate.py`: new `rs-evaluate` CLI command. Runs retrosynthesis evaluation against all test molecules (reads `test_molecules.yml`), supports both HTTP endpoint mode (`--endpoint URL`) and local model mode (`--model path/to/model.pth`). Auto-detects study name and trial number from model path. Fills null fields (SMILES, InChI, InChIKey, CID) via PubChem API. Saves `data/test_molecules_retrosynformer_{study}-trial{trial}-routes.yml` and a markdown report.
+- `upload_model.py`: add `--deploy SERVICE` flag — after a successful upload, runs `gcloud run services update SERVICE --update-env-vars MODEL_WEIGHTS_GCS=<gcs_uri>` to redeploy the Cloud Run inference endpoint with the new model. `--deploy-config-gcs` also updates `MODEL_CONFIG_GCS`.
+- `upload_model.py`: auth-error retry — `_upload_chunk` catches credential expiry errors, refreshes the `gcloud auth print-access-token` token (clears per-thread cache), and retries the chunk once automatically.
+- `upload_model.py`: auto-retry failed chunks — after the main upload loop, any failed chunks are retried with `skip_existing=True` and a fresh auth token.
+- `upload_model.py`: deterministic gzip compression — use `gzip.GzipFile(mtime=0)` so repeated `--compress` runs on the same file produce identical bytes; fixes `--skip-existing` MD5 mismatches across invocations.
+
+---
+
 ## [0.1.33] — 2026-06-21
 
 **`rs-hypertune --resume` now respects `--n-epochs`.**

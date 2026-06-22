@@ -307,15 +307,46 @@ def upload_chunked(
         source_path.unlink()
 
 
+def deploy_to_cloud_run(
+    gcs_uri: str,
+    service: str,
+    region: str = "us-central1",
+    config_gcs_uri: str | None = None,
+) -> None:
+    """Update MODEL_WEIGHTS_GCS (and optionally MODEL_CONFIG_GCS) on a Cloud Run service."""
+    env_updates = [f"MODEL_WEIGHTS_GCS={gcs_uri}"]
+    if config_gcs_uri:
+        env_updates.append(f"MODEL_CONFIG_GCS={config_gcs_uri}")
+
+    cmd = [
+        "gcloud", "run", "services", "update", service,
+        "--region", region,
+        f"--update-env-vars={','.join(env_updates)}",
+    ]
+    print(f"\nDeploying to Cloud Run service '{service}' (region: {region}) …", flush=True)
+    print(f"  MODEL_WEIGHTS_GCS → {gcs_uri}", flush=True)
+    if config_gcs_uri:
+        print(f"  MODEL_CONFIG_GCS  → {config_gcs_uri}", flush=True)
+    print(f"  $ {' '.join(cmd)}", flush=True)
+
+    result = subprocess.run(cmd, capture_output=False)
+    if result.returncode != 0:
+        sys.exit(f"gcloud deploy failed (exit {result.returncode})")
+    print(f"Deploy complete. New revision is live at: {service}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Upload a model file to GCS as parallel 50 MB chunks.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Example:\n"
+            "Examples:\n"
             "  rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\\n"
-            "            gs://biochem-db-by-hobs/retrosynformer/models/large_emma_23layers_trial000/model.pth.gz \\\n"
-            "            --compress"
+            "            gs://biochem-db-by-hobs/retrosynformer/models/large-23-layer-trial000/model.pth.gz \\\n"
+            "            --compress\n\n"
+            "  # Upload and immediately redeploy the inference endpoint:\n"
+            "  rs-upload results/.../model.pth gs://bucket/models/new-model/model.pth.gz \\\n"
+            "            --compress --deploy retrosynformer-inference-v3\n"
         ),
     )
     parser.add_argument("local_path", type=Path, help="Local model file to upload")
@@ -324,6 +355,18 @@ def main():
     parser.add_argument("--workers", type=int, default=1, help="Upload workers (default: 1 — network is the bottleneck)")
     parser.add_argument("--compress", action="store_true", help="gzip the file before chunking (.pth → .pth.gz)")
     parser.add_argument("--skip-existing", action="store_true", help="Skip chunks already in GCS with matching size+MD5")
+    parser.add_argument(
+        "--deploy", metavar="SERVICE",
+        help="Cloud Run service to update after upload (sets MODEL_WEIGHTS_GCS env var)",
+    )
+    parser.add_argument(
+        "--deploy-region", default="us-central1", metavar="REGION",
+        help="Cloud Run region for --deploy (default: us-central1)",
+    )
+    parser.add_argument(
+        "--deploy-config-gcs", metavar="GCS_URI",
+        help="Also update MODEL_CONFIG_GCS on the service (optional)",
+    )
     args = parser.parse_args()
 
     upload_chunked(
@@ -334,6 +377,14 @@ def main():
         compress=args.compress,
         skip_existing=args.skip_existing,
     )
+
+    if args.deploy:
+        deploy_to_cloud_run(
+            gcs_uri=args.gcs_uri,
+            service=args.deploy,
+            region=args.deploy_region,
+            config_gcs_uri=args.deploy_config_gcs,
+        )
 
 
 if __name__ == "__main__":
