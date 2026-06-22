@@ -108,6 +108,8 @@ rs-serve                = "retrosynformer.scripts.serve:main"
 rs-status               = "retrosynformer.scripts.status:main"
 rs-dashboard            = "retrosynformer.scripts.dashboard:main"
 rs-cleanup-study        = "retrosynformer.scripts.cleanup_study:main"
+rs-upload               = "retrosynformer.scripts.upload_model:main"
+rs-evaluate             = "retrosynformer.scripts.evaluate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

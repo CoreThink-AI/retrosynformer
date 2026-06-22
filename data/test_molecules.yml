@@ -242,8 +242,8 @@ molecules:
     max_new_tokens: 600
     inchikey: XZXHXSATPCNXJR-ZIADKAODSA-N
     inchi: InChI=1S/C31H33N5O4/c1-34-15-17-36(18-16-34)20-27(37)35(2)24-12-10-23(11-13-24)32-29(21-7-5-4-6-8-21)28-25-14-9-22(31(39)40-3)19-26(25)33-30(28)38/h4-14,19,33,38H,15-18,20H2,1-3H3
-    vendor_count:
-    bioassay_count:
+    vendor_count: null
+    bioassay_count: null
 
   - query_name: Methoxybiphenyl_Sulfonamide_Amidoxime
     pubchem_cid: 9870771
@@ -253,10 +253,10 @@ molecules:
     complexity: 843
     inchikey: "QQJUGGKQEQFOPS-IBGZPJMESA-N"
     inchi: "InChI=1S/C22H28N6O6S/c1-33-17-6-2-15(3-7-17)16-4-8-18(9-5-16)35(31,32)27-19-10-12-28(21(19)30)14-20(29)25-11-13-34-26-22(23)24/h2-9,19,27H,10-14H2,1H3,(H,25,29)(H4,23,24,26)/t19-/m0/s1"
-    vendor_count:
-    bioassay_count:
+    vendor_count: null
+    bioassay_count: null
 
-  - query_name: losartan
+  - query_name: Losartan
     pubchem_cid: 3961
     pubchem_name: Losartan
     smiles: Cc1ccc(cc1)C(=O)N2C(=NNC2c3ccccc3Cn4cc(c(n4)C)Cl)C
@@ -264,12 +264,12 @@ molecules:
     complexity: 492
     inchikey: OXCMYAYHXIHQOA-UHFFFAOYSA-N
     inchi: InChI=1S/C22H23ClN6O/c1-15-9-11-17(12-10-15)18-14-28-21(24-25-27-28)16-7-5-4-6-8-19(16)13-29-20(26-22(18)23)3-2-19/h4-12,14H,2-3,13H2,1H3,(H,24,25,27)
-    vendor_count:
-    bioassay_count:
+    vendor_count: null
+    bioassay_count: null
 
   - query_name: Venetoclax
     pubchem_cid: 49846579
-    pubchem_name: "venetoclax"
+    pubchem_name: "Venetoclax"
     smiles: "CC1(CCC(=C(C1)C2=CC=C(C=C2)Cl)CN3CCN(CC3)C4=CC(=C(C=C4)C(=O)NS(=O)(=O)C5=CC(=C(C=C5)NCC6CCOCC6)[N+](=O)[O-])OC7=CN=C8C(=C7)C=CN8)C"
     canonical_smiles: "CC1(C)CCC(CN2CCN(c3ccc(C(=O)NS(=O)(=O)c4ccc(NCC5CCOCC5)c([N+](=O)[O-])c4)c(Oc4cnc5[nH]ccc5c4)c3)CC2)=C(c2ccc(Cl)cc2)C1"
     complexity: 1640
@@ -281,11 +281,30 @@ molecules:
 
   - query_name: Cefepime
     pubchem_cid: 49846579
-    pubchem_name: "cefepime"
-    smiles: 
-    complexity: 
-    inchikey: 
-    inchi: 
-    vendor_count: 
-    bioassay_count: 
+    pubchem_name: "Cefepime"
+    smiles: null
+    complexity: null
+    inchikey: null
+    inchi: null
+    vendor_count: null
+    bioassay_count: null
 
+  - query_name: Lorazepam
+    pubchem_cid: null
+    pubchem_name: "Lorazepam"
+    smiles: null
+    complexity: null
+    inchikey: null
+    inchi: null
+    vendor_count: null
+    bioassay_count: null
+
+  - query_name: Vepdegestrant
+    pubchem_cid: null
+    pubchem_name: "Vepdegestrant"
+    smiles: null
+    complexity: null
+    inchikey: null
+    inchi: null
+    vendor_count: null
+    bioassay_count: null
