@@ -5,6 +5,17 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.41] — 2026-06-22
+
+**Unified `layer_shared_resid_dropout`: intra- and inter-layer residual mask tying in one parameter.**
+
+- `dropout.py`: `apply_shared_resid_dropout(model, p, spec)` — new unified entry point for `layer_shared_resid_dropout`. Accepts a list/bool (intra-layer, backward-compatible), a dict with integer keys N (1-based, intra-layer), float keys N.5 (inter-layer boundary with group-ID value), or any mix of the two. Internally delegates to `apply_layer_shared_resid_dropout` and `apply_interlayer_tied_dropout`.
+- `runner.py`: collapsed the separate `layer_shared_resid_dropout` and `tied_resid_drop` blocks in `init_model` into a single unified block; removed `_validate_tied_resid_drop`; extended `_validate_layer_shared_resid_dropout` to validate both list and dict formats.
+- `tests/test_dropout.py`: 10 new `TestUnifiedAPI` tests covering all spec formats (list, bool, dict intra-only, dict inter-only, combined overlapping, combined non-overlapping, zero-p); 23 tests total.
+- `results/config/baseline_{small,standard}.yaml`: consolidated comments under a single `layer_shared_resid_dropout` heading documenting all four usage forms.
+
+---
+
 ## [0.1.40] — 2026-06-22
 
 **hplot column legend; `UNABBREV` dict and `unabbreviate()` in `names.py`.**

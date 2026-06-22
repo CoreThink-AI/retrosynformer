@@ -59,6 +59,37 @@ model:
   resid_pdrop: 0.0
   use_structured_dropout: false  # baseline: no structured dropout
 
+  # --- Residual dropout mask tying (layer_shared_resid_dropout) ---
+  # Controls which residual dropout sites share a Bernoulli mask.  Three formats:
+  #
+  # 1. List of bool / 0-1 (one entry per layer, 0-indexed, length >= n_layers):
+  #    Ties the attention and MLP residual dropout masks *within* each enabled
+  #    transformer block.  Extra entries beyond n_layers are silently truncated.
+  #
+  #      layer_shared_resid_dropout: true          # tie all layers uniformly
+  #      layer_shared_resid_dropout: [1,1,0,0,...] # per-layer; 1=tied, 0=independent
+  #
+  # 2. Dict with integer keys (1-based layer number, value bool / 0-1):
+  #    Same intra-layer tying but specified as a sparse map instead of a full list.
+  #
+  #      layer_shared_resid_dropout: {1: 1, 3: 1}  # tie layers 1 and 3 only
+  #
+  # 3. Dict with float keys of the form N.5 (value = integer group-ID):
+  #    Ties the MLP output dropout of 1-based layer N to the attention input
+  #    dropout of layer N+1 so the same units are suppressed across the boundary.
+  #    Boundaries sharing a group-ID share one mask.
+  #
+  #      layer_shared_resid_dropout: {1.5: 1}            # one inter-layer tied pair
+  #      layer_shared_resid_dropout: {1.5: 1, 2.5: 2}    # two independent pairs
+  #      layer_shared_resid_dropout: {1.5: 1, 2.5: 1}    # one mask spans three layers
+  #
+  # 4. Dict mixing integer and float keys combines both intra- and inter-layer tying:
+  #
+  #      layer_shared_resid_dropout: {1: 1, 2: 1, 1.5: 1}
+  #
+  # Implemented in src/retrosynformer/dropout.py:apply_shared_resid_dropout.
+  # layer_shared_resid_dropout: ~   # omit or set to null/false to disable
+
 optimizer:
   lr: 0.211                 # from Optuna study (Table S1)
   momentum: 0.98

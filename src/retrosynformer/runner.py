@@ -180,33 +180,63 @@ def create_dataloaders(datasets, config, shuffle=False, batch_size=None):
 def _validate_layer_shared_resid_dropout(config: dict) -> None:
     """Validate model.layer_shared_resid_dropout before any training run.
 
-    Rules:
-    - Must be a list of bools (not a bare bool — use a list for clarity).
-    - Length must be >= model.n_layers (extra entries are truncated at runtime).
+    Accepted formats:
+    - list[bool | 0 | 1]: per-layer intra-layer flags, length >= n_layers.
+    - dict: keys are either int N (1-based layer, value bool/0-1) for
+      intra-layer tying, or float N.5 (inter-layer boundary, value int
+      group-ID).  Both key types may appear together.
     """
     lsrd = config.get("model", {}).get("layer_shared_resid_dropout")
     if lsrd is None:
         return
     n_layers = config.get("model", {}).get("n_layers", 0)
-    if not isinstance(lsrd, list):
-        raise ValueError(
-            f"model.layer_shared_resid_dropout must be a list of bools "
-            f"(got {type(lsrd).__name__!r}). "
-            f"Use e.g. layer_shared_resid_dropout: [true, false, true, ...]"
-        )
-    # Accept True/False or 0/1 — YAML parses bare integers as int, not bool.
-    invalid = [i for i, x in enumerate(lsrd) if x not in (True, False, 0, 1)]
-    if invalid:
-        raise ValueError(
-            f"model.layer_shared_resid_dropout contains values that are not "
-            f"bool or 0/1 at indices {invalid}: {[lsrd[i] for i in invalid]}"
-        )
-    if len(lsrd) < n_layers:
-        raise ValueError(
-            f"model.layer_shared_resid_dropout has {len(lsrd)} entries but "
-            f"model.n_layers={n_layers}. The list must be at least as long as "
-            f"n_layers (extra entries beyond n_layers are silently truncated)."
-        )
+
+    if isinstance(lsrd, list):
+        # Accept True/False or 0/1 — YAML parses bare integers as int, not bool.
+        invalid = [i for i, x in enumerate(lsrd) if x not in (True, False, 0, 1)]
+        if invalid:
+            raise ValueError(
+                f"model.layer_shared_resid_dropout contains values that are not "
+                f"bool or 0/1 at indices {invalid}: {[lsrd[i] for i in invalid]}"
+            )
+        if len(lsrd) < n_layers:
+            raise ValueError(
+                f"model.layer_shared_resid_dropout has {len(lsrd)} entries but "
+                f"model.n_layers={n_layers}. The list must be at least as long as "
+                f"n_layers (extra entries beyond n_layers are silently truncated)."
+            )
+        return
+
+    if isinstance(lsrd, dict):
+        from .dropout import _validate_interlayer_ties
+        int_keys = {k: v for k, v in lsrd.items() if isinstance(k, int)}
+        float_keys = {k: v for k, v in lsrd.items() if isinstance(k, float)}
+        bad_types = [k for k in lsrd if not isinstance(k, (int, float))]
+        if bad_types:
+            raise ValueError(
+                f"model.layer_shared_resid_dropout dict keys must be int (intra-layer, "
+                f"1-based) or float N.5 (inter-layer boundary). Bad keys: {bad_types}"
+            )
+        for k, v in int_keys.items():
+            if k < 1 or k > n_layers:
+                raise ValueError(
+                    f"model.layer_shared_resid_dropout int key {k} out of range "
+                    f"[1, {n_layers}] (1-based layer index)."
+                )
+            if v not in (True, False, 0, 1):
+                raise ValueError(
+                    f"model.layer_shared_resid_dropout intra-layer key {k} value "
+                    f"must be bool or 0/1 (got {v!r})."
+                )
+        if float_keys:
+            _validate_interlayer_ties(float_keys, n_layers)
+        return
+
+    raise ValueError(
+        f"model.layer_shared_resid_dropout must be a list or dict "
+        f"(got {type(lsrd).__name__!r})."
+    )
+
 
 
 def init_model(config, model_path=None):
@@ -241,15 +271,18 @@ def init_model(config, model_path=None):
     lsrd = config["model"].get("layer_shared_resid_dropout")
     if lsrd:
         _validate_layer_shared_resid_dropout(config)
-        from .dropout import apply_layer_shared_resid_dropout
+        from .dropout import apply_shared_resid_dropout
         p = config["model"].get("resid_pdrop", 0.0)
         n_layers = config["model"]["n_layers"]
-        # Truncate list to actual layer count (list may be longer by design)
-        flags = lsrd[:n_layers]
-        if len(lsrd) > n_layers:
+        spec = lsrd
+        if isinstance(lsrd, list) and len(lsrd) > n_layers:
+            spec = lsrd[:n_layers]
             logger.info("layer_shared_resid_dropout: truncating list from %d → %d entries", len(lsrd), n_layers)
-        n = apply_layer_shared_resid_dropout(model, p, flags=flags)
-        logger.info("layer_shared_resid_dropout: tied resid masks in %d/%d blocks (p=%s)", n, n_layers, p)
+        n_intra, n_inter = apply_shared_resid_dropout(model, p, spec)
+        if n_intra:
+            logger.info("layer_shared_resid_dropout: intra-layer masks tied in %d/%d blocks (p=%s)", n_intra, n_layers, p)
+        if n_inter:
+            logger.info("layer_shared_resid_dropout: inter-layer boundaries patched: %d (p=%s)", n_inter, p)
 
     return model
 
