@@ -330,27 +330,35 @@ def build_trials_df(
 
 
 def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric: str) -> pd.DataFrame:
-    """Drop all-empty columns, print, and save the trials summary table; return the filtered DataFrame."""
-    from retrosynformer.training_display import format_epoch_header, format_epoch_row, iter_jsonl_rows
+    """Merge per-trial best-epoch columns into the summary table, then print and save.
 
-    _empty = {"", "-", "nan", "none", "null"}
-    df = df.loc[:, ~df.apply(
-        lambda col: col.map(lambda v: str(v).strip().lower() in _empty or (isinstance(v, float) and pd.isna(v))).all()
-    )]
-    print(f"Top {len(top)} trials by {rank_metric}:")
-    print(df.to_string(index=False))
-    print()
+    The two logical tables (Optuna summary + per-epoch training metrics) are
+    concatenated column-wise into a single display DataFrame so each trial
+    occupies exactly one row.  Columns that appear in both tables (trial,
+    study, valid_action_accuracy, valid_route_accuracy) are kept from the
+    Optuna summary side and dropped from the training-metrics side.  The
+    Optuna summary's ``epoch`` column (n_epochs trained) is renamed to
+    ``n_ep`` to make room for the best-epoch number from the jsonl.
+    """
+    from retrosynformer.training_display import EPOCH_TABLE_COLS, iter_jsonl_rows
 
-    # Show best-epoch row per trial in training-display format (same columns as
-    # the live terminal output during training).
-    _inc_study = "study_name" in top.columns
-    has_any_jsonl = False
+    # jsonl keys whose values already appear in df under different headers.
+    _SKIP_JSONL_KEYS = {
+        "trial_number",
+        "study_name",
+        "valid_action_accuracy",
+        "valid_route_accuracy",
+    }
+
+    lower = "loss" in rank_metric
+
+    # Build one training-metrics row per trial (in top's rank order).
+    t2_rows: list[dict] = []
     for _, row in top.iterrows():
         jp = str(row.get("jsonl_path", ""))
         if not os.path.exists(jp):
+            t2_rows.append({})
             continue
-        # Find the best-epoch record (highest rank_metric or lowest loss).
-        lower = "loss" in rank_metric
         best_rec = None
         best_val = float("inf") if lower else float("-inf")
         for rec in iter_jsonl_rows(jp):
@@ -361,13 +369,41 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
                 best_val = v
                 best_rec = rec
         if best_rec is None:
+            t2_rows.append({})
             continue
-        if not has_any_jsonl:
-            print(format_epoch_header(include_trial=True, include_study=_inc_study))
-            has_any_jsonl = True
-        print(format_epoch_row(best_rec, include_trial=True, include_study=_inc_study))
-    if has_any_jsonl:
-        print()
+        t2_row: dict = {}
+        for hdr, key, _, fmt_fn in EPOCH_TABLE_COLS:
+            if key in _SKIP_JSONL_KEYS:
+                continue
+            val = best_rec.get(key)
+            if val is None:
+                t2_row[hdr] = "-"
+            else:
+                try:
+                    t2_row[hdr] = fmt_fn(val)
+                except (TypeError, ValueError):
+                    t2_row[hdr] = str(val)
+        t2_rows.append(t2_row)
+
+    # Rename df's "epoch" (= n_epochs trained) so it doesn't collide with
+    # the best-epoch number coming from the jsonl.
+    df = df.rename(columns={"epoch": "n_ep"})
+
+    # Concatenate column-wise: summary columns first, then unique training cols.
+    t2_df = pd.DataFrame(t2_rows, index=df.index)
+    df = pd.concat([df, t2_df], axis=1)
+
+    # Drop all-empty columns.
+    _empty = {"", "-", "nan", "none", "null"}
+    df = df.loc[:, ~df.apply(
+        lambda col: col.map(
+            lambda v: str(v).strip().lower() in _empty or (isinstance(v, float) and pd.isna(v))
+        ).all()
+    )]
+
+    print(f"Top {len(top)} trials by {rank_metric}:")
+    print(df.to_string(index=False))
+    print()
 
     if not df.empty:
         top_study = str(top.iloc[0]["study_name"])
