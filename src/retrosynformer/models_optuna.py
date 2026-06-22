@@ -1164,7 +1164,7 @@ def complete_stale_trials(
     db_path: str | Path,
     *,
     stale_states: list[str] | None = None,
-    proxy_metric: str = _DEFAULT_OBJECTIVE_METRIC,
+    proxy_metric: str = "valid_action_accuracy",
     min_epochs: int = 6,
     value_range: tuple[float, float] = (0.0, 1.0),
     dry_run: bool = False,
@@ -1196,7 +1196,10 @@ def complete_stale_trials(
         ``["RUNNING", "FAILED", "CANCELED"]``.
     proxy_metric:
         Per-epoch metric used when the configured objective metric is absent
-        from the training log.  Defaults to ``"valid_route_accuracy"``.
+        from the training log.  Defaults to ``"valid_action_accuracy"``, which
+        is logged every epoch and sits in the same numerical range as
+        ``fraction_solved`` (~0.3–0.4).  ``valid_route_accuracy`` is a poor
+        proxy because it is an order of magnitude smaller.
     min_epochs:
         Minimum observed epochs before attempting extrapolation.  Trials with
         fewer rows get ``action="skipped"``.
@@ -1284,6 +1287,20 @@ def complete_stale_trials(
             continue
 
         estimated_value = float(est["estimated_value"])
+
+        # Floor: never report below the trial's actual peak.  Polynomial
+        # extrapolation can dip below best-observed when the curve was
+        # declining at interruption (e.g. lr not yet reduced).
+        actual_metric = metric_used.removesuffix(" (proxy)").strip()
+        obs_pairs = _load_jsonl_metric(
+            db_path.parent / f"trial_{trial_num:03d}" / "train_progress.jsonl",
+            actual_metric,
+        )
+        if obs_pairs:
+            best_observed = max(v for _, v in obs_pairs)
+            if best_observed > estimated_value:
+                estimated_value = best_observed
+
         lo, hi = value_range
         if not (lo <= estimated_value <= hi):
             results[trial_num] = {
