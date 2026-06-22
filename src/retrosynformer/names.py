@@ -42,6 +42,7 @@ ABBREV: dict[str, str] = {
     # Dataset / study
     "valid_set": "vset",
     "objective_metric": "obj_metric",
+    "dataset_name": "dataset",
 }
 
 

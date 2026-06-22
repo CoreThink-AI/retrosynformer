@@ -123,25 +123,101 @@ def find_trial_base(db_dir: str, study_name: str) -> str:
     return db_dir
 
 
+def _config_yaml_params(trial_dir: str) -> dict:
+    """Read fixed (non-Optuna) params from a trial's model.config.yaml.
+
+    Returns a flat dict with keys like ``dataset_name``, ``valid_set``, etc.
+    Only extracts params that appear in ``names.ABBREV`` to avoid polluting the
+    table with every config key.
+    """
+    import yaml
+    from retrosynformer.names import ABBREV
+
+    cfg_path = os.path.join(trial_dir, "model.config.yaml")
+    if not os.path.exists(cfg_path):
+        return {}
+    try:
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+    except Exception:
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    params: dict = {}
+    for section in cfg.values():
+        if isinstance(section, dict):
+            for k, v in section.items():
+                if k in ABBREV:
+                    params[k] = v
+    return params
+
+
 def load_run_params(trial_base_dir: str) -> dict[int, tuple[dict, list[str]]]:
-    """Load run.jsonl and return per-trial hyperparameter values and optuna-searched keys."""
+    """Load run.jsonl and return per-trial hyperparameter values and optuna-searched keys.
+
+    Fixed study-level params (e.g. ``dataset_name``) that are absent from
+    ``run.jsonl`` are read from whichever trial has a ``model.config.yaml``
+    and merged into every trial's param dict.  This handles studies where
+    ``trial_start`` events were only logged for some trials.
+    """
     path = os.path.join(trial_base_dir, "run.jsonl")
     result: dict[int, tuple[dict, list[str]]] = {}
-    if not os.path.exists(path):
+    if os.path.exists(path):
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("event") == "trial_start" and "all_params" in rec:
+                    n = rec.get("trial", {}).get("number")
+                    if n is not None:
+                        result[int(n)] = (rec["all_params"], rec.get("optuna_keys", []))
+
+    # Collect fixed params from any trial that has model.config.yaml.
+    # These are study-level constants not captured in run.jsonl trial_start events.
+    shared_cfg: dict = {}
+    try:
+        entries = sorted(os.listdir(trial_base_dir))
+    except OSError:
+        entries = []
+    for entry in entries:
+        if not entry.startswith("trial_"):
+            continue
+        trial_dir = os.path.join(trial_base_dir, entry)
+        if not os.path.isdir(trial_dir):
+            continue
+        cfg_params = _config_yaml_params(trial_dir)
+        if cfg_params:
+            shared_cfg.update(cfg_params)
+            break  # one config file is enough for study-level constants
+
+    if not shared_cfg:
         return result
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if rec.get("event") == "trial_start" and "all_params" in rec:
-                n = rec.get("trial", {}).get("number")
-                if n is not None:
-                    result[int(n)] = (rec["all_params"], rec.get("optuna_keys", []))
+
+    # Merge shared cfg params into all known trials (without overwriting Optuna params).
+    for n, (params, keys) in list(result.items()):
+        merged = dict(shared_cfg)
+        merged.update(params)
+        result[n] = (merged, keys)
+
+    # For any trial_NNN directory not yet in result, add an entry with shared cfg.
+    for entry in entries:
+        if not entry.startswith("trial_"):
+            continue
+        trial_dir = os.path.join(trial_base_dir, entry)
+        if not os.path.isdir(trial_dir):
+            continue
+        try:
+            n = int(entry[len("trial_"):])
+        except ValueError:
+            continue
+        if n not in result:
+            result[n] = (dict(shared_cfg), [])
+
     return result
 
 

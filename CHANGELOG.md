@@ -5,6 +5,15 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.39] — 2026-06-22
+
+**hplot table: dataset column populated for all trials; `dataset_name` abbreviation added.**
+
+- `names.py`: added `"dataset_name": "dataset"` to `ABBREV` so `abbreviate("dataset_name")` returns `"dataset"` for consistent column labelling.
+- `dataframes.py`: `load_run_params` now reads fixed study-level params (e.g. `dataset_name`) from `model.config.yaml` in any trial subdirectory and merges them into every trial's param dict — including trials whose `trial_start` event was never written to `run.jsonl`. This fills the `dataset` column for all trials rather than only those with a `trial_start` log entry.
+
+---
+
 ## [0.1.38] — 2026-06-22
 
 **Server-side disconnect detection; evaluate retry on timeout; pass 1 timeout raised.**
