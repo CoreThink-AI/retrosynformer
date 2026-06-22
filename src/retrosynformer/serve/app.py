@@ -3,6 +3,12 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
+
+try:
+    _RETROSYNFORMER_VERSION: str | None = _pkg_version("retrosynformer")
+except PackageNotFoundError:
+    _RETROSYNFORMER_VERSION = None
 
 from fastapi import FastAPI, HTTPException, Security, status
 from fastapi.security.api_key import APIKeyHeader
@@ -63,6 +69,7 @@ def health() -> HealthResponse:
         device=predictor.device if predictor else "unknown",
         beam_width_default=predictor.beam_width_default if predictor else 0,
         action_dim=predictor.action_dim if predictor else 0,
+        retrosynformer_version=_RETROSYNFORMER_VERSION,
         model_path=predictor.model_path if predictor else None,
         model_released_at=predictor.model_released_at if predictor else None,
         model_sha256_hash=predictor.model_sha256_hash if predictor else None,

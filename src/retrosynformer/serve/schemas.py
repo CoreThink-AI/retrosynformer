@@ -195,6 +195,7 @@ class HealthResponse(BaseModel):
     device: str
     beam_width_default: int
     action_dim: int
+    retrosynformer_version: Optional[str] = None
     model_path: Optional[str] = None
     model_released_at: Optional[str] = None
     model_sha256_hash: Optional[str] = None
