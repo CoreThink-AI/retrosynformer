@@ -16,6 +16,7 @@ import hashlib
 import io
 import math
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -341,12 +342,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
+            "  # Upload only:\n"
             "  rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\\n"
             "            gs://biochem-db-by-hobs/retrosynformer/models/large-23-layer-trial000/model.pth.gz \\\n"
             "            --compress\n\n"
-            "  # Upload and immediately redeploy the inference endpoint:\n"
-            "  rs-upload results/.../model.pth gs://bucket/models/new-model/model.pth.gz \\\n"
-            "            --compress --deploy retrosynformer-inference-v3\n"
+            "  # Upload and redeploy the v3 inference endpoint:\n"
+            "  rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\\n"
+            "            gs://biochem-db-by-hobs/retrosynformer/models/large-23-layer-trial000/model.pth.gz \\\n"
+            "            --compress \\\n"
+            "            --deploy retrosynformer-inference-v3 \\\n"
+            "            --deploy-region us-central1\n"
         ),
     )
     parser.add_argument("local_path", type=Path, help="Local model file to upload")
