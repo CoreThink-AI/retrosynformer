@@ -435,6 +435,46 @@ def _is_cyclic(route: dict) -> bool:
     return False
 
 
+_ROUTE_KEYS = {"retrosynformer_routes", "retrosynformer_error", "retrosynformer_solved_on_pass"}
+
+
+def _yaml_write_incremental(
+    done: list[dict],
+    pending: list[dict],
+    out_yaml: "Path",
+    header_str: str,
+) -> None:
+    """Write completed results + null-route placeholders for pending molecules.
+
+    Called after every molecule finishes so the YAML stays current even if
+    the run is interrupted.
+    """
+    import yaml
+
+    out_mols = []
+    for mol in done:
+        d = {k: v for k, v in mol.items() if k not in _ROUTE_KEYS}
+        if mol.get("retrosynformer_error"):
+            d["retrosynformer_routes"] = None
+            d["retrosynformer_error"] = mol["retrosynformer_error"]
+        else:
+            d["retrosynformer_routes"] = mol.get("retrosynformer_routes")
+            if mol.get("retrosynformer_solved_on_pass") is not None:
+                d["retrosynformer_solved_on_pass"] = mol["retrosynformer_solved_on_pass"]
+        out_mols.append(d)
+    for mol in pending:
+        out_mols.append({k: v for k, v in mol.items() if k not in _ROUTE_KEYS})
+
+    body = yaml.dump(
+        {"molecules": out_mols},
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+        width=120,
+    )
+    out_yaml.write_text(header_str + "\n\n" + body)
+
+
 # ── .env loader ──────────────────────────────────────────────────────────────
 
 def _load_dotenv_defaults() -> dict[str, str]:
@@ -615,6 +655,36 @@ def main():
         *_RETRY_PASSES[1:],
     ]
 
+    # Build YAML header (needed before the loop for incremental writes)
+    import datetime as dt
+    today = dt.date.today().isoformat()
+    header_str = "\n".join([
+        f"# RetroSynFormer evaluation routes",
+        f"# Generated: {today}",
+        f"# Study: {study_name}  Trial: {trial_num}",
+        f"# Mode: {mode}",
+        f"# pass1: max_routes={args.beam_width} max_steps=6  "
+        f"pass2: max_routes=30 max_steps=10  "
+        f"pass3: max_routes=50 max_steps=15  top_routes: {args.top_routes}",
+    ])
+
+    # Load existing YAML if present (purely informational; we always re-evaluate)
+    if out_yaml.exists():
+        try:
+            import yaml as _yaml_mod
+            with open(out_yaml) as _f:
+                _existing = _yaml_mod.safe_load(_f)
+            _n_existing = len((_existing or {}).get("molecules", []))
+            print(f"Loaded existing YAML with {_n_existing} molecule(s) from {out_yaml}", flush=True)
+        except Exception as _exc:
+            print(f"Warning: could not load existing YAML: {_exc}", flush=True)
+
+    # Write initial YAML immediately so the file reflects all pending molecules
+    try:
+        _yaml_write_incremental([], molecules, out_yaml, header_str)
+    except Exception as exc:
+        print(f"Warning: failed to write initial YAML: {exc}", flush=True)
+
     # Evaluate each molecule (progressive retry in endpoint mode)
     results: list[dict] = []
     n = len(molecules)
@@ -693,46 +763,14 @@ def main():
             mol["retrosynformer_routes"] = routes
             mol["retrosynformer_solved_on_pass"] = solved_on_pass
         results.append(mol)
+        try:
+            _yaml_write_incremental(results, molecules[len(results):], out_yaml, header_str)
+        except Exception as exc:
+            print(f"  Warning: failed to flush YAML: {exc}", flush=True)
 
-    # Write YAML
-    import datetime as dt
-    today = dt.date.today().isoformat()
-    header = [
-        f"RetroSynFormer evaluation routes",
-        f"Generated: {today}",
-        f"Study: {study_name}  Trial: {trial_num}",
-        f"Mode: {mode}",
-        f"pass1: max_routes={args.beam_width} max_steps=6  "
-        f"pass2: max_routes=30 max_steps=10  "
-        f"pass3: max_routes=50 max_steps=15  top_routes: {args.top_routes}",
-    ]
     print(f"\nWriting {out_yaml} …", flush=True)
     try:
-        import yaml
-
-        # Merge results back into YAML preserving original field order
-        out_mols = []
-        _route_keys = {"retrosynformer_routes", "retrosynformer_error", "retrosynformer_solved_on_pass"}
-        for mol in results:
-            d = {k: v for k, v in mol.items() if k not in _route_keys}
-            if mol.get("retrosynformer_error"):
-                d["retrosynformer_routes"] = None
-                d["retrosynformer_error"] = mol["retrosynformer_error"]
-            else:
-                d["retrosynformer_routes"] = mol.get("retrosynformer_routes")
-                if mol.get("retrosynformer_solved_on_pass") is not None:
-                    d["retrosynformer_solved_on_pass"] = mol["retrosynformer_solved_on_pass"]
-            out_mols.append(d)
-
-        header_str = "\n".join(f"# {l}" for l in header)
-        body = yaml.dump(
-            {"molecules": out_mols},
-            default_flow_style=False,
-            allow_unicode=True,
-            sort_keys=False,
-            width=120,
-        )
-        out_yaml.write_text(header_str + "\n\n" + body)
+        _yaml_write_incremental(results, [], out_yaml, header_str)
     except Exception as exc:
         sys.exit(f"Failed to write YAML: {exc}")
 
