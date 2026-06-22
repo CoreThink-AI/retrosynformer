@@ -5,6 +5,14 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.33] — 2026-06-21
+
+**`rs-hypertune --resume` now respects `--n-epochs`.**
+
+- `hypertune.py`: the `train()` call in the `--resume` block was missing `n_epochs=args.n_epochs`, so the saved `model.config.yaml` value was used instead of the CLI argument. Fixed by passing `n_epochs=args.n_epochs` through.
+
+---
+
 ## [0.1.32] — 2026-06-21
 
 **Auto-disable hipBLASLt on unsupported ROCm architectures.**
