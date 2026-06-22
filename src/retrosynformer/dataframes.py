@@ -464,6 +464,9 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
     t2_df = pd.DataFrame(t2_rows, index=df.index)
     df = pd.concat([df, t2_df], axis=1)
 
+    # Drop display-only columns not useful in the summary table.
+    df = df.drop(columns=["rank", "note"], errors="ignore")
+
     # Reorder leading columns: study, dataset, trial, epochs.
     _LEAD = ["study", "dataset", "trial", "epochs"]
     _rest = [c for c in df.columns if c not in _LEAD]
@@ -476,6 +479,15 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
             lambda v: str(v).strip().lower() in _empty or (isinstance(v, float) and pd.isna(v))
         ).all()
     )]
+
+    from retrosynformer.names import unabbreviate
+    legend = {col: unabbreviate(col.rstrip("*^↑↓")) for col in df.columns}
+    legend = {k: v for k, v in legend.items() if v != k.rstrip("*^↑↓")}
+    if legend:
+        print("Column legend:")
+        for abbr, full in legend.items():
+            print(f"  {abbr}: {full}")
+        print()
 
     print(f"Top {len(top)} trials by {rank_metric}:")
     print(df.to_string(index=False))

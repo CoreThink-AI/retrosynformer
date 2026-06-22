@@ -5,6 +5,15 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.40] — 2026-06-22
+
+**hplot column legend; `UNABBREV` dict and `unabbreviate()` in `names.py`.**
+
+- `names.py`: added `UNABBREV` (exact inversion of `ABBREV`) and `unabbreviate()` (reverses `abbreviate()` via UNABBREV lookup then systematic prefix/suffix rules). Added round-trip doctests covering all 16 cases.
+- `dataframes.py`: `print_and_save_trials_table` now prints a `Column legend:` block before the table mapping each abbreviated header to its full name, skipping columns whose abbreviation is identical to the full name.
+
+---
+
 ## [0.1.39] — 2026-06-22
 
 **hplot table: dataset column populated for all trials; `dataset_name` abbreviation added.**
