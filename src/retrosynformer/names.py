@@ -80,6 +80,7 @@ ABBREV: dict[str, str] = {
     # Regularisation
     "dropout": "drop",
     "attn_pdrop": "a_pdrop",
+    "embd_pdrop": "e_pdrop",
     "resid_pdrop": "r_pdrop",
     "weight_decay": "wd",
     # Optimisation
