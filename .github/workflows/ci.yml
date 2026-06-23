@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +22,35 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --extra cpu --extra dev
 
-      - name: Run doctests
-        run: uv run --with pytest pytest tests/ -v
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests/ -v \
+            --cov=src/retrosynformer \
+            --cov-report=term-missing \
+            --cov-report=html:docs/coverage_html \
+            --cov-report=json:coverage.json
+
+      - name: Upload coverage HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-html
+          path: docs/coverage_html/
+          retention-days: 30
+
+      - name: Print coverage summary
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, sys
+          with open("coverage.json") as f:
+              cov = json.load(f)
+          t = cov["totals"]
+          pct = round(t["percent_covered"], 1)
+          print(f"Coverage: {pct}%  ({t['covered_lines']}/{t['num_statements']} statements)")
+          if pct < 15:
+              print("WARNING: coverage below 15%")
+              sys.exit(1)
+          EOF
