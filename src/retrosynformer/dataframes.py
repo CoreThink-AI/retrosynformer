@@ -405,6 +405,32 @@ def build_trials_df(
     return pd.DataFrame(rows)
 
 
+def df_to_markdown(df: pd.DataFrame, index: bool = False) -> str:
+    """Return a space-aligned Markdown table string from a DataFrame.
+
+    Uses ``pd.DataFrame.to_markdown`` (requires ``tabulate``), which pads every
+    column with spaces so the table is human-readable in plain text and renders
+    correctly in Markdown.  Always call this instead of hand-writing Markdown
+    table syntax or using ``df.to_string``.
+
+    Args:
+        df:    DataFrame to render.
+        index: Whether to include the row index (default False).
+
+    Returns:
+        Multi-line string containing the Markdown table.
+
+    Raises:
+        ImportError: if ``tabulate`` is not installed (``uv pip install tabulate``).
+    """
+    try:
+        return df.to_markdown(index=index)
+    except ImportError as exc:
+        raise ImportError(
+            "df_to_markdown requires 'tabulate'. Install with: uv pip install tabulate"
+        ) from exc
+
+
 def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric: str) -> pd.DataFrame:
     """Merge per-trial best-epoch columns into the summary table, then print and save.
 

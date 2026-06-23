@@ -8,15 +8,15 @@
 
 ## Run inventory
 
-| Run label | Date | Mode | Test set | Tested | Solved | % Solved | Cyclic/solved | Avg depth¹ | Pass 1 | Pass 2 | Pass 3 |
-|-----------|------|------|----------|-------:|-------:|---------:|--------------:|-----------:|-------:|-------:|-------:|
-| v3-initial | 2026-06-21 | endpoint-old | 22/25² | 22 | 6 | 27.3 % | 3 (50 %) | 5.00 | — | — | — |
-| hypertune-t000 | 2026-06-21 | endpoint-old | 23/27³ | 23 | 6 | 26.1 % | 3 (50 %) | 5.05 | — | — | — |
-| v3-t000 | 2026-06-22 | endpoint-old | 17/27⁴ | 17 | 9 | 52.9 % | 6 (67 %) | 6.38 | 8 | 1 | 0 |
-| hypertune-t002 | 2026-06-23 | local model | 23/27³ | 23 | 7 | 30.4 % | 4 (57 %) | 4.95 | 6 | 0 | 0 |
-| **hypertune-t003** | **2026-06-23** | **endpoint-old** | **23/27**³ | **23** | **9** | **39.1 %** | **6 (67 %)** | **4.95** | **8** | **1** | **0** |
-| t003-partial *(excl.)* | 2026-06-22 | endpoint-old | 27/27 | 27 | 3 | 11.1 % | 2 (67 %) | 4.00 | 3 | 0 | 0 |
-| cpu-subset *(excl.)* | 2026-06-23 | endpoint-cpu v0.1.45 | 9/9⁵ | 9 | 9 | 100 % | 6 (67 %) | 1.88 | 8 | 1 | 0 |
+| Run label              | Date           | Mode                 | Test set   |   Tested |   Solved | % Solved   | Cyclic/solved   | Avg depth¹   | Pass 1   | Pass 2   | Pass 3   |
+|:-----------------------|:---------------|:---------------------|:-----------|---------:|---------:|:-----------|:----------------|:-------------|:---------|:---------|:---------|
+| v3-initial             | 2026-06-21     | endpoint-old         | 22/25²     |       22 |        6 | 27.3 %     | 3 (50 %)        | 5.00         | —        | —        | —        |
+| hypertune-t000         | 2026-06-21     | endpoint-old         | 23/27³     |       23 |        6 | 26.1 %     | 3 (50 %)        | 5.05         | —        | —        | —        |
+| v3-t000                | 2026-06-22     | endpoint-old         | 17/27⁴     |       17 |        9 | 52.9 %     | 6 (67 %)        | 6.38         | 8        | 1        | 0        |
+| hypertune-t002         | 2026-06-23     | local model          | 23/27³     |       23 |        7 | 30.4 %     | 4 (57 %)        | 4.95         | 6        | 0        | 0        |
+| **hypertune-t003**     | **2026-06-23** | **endpoint-old**     | **23/27**³ |       23 |        9 | **39.1 %** | **6 (67 %)**    | **4.95**     | **8**    | **1**    | **0**    |
+| t003-partial *(excl.)* | 2026-06-22     | endpoint-old         | 27/27      |       27 |        3 | 11.1 %     | 2 (67 %)        | 4.00         | 3        | 0        | 0        |
+| cpu-subset *(excl.)*   | 2026-06-23     | endpoint-cpu v0.1.45 | 9/9⁵       |        9 |        9 | 100 %      | 6 (67 %)        | 1.88         | 8        | 1        | 0        |
 
 ¹ Average depth of non-trivial (depth > 0) best routes.  
 ² 3 entries missing SMILES in the original test_molecules.yml at that time.  

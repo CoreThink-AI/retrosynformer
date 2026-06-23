@@ -61,6 +61,31 @@ model:
   n_heads: 2                # best Optuna trial: 2; paper value incorrect
   n_layers: 4               # best Optuna trial: 4; paper value (26) is certainly wrong
   resid_pdrop: 0.08
+  # --- Molecule-conditioned structured dropout ---
+  # A learned MLP maps each target molecule's fingerprint to per-channel drop
+  # probabilities, then applies inverted Bernoulli masking at the embedding
+  # layer output so the same hidden units are suppressed for similar molecules
+  # during training.  At eval time the deterministic expected-value mask (1-p)
+  # is used instead for stable, reproducible inference.
+  # Implemented in src/retrosynformer/structured_dropout.py.
+  #
+  #   structured_dropout_bottleneck: 128  # MLP hidden dim: fp_dim → bottleneck → hidden_size
+  #                                       # fp_dim=1024 → bottleneck (ReLU) → hidden_size (Sigmoid)
+  #                                       # typical range 32–512; initial output bias ≈ -2.2 (→ ~10% drop rate)
+  #   structured_dropout_rate: 1.0        # global multiplier on learned drop probabilities
+  #                                       # 0.0 = no dropout; 1.0 = learned rates unchanged (default)
+  #                                       # >1.0 = amplified masking (clamped so drop_prob ≤ 0.9 per channel)
+  #                                       # Optuna-searchable via optuna.structured_dropout_rate
+  #
+  # Example — enable with default settings:
+  #   use_structured_dropout: true
+  #   structured_dropout_bottleneck: 128
+  #   structured_dropout_rate: 1.0
+  #
+  # Example — strong regularisation (wider bottleneck, amplified rate):
+  #   use_structured_dropout: true
+  #   structured_dropout_bottleneck: 256
+  #   structured_dropout_rate: 1.5
   use_structured_dropout: false  # baseline: no structured dropout
 
   # --- Residual dropout mask tying (layer_shared_resid_dropout) ---
