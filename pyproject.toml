@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "retrosynformer"
-version = "0.1.41"
+version = "0.1.43"
 description = "RetroSynFormer"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,6 +40,7 @@ dependencies = [
     "markupsafe",
     "huggingface-hub",
     "filelock",
+    "safetensors",
     # "sympy>=1.13.3",
     "transformers",
     "optuna-dashboard>=0.20.0",
@@ -109,6 +110,7 @@ rs-status               = "retrosynformer.scripts.status:main"
 rs-dashboard            = "retrosynformer.scripts.dashboard:main"
 rs-cleanup-study        = "retrosynformer.scripts.cleanup_study:main"
 rs-upload               = "retrosynformer.scripts.upload_model:main"
+rs-compress             = "retrosynformer.scripts.compress_model:main"
 rs-evaluate             = "retrosynformer.scripts.evaluate:main"
 
 [tool.setuptools.packages.find]

@@ -33,6 +33,7 @@ class RoutePredictor:
         self.calculator = utils.make_ted_calculator(exhaustive_limit=exhaustive_limit)
         self.softmax = torch.nn.Softmax(dim=-1)
         self.max_depth = self.config["evaluation"]["max_depth"]
+        self.prevent_cyclic_routes = self.config["evaluation"].get("prevent_cyclic_routes", True)
         self.result_df = pd.DataFrame({})
         self.eval_df = pd.DataFrame({})
         self.Beam = namedtuple(
@@ -69,7 +70,8 @@ class RoutePredictor:
         self.model.eval()
         # default RetroGymEnvironment.process_routes is False
         self.env = RetroGymEnvironment(
-            self.building_blocks, self.templates_df, self.reward_mapping, self.max_depth, process_routes=False,
+            self.building_blocks, self.templates_df, self.reward_mapping, self.max_depth,
+            process_routes=False, prevent_cyclic_routes=self.prevent_cyclic_routes,
         )
         self.env.set_target_compound(
             target,
@@ -461,6 +463,7 @@ class RoutePredictor:
             self.reward_mapping,
             effective_max_depth,
             process_routes=False,
+            prevent_cyclic_routes=self.prevent_cyclic_routes,
         )
         self.env.set_target_compound(target, reward_function="reward_specific")
 

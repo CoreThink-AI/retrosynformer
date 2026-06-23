@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from transformers import DecisionTransformerConfig, DecisionTransformerModel
 
 from . import trainer as _trainer_mod
+from .compression import load_model as _load_model_file
 from .data import RouteDatasetTorch, collate_fn
 from .trainer import RetroTrainer
 from .utils import evaluation, reward_functions, utils
@@ -266,7 +267,7 @@ def init_model(config, model_path=None):
         model = DecisionTransformerModel(dt_config)
 
     if model_path:
-        model.load_state_dict(torch.load(model_path, map_location=torch.device(DEVICE)))
+        model.load_state_dict(_load_model_file(model_path, map_location=torch.device(DEVICE)))
 
     lsrd = config["model"].get("layer_shared_resid_dropout")
     if lsrd:
@@ -285,6 +286,32 @@ def init_model(config, model_path=None):
             logger.info("layer_shared_resid_dropout: inter-layer boundaries patched: %d (p=%s)", n_inter, p)
 
     return model
+
+
+_CHECKPOINT_CANDIDATES = (
+    "model.pth",
+    "model.safetensors",
+    "model.pth.gz",
+    "model.pth.bz2",
+    "model.pth.xz",
+    "model.safetensors.gz",
+    "model.safetensors.bz2",
+    "model.safetensors.xz",
+)
+
+
+def _find_model_checkpoint(results_path: str) -> "str | None":
+    """Return the first checkpoint found in *results_path*, or None.
+
+    Candidates are tried in priority order: model.pth wins (backward compat;
+    it is the trainer's output filename), then safetensors, then compressed
+    variants of each.
+    """
+    for name in _CHECKPOINT_CANDIDATES:
+        path = os.path.join(results_path, name)
+        if os.path.exists(path):
+            return path
+    return None
 
 
 DATASET_CONFIGS = {
@@ -402,7 +429,12 @@ def main(
     derived_start_epoch = 0
     if resume:
         results_path = config["train"]["results_path"].rstrip("/")
-        model_path = results_path + "/model.pth"
+        model_path = _find_model_checkpoint(results_path)
+        if model_path is None:
+            raise FileNotFoundError(
+                f"No model checkpoint found in {results_path!r}. "
+                f"Expected one of: {', '.join(_CHECKPOINT_CANDIDATES)}"
+            )
         progress_path = results_path + "/train_progress.jsonl"
         if pd.io.common.file_exists(progress_path):
             prev = pd.read_json(progress_path, lines=True)

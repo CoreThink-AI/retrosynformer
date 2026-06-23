@@ -5,6 +5,22 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.43] — 2026-06-22
+
+**`compression.load_model` wired into `runner.init_model`; `prevent_cyclic_routes` beam pruning; test coverage report.**
+
+- `compression.py` (new): format/codec utilities — `save_model`/`load_model` with auto-detection of `.pth`, `.safetensors`, `.gz`/`.bz2`/`.xz`; `cast_state_dict` for fp16/bfloat16 dtype conversion; `is_valid_model_file` for header-only validation.
+- `scripts/compress_model.py` (new): `rs-compress` CLI — convert and/or compress a local model file.
+- `runner.py`: replaced bare `torch.load()` in `init_model` with `compression.load_model`, which auto-detects format and compression. Added `_CHECKPOINT_CANDIDATES` tuple and `_find_model_checkpoint()` so `--resume` probes all supported filenames rather than hardcoding `model.pth`. Raises `FileNotFoundError` with candidate list when nothing is found. Backward compatible: `model.pth` remains first in the probe order.
+- `scripts/upload_model.py`: extended `rs-upload` to support `--format safetensors`, `--dtype fp16/bfloat16`, and all three codecs; `--deploy` auto-uploads config alongside weights.
+- `scripts/gcs_download.py`: extended to support bz2/xz decompression (was gz-only); uses `compression.decompress_file` when available.
+- `environment.py`: `prevent_cyclic_routes` parameter (default `True`) — prunes beam branches that would revisit an already-decomposed molecule; stored as `_decomposed_molecules` set per branch. Set to `false` to reproduce pre-v0.1.43 behaviour.
+- `results/config/baseline_{small,standard,large}.yaml`: `prevent_cyclic_routes: true`; `baseline_large.yaml` added.
+- `tests/test_compression.py` (new): 49 tests covering all format/codec/dtype paths.
+- `docs/coverage.md` (new): test coverage report (298 tests, 20% overall; compression 92%, dropout 96%, extrapolate 90%).
+
+---
+
 ## [0.1.41] — 2026-06-22
 
 **Unified `layer_shared_resid_dropout`: intra- and inter-layer residual mask tying in one parameter.**

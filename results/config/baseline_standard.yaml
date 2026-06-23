@@ -1,4 +1,4 @@
-# Baseline config matching the paper's small-dataset experiment.
+# Baseline config matching the paper's standard dataset experiment.
 #
 # Paper: Granqvist et al., RetroSynFormer, Digital Discovery 2026, 5, 348-362
 #        DOI: 10.1039/d5dd00153f  (see docs/d5dd00153f-RetroSynFormer.md)
@@ -9,7 +9,7 @@
 #
 # Architecture: GPT-2 Decision Transformer (Section 3.3).
 # Hyperparameters were found via Optuna search (paper Table S1).
-# The values below reproduce the small-dataset model as closely as possible
+# The values below reproduce the standard dataset model as closely as possible
 # given the published description; n_heads/n_layers/head_dim/lr are taken
 # from the Optuna-tuned standard-dataset model (the SI table is not publicly
 # available, but these values produced the results in this codebase).
@@ -46,6 +46,10 @@ evaluation:
   test_frac: 0.1
   sort_on: trajectory_prob  # trajectory_prob | total_reward
   ted_exhaustive_limit: 64
+  # Prune beam branches that would revisit a molecule already decomposed in the same
+  # branch (cyclic routes are provably unsolvable and waste beam capacity).
+  # Set to false to reproduce pre-v0.1.42 behaviour or to measure the impact.
+  prevent_cyclic_routes: true
 
 model:
   action_tanh: false        # discrete one-hot template selection; no tanh needed
