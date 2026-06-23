@@ -1,23 +1,24 @@
-# Hyperparameter search for layer-shared residual dropout on the small dataset.
+# Hyperparameter search for architecture + dropout on the large PaRoutes dataset.
 #
-# Architecture is fixed at the best-performing trial from standard-v2-dropout-details
-# trial_001 (epoch 81: best valid_action_accuracy=0.3399):
-#   n_heads=5, n_layers=10, head_dim=128, hidden_size=640
-#   lr=9.685e-4, attn_pdrop=0.166, embd_pdrop=0.006, resid_pdrop=0.087
+# Study: large-23-layer (6 trials completed, 2026-06-21 – 2026-06-23)
 #
-# This study searches only the layer_shared_resid_dropout binary pattern:
-# whether to tie the attention and MLP residual dropout masks within each layer.
-# Four patterns are compared (24-element lists, truncated to n_layers=10 at runtime):
+# Best trial: trial_003 (n_layers=27, n_heads=3, lr=3.70e-4, attn_pdrop=0.123)
+#   valid_action_accuracy=0.4187  valid_route_accuracy=0.1305  frac_solved=0.307
+#   test_molecules.yml: 9/27 solved (33%) — best test result of all trials
 #
-#   all-tied   [True]*24  — every layer uses a shared mask
-#   none-tied  [False]*24 — large independent masks (baseline)
-#   first-only [True] + [False]*23 — only the first layer is tied
-#   last-only  [False]*23 + [True] — only the last layer is tied
-
-# This file intended to be run with:
-  # rs-hypertune -c results/config/large_emma_23_layer.yaml \
-  #     --n-trials 7 --n-epochs 100 --dataset large \
-  #     --study-name large-23-layer
+# Key findings from round 1:
+#   - n_heads=3 beats 4 and 5 in all comparisons; n_heads=2 unexplored
+#   - n_layers=27 beats 19; try 24 to bracket the optimum
+#   - attn_pdrop [0.12, 0.131] was too narrow — all trials converged to same value
+#   - resid_pdrop [0.0, 0.01] was too narrow — standard-dataset optimal is 0.08
+#   - embd_pdrop was fixed at 0; large_nonuniform study found non-zero values help
+#   - fraction_solved (beam_width=1) is a poor proxy for test results (beam_width=50)
+#   - valid_action_accuracy correlates better with full-beam test performance
+#   - best trials still improving at epoch 85; n_epochs and patience increased
+#
+# Run with:
+#   rs-hypertune -c results/config/large_23_layer.yaml \
+#       --n-trials 8 --dataset large --study-name large-23-layer
 
 context:
   building_blocks: data/large_building_blocks.csv
@@ -59,25 +60,57 @@ optimizer:
   momentum: 0.9823
 
 optuna:
-  n_layers: [19, 27]
-  attn_pdrop:
-    high: 0.131
-    log: true
-    low: 0.12
-  lr:
-    high: 0.003
-    log: true
-    low: 0.0002
-  n_heads: [3, 4, 5]
+  # --- Architecture ---
+  # Trial 003 (n_layers=27, n_heads=3) gave best valid_action_accuracy (0.4187) and
+  # best test solve rate (9/27=33%); n_heads=3 beat 4 and 5 in every comparison.
+  # Narrow to [24, 27] and add n_heads=2 as an unexplored direction.
+  n_layers: [24, 27]           # was [19, 27]; 27 clearly beats 19; add 24 to test between
+  n_heads: [2, 3, 4]           # was [3, 4, 5]; n_heads=3 dominates; try 2; drop 5 (worst)
 
+  # --- Learning rate ---
+  # Trials with lr > 1e-3 (t004, t005) early-stopped at 49–85 epochs without
+  # converging.  Best trials were t003 (3.70e-4) and t000 (2.01e-4).
+  # Tighten upper bound; extend lower end slightly to explore slower convergence.
+  lr:
+    low: 0.0001
+    high: 0.002
+    log: true
+
+  # --- Dropout ---
+  # Previous attn_pdrop range [0.12, 0.131] was far too narrow — all 6 trials
+  # landed between 0.122 and 0.130, giving zero exploration signal.
+  # Standard-dataset optimal was 0.08; large_nonuniform study used [0.13, 0.20].
+  # Widen substantially to cover the plausible range.
+  attn_pdrop:
+    low: 0.05
+    high: 0.25
+    log: true
+
+  # embd_pdrop was fixed at 0 in all prior trials.  The large_nonuniform study
+  # searched [1e-5, 0.08] and found non-zero values.  Add it here.
+  embd_pdrop:
+    low: 0.00001
+    high: 0.10
+    log: true
+
+  # resid_pdrop [0.0, 0.01] was too narrow — standard-dataset optimal is 0.08,
+  # large_nonuniform searched [0.02, 0.1] and found similar values.
+  resid_pdrop:
+    low: 0.001
+    high: 0.12
+    log: true
+
+  # --- Objective ---
+  # fraction_solved is measured at beam_width=1 (greedy) during training and is
+  # a poor proxy: trial 002 had the highest frac_solved (0.331) but only 7/27
+  # test molecules solved, while trial 003 had frac_solved=0.307 but solved
+  # 9/27 — the best result.  valid_action_accuracy correlates more reliably
+  # with full-beam test performance.
   # Metric maximised by Optuna across trials:
   #   valid_route_accuracy  — fraction of validation routes where every step matches
   #   valid_action_accuracy — per-step template prediction accuracy on validation set
   #   fraction_solved       — fraction of targets solved during route evaluation
-  objective_metric: fraction_solved  # valid_route_accuracy | valid_action_accuracy | fraction_solved
-  resid_pdrop:
-    high: 0.01
-    low: 0.0
+  objective_metric: valid_action_accuracy  # was fraction_solved; see note above
 
 reward:
   building_block_reward_factor: 0
@@ -88,9 +121,9 @@ reward:
   intermediate_scale_with_depth: 1
 train:
   batch_size: 128
-  early_stopping_patience: 13
+  early_stopping_patience: 20  # was 13; t003 still improving at epoch 83/85 — give more room
   loss: crossEntropyLoss
-  lr_scheduler_patience: 4
-  lr_scheduler_factor: .71
-  n_epochs: 100
+  lr_scheduler_patience: 6     # was 4; slightly more patient before halving lr
+  lr_scheduler_factor: 0.71
+  n_epochs: 150                # was 100; best trials had not converged at 85 epochs
   start_epoch: 0
