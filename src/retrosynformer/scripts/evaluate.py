@@ -21,7 +21,12 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
+
+# ── Type aliases ──────────────────────────────────────────────────────────────
+
+MoleculeList = list[dict]
+RoutesData = dict  # {"molecules": list[dict]} — deserialized routes YAML
 
 _PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound"
 _PUBCHEM_PROPS = "IsomericSMILES,CanonicalSMILES,InChI,InChIKey,MolecularWeight"
@@ -39,6 +44,68 @@ _RETRY_PASSES = [
     (15,  8,  480, "pass 2"),
     (15, 10,  900, "pass 3"),
 ]
+
+
+# ── Data loaders ─────────────────────────────────────────────────────────────
+
+def load_molecules(
+    source: Union[Path, str, MoleculeList, RoutesData],
+) -> MoleculeList:
+    """Return a list of molecule dicts from a file path or an already-loaded object.
+
+    Accepts:
+    - Path / str  → YAML file whose top-level key is ``molecules``
+    - list        → returned as-is (assumed to already be MoleculeList)
+    - dict        → treated as a deserialized YAML doc; ``molecules`` key extracted
+    """
+    if isinstance(source, list):
+        return source
+    if isinstance(source, dict):
+        return source.get("molecules", [])
+    import yaml
+    with open(source) as fh:
+        raw = yaml.safe_load(fh)
+    return (raw or {}).get("molecules", [])
+
+
+def load_routes_data(
+    source: Union[Path, str, RoutesData],
+) -> RoutesData:
+    """Return a routes data dict from a file path or an already-loaded dict."""
+    if isinstance(source, dict):
+        return source
+    import yaml
+    with open(source) as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def filter_solved_molecules(
+    molecules: Union[Path, str, MoleculeList, RoutesData],
+    routes_data: Union[Path, str, RoutesData],
+) -> MoleculeList:
+    """Return only molecules that have at least one solved route in *routes_data*.
+
+    Args:
+        molecules:   test_molecules.yml path, deserialized dict, or list of dicts.
+        routes_data: routes YAML path or deserialized dict (the ``*-routes.yml``
+                     output of a previous evaluation run).  A molecule is
+                     considered solved when any of its ``retrosynformer_routes``
+                     entries has ``all_leaves_purchasable=True``.
+
+    Returns:
+        Subset of *molecules* whose ``query_name`` appears as solved in *routes_data*.
+    """
+    mols = load_molecules(molecules)
+    data = load_routes_data(routes_data)
+    route_mols = data.get("molecules", [])
+    solved_names: set[str] = set()
+    for rm in route_mols:
+        routes = rm.get("retrosynformer_routes") or []
+        if any(r.get("all_leaves_purchasable") for r in routes):
+            name = rm.get("query_name")
+            if name:
+                solved_names.add(name)
+    return [m for m in mols if m.get("query_name") in solved_names]
 
 
 # ── PubChem lookup ────────────────────────────────────────────────────────────
@@ -587,6 +654,15 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("data"), help="Output directory (default: data/)")
     parser.add_argument("--study-name", help="Override auto-detected study name")
     parser.add_argument("--trial-num", help="Override auto-detected trial number (e.g. 000)")
+    parser.add_argument(
+        "--filter-routes", type=Path, metavar="ROUTES_YML",
+        help=(
+            "Path to a previous *-routes.yml output file.  When supplied, only "
+            "molecules that were **solved** in that run are evaluated this time.  "
+            "Useful for benchmarking the same solved subset against a new model or "
+            "endpoint without re-evaluating failures."
+        ),
+    )
     parser.add_argument("--pubchem", action="store_true", default=True,
                         help="Fill null fields from PubChem API (default: on)")
     parser.add_argument("--no-pubchem", dest="pubchem", action="store_false",
@@ -638,17 +714,21 @@ def main():
             )
     print(f"Test molecules: {test_mol_path}", flush=True)
 
-    # Load YAML (avoid PyYAML dependency — parse manually if needed, else import)
     try:
-        import yaml
-        with open(test_mol_path) as f:
-            raw = yaml.safe_load(f)
-        molecules: list[dict] = raw.get("molecules", [])
-        yaml_header_comment = ""
+        import yaml  # noqa: F401 — ensure available before downstream calls
     except ImportError:
         sys.exit("PyYAML is required: pip install pyyaml")
 
+    molecules: MoleculeList = load_molecules(test_mol_path)
     print(f"Loaded {len(molecules)} molecules.", flush=True)
+
+    if args.filter_routes:
+        before = len(molecules)
+        molecules = filter_solved_molecules(molecules, args.filter_routes)
+        print(
+            f"Filtered to {len(molecules)}/{before} molecules solved in {args.filter_routes.name}.",
+            flush=True,
+        )
 
     # Resolve config for local model
     config_path = args.config
