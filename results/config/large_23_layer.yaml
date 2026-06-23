@@ -66,7 +66,6 @@ optuna:
   # Narrow to [24, 27] and add n_heads=2 as an unexplored direction.
   n_layers: [24, 26]           # was [19, 27]; 27 clearly beats 19; add 24 to test between
   n_heads: [2, 3]           # was [3, 4, 5]; n_heads=3 dominates; try 2; drop 5 (worst)
-
   # --- Learning rate ---
   # Trials with lr > 1e-3 (t004, t005) early-stopped at 49–85 epochs without
   # converging.  Best trials were t003 (3.70e-4) and t000 (2.01e-4).
