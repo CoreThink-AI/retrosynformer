@@ -5,6 +5,16 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.46] — 2026-06-23
+
+**evaluate.py refactor; names.py e_pdrop; coverage CI; eval meta-reports.**
+
+- `scripts/evaluate.py`: added `load_molecules()`, `load_routes_data()`, and `filter_solved_molecules()` — all accept file paths or already-deserialized Python objects. Added `--filter-routes` CLI flag to re-evaluate only previously-solved molecules.
+- `scripts/evaluate.py`: fixed `_load_local_predictor` to correctly pass `building_blocks_path` and `templates_path` to `ModelPredictor`.
+- `names.py`: added `e_pdrop` → `embd_pdrop` abbreviation.
+- CI: added `pytest-cov` to `dev` extra; GitHub Actions and GitLab CI now publish HTML coverage reports.
+- `docs/`: added `PLAN-persistent_cache.md` (PostgreSQL persistent cache + eval tracking + access log schema); `eval_meta_report.md`, `eval_runs_meta_report.csv`, `eval_molecules_meta_report.csv` (aggregate statistics across all 7 evaluation runs).
+
 ## [0.1.45] — 2026-06-23
 
 **In-memory LRU cache for `/retrosynthesis`; Cloud Run switched to CPU-only (8 vCPU / 32 GiB).**
