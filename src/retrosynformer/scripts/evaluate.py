@@ -27,15 +27,17 @@ _PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound"
 _PUBCHEM_PROPS = "IsomericSMILES,CanonicalSMILES,InChI,InChIKey,MolecularWeight"
 
 # Progressive retry passes: (max_routes, max_steps, client_timeout_s, label).
-# max_routes ≤ 50, max_steps ≤ 20 (endpoint schema limits).
+# max_routes ≤ 15, max_steps ≤ 20 (endpoint schema limits).
+# The large 27-layer model (799MB) OOMs on Cloud Run with max_routes=30;
+# cap at 15 for all passes after pass 1.
 # Client timeouts should be < Cloud Run request timeout (see rs-upload --deploy).
 # Depths increment gradually (6 → 8 → 10) to avoid wasting GPU time on deep
 # searches for molecules that would be solved at shallower depths.
 # max_steps=10 is the hard ceiling — nothing is searched beyond depth 10.
 _RETRY_PASSES = [
     (10,  6,  360, "pass 1"),
-    (30,  8,  480, "pass 2"),
-    (50, 10,  900, "pass 3"),
+    (15,  8,  480, "pass 2"),
+    (15, 10,  900, "pass 3"),
 ]
 
 
@@ -318,8 +320,8 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
         f"| Skipped (no SMILES / error) | {errors} |",
         f"| **Solved** (all_leaves_purchasable) | **{solved}/{valid}** |",
         f"| Solved on pass 1 (max_routes={meta['beam_width']}, max_steps=6) | {pass_counts[0]} |",
-        f"| Solved on pass 2 (max_routes=30, max_steps=8) | {pass_counts[1]} |",
-        f"| Solved on pass 3 (max_routes=50, max_steps=10) | {pass_counts[2]} |",
+        f"| Solved on pass 2 (max_routes=15, max_steps=8) | {pass_counts[1]} |",
+        f"| Solved on pass 3 (max_routes=15, max_steps=10) | {pass_counts[2]} |",
         f"| Trivially solved (depth=0, is a building block) | {trivial} |",
         f"| Cyclic best route | {cyclic_count} |",
         f"| Avg depth of non-trivial best route | {avg_depth:.1f} |",
@@ -538,8 +540,8 @@ def main():
             "  rs-evaluate --model results/hypertune-large-23-layer/trial_000/model.pth\n\n"
             "  Progressive retry (endpoint mode only):\n"
             "    Pass 1: max_routes=10, max_steps=6\n"
-            "    Pass 2: max_routes=30, max_steps=8   (if not solved)\n"
-            "    Pass 3: max_routes=50, max_steps=10  (if still not solved; hard ceiling)\n"
+            "    Pass 2: max_routes=15, max_steps=8   (if not solved)\n"
+            "    Pass 3: max_routes=15, max_steps=10  (if still not solved; hard ceiling)\n"
         ),
     )
     parser.add_argument(
@@ -671,8 +673,8 @@ def main():
         f"# Study: {study_name}  Trial: {trial_num}",
         f"# Mode: {mode}",
         f"# pass1: max_routes={args.beam_width} max_steps=6  "
-        f"pass2: max_routes=30 max_steps=8  "
-        f"pass3: max_routes=50 max_steps=10  top_routes: {args.top_routes}",
+        f"pass2: max_routes=15 max_steps=8  "
+        f"pass3: max_routes=15 max_steps=10  top_routes: {args.top_routes}",
     ])
 
     # Load existing YAML if present (purely informational; we always re-evaluate)

@@ -5,6 +5,13 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.44] — 2026-06-23
+
+**Reduce `max_routes` server cap to prevent OOM on 27-layer model.**
+
+- `serve/schemas.py`: `RetrosynthesisRequest.max_routes` upper bound lowered from 50 → 15; the 799MB 27-layer model OOMs on Cloud Run (NVIDIA L4 24GB) when beam width exceeds ~20 routes.
+- `scripts/evaluate.py`: `_RETRY_PASSES` updated to use `max_routes=15` for passes 2 and 3 (was 30 and 50); inline string literals and docstrings updated to match.
+
 ## [0.1.43] — 2026-06-22
 
 **`compression.load_model` wired into `runner.init_model`; `prevent_cyclic_routes` beam pruning; test coverage report.**
