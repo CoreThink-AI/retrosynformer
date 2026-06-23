@@ -23,6 +23,10 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Union
 
+import yaml
+
+from retrosynformer.serve.predictor import ModelPredictor
+
 # ── Type aliases ──────────────────────────────────────────────────────────────
 
 MoleculeList = list[dict]
@@ -225,8 +229,6 @@ def _load_local_predictor(model_path: Path, config_path: Path):
     global _local_predictor
     if _local_predictor is not None:
         return _local_predictor
-    import yaml
-    from retrosynformer.serve.predictor import ModelPredictor
     print(f"Loading model from {model_path} with config {config_path} …", flush=True)
     with open(config_path) as fh:
         cfg = yaml.safe_load(fh)
@@ -386,21 +388,21 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
             pass_counts[p - 1] += 1
 
     lines = [
-        f"# RetroSynFormer Evaluation Report",
-        f"",
+        "# RetroSynFormer Evaluation Report",
+        "",
         f"**Date:** {meta['date']}  ",
         f"**Study:** {meta['study_name']}  Trial: {meta['trial_num']}  ",
         f"**Mode:** {meta['mode']}  ",
         f"**Initial beam width (max_routes):** {meta['beam_width']}  ",
         f"**Top routes saved:** {meta['top_routes']}  ",
         f"**Progressive retry:** pass 1 ({meta['beam_width']}/6), pass 2 (30/8), pass 3 (50/10)",
-        f"",
-        f"---",
-        f"",
-        f"## Summary",
-        f"",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        "",
+        "---",
+        "",
+        "## Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Molecules tested | {valid} |",
         f"| Skipped (no SMILES / error) | {errors} |",
         f"| **Solved** (all_leaves_purchasable) | **{solved}/{valid}** |",
@@ -410,13 +412,13 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
         f"| Trivially solved (depth=0, is a building block) | {trivial} |",
         f"| Cyclic best route | {cyclic_count} |",
         f"| Avg depth of non-trivial best route | {avg_depth:.1f} |",
-        f"",
-        f"---",
-        f"",
-        f"## Per-Molecule Results",
-        f"",
-        f"| Molecule | Complexity | Routes | Best depth | Solved | Pass | Cyclic | Leaves (purch/total) | Score |",
-        f"|----------|-----------|--------|-----------|--------|------|--------|----------------------|-------|",
+        "",
+        "---",
+        "",
+        "## Per-Molecule Results",
+        "",
+        "| Molecule | Complexity | Routes | Best depth | Solved | Pass | Cyclic | Leaves (purch/total) | Score |",
+        "|----------|-----------|--------|-----------|--------|------|--------|----------------------|-------|",
     ]
 
     for mol in molecules:
@@ -605,7 +607,6 @@ def _load_dotenv_defaults() -> dict[str, str]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    import datetime
 
     dotenv = _load_dotenv_defaults()
     default_endpoint = os.environ.get("RETROSYNFORMER_URL") or dotenv.get("RETROSYNFORMER_URL")
@@ -766,7 +767,7 @@ def main():
     import datetime as dt
     today = dt.date.today().isoformat()
     header_str = "\n".join([
-        f"# RetroSynFormer evaluation routes",
+        "# RetroSynFormer evaluation routes",
         f"# Generated: {today}",
         f"# Study: {study_name}  Trial: {trial_num}",
         f"# Mode: {mode}",

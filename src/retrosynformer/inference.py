@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class RoutePredictor:
-    def __init__(self, model, config, beam_width=None):
+    def __init__(self, model, config, beam_width=None, **kwargs):
         self.device = utils.get_device()
         self.model = model.to(self.device)
         self.config = config
@@ -33,7 +33,10 @@ class RoutePredictor:
         self.calculator = utils.make_ted_calculator(exhaustive_limit=exhaustive_limit)
         self.softmax = torch.nn.Softmax(dim=-1)
         self.max_depth = self.config["evaluation"]["max_depth"]
-        self.prevent_cyclic_routes = self.config["evaluation"].get("prevent_cyclic_routes", True)
+        self.prevent_cyclic_routes = kwargs.get('prevent_cyclic_routes')
+        if self.prevent_cyclic_routes is None:
+            self.config["evaluation"].get("prevent_cyclic_routes", True)
+        logger.warning(f'{self}.prevent_cyclic_routes: {self.prevent_cyclic_routes}')
         self.result_df = pd.DataFrame({})
         self.eval_df = pd.DataFrame({})
         self.Beam = namedtuple(

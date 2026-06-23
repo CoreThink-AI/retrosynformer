@@ -29,6 +29,7 @@ class RetroGymEnvironment:
         ].values  # SMARTS NOT SMILES!
         self.process_routes = process_routes
         self.prevent_cyclic_routes = prevent_cyclic_routes
+        logger.warning(f'{self}.prevent_cyclic_routes: {self.prevent_cyclic_routes}')
 
         self.state = None
         self.all_rewards = None
