@@ -4,6 +4,6 @@ elif [[ -d .venv/bin ]] ; then
     source .venv/bin/activate
 fi
 git status
-echo "rsync -av --include='*/' --include='study.db' --include='pred_routes_train_progress.json' --include='train_progress.jsonl' --include '*.log' --include='model.config.yaml' --include='run.jsonl' --exclude='*' taco:code/corethink/retrosynformer/results/ results/"
+# echo "rsync -av --include='*/' --include='study.db' --include='pred_routes_train_progress.json' --include='train_progress.jsonl' --include '*.log' --include='model.config.yaml' --include='run.jsonl' --exclude='*' taco:code/corethink/retrosynformer/results/ results/"
 # rsync -av --include='*/' --include='study.db' --include='train_progress.jsonl' --include '*.log' --include='model.config.yaml' --include='run.jsonl' --exclude='*' taco:code/corethink/retrosynformer/results/ results/"
 
