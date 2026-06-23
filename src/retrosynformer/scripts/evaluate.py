@@ -573,6 +573,10 @@ def main():
                         help="Skip PubChem lookups")
     parser.add_argument("--report", action="store_true", default=True, help="Write markdown report (default: on)")
     parser.add_argument("--no-report", dest="report", action="store_false")
+    parser.add_argument(
+        "--passes", type=int, default=3, choices=[1, 2, 3],
+        help="Maximum number of retry passes (default: 3). Use --passes 1 for fast single-pass evaluation.",
+    )
     args = parser.parse_args()
 
     if args.model:
@@ -656,7 +660,7 @@ def main():
     pass_config = [
         (args.beam_width, _RETRY_PASSES[0][1], _RETRY_PASSES[0][2], _RETRY_PASSES[0][3]),
         *_RETRY_PASSES[1:],
-    ]
+    ][:args.passes]
 
     # Build YAML header (needed before the loop for incremental writes)
     import datetime as dt
