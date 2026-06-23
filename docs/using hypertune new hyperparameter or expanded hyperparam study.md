@@ -18,7 +18,6 @@ Optuna re-opens the study from results/hypertune-standard-v2-dropout-details/stu
 ### Expand or change hyperparameter ranges:
 Before running `rs-hypertune` edit the `optuna` section in the YAML config, then re-run with more `--n-trials`. The new ranges take effect for all new trials; old trials in the DB are unaffected. The sampler will adapt to the wider space.
 
-IMPORTANT: The _validate_config check at hypertune.py:669 enforces `n_trials == total_combinations` when all params are discrete. If there's a mix of continuous and discrete, optuna treats the study as Bayesian (TPE) and any `n_trials` works.
+IMPORTANT: The `_validate_config` check at `hypertune.py:669` enforces `n_trials == total_combinations` when all hyperparameters are discrete. If there's a mix of continuous and discrete, Optuna treats the study as Bayesian (TPE) and any `n_trials` works.
 
 
-  Want me to look at the current study's config and suggest a specific command to resume with expanded search?
