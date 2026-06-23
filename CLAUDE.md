@@ -108,3 +108,17 @@ See [`CHANGELOG.md`](../CHANGELOG.md) and [`docs/`](docs/) for full release note
 | `train.results_path` | Where model checkpoints and logs are written |
 | `evaluation.beam_width` | 1 = greedy; 50 = full beam search |
 | `evaluation.eval_routes_frequency` | How often (in epochs) to run full route evaluation (expensive) |
+
+## Coding conventions
+
+**Markdown tables** — always use `df_to_markdown` from `retrosynformer.dataframes` instead of
+hand-writing Markdown table syntax or using `df.to_string`.  It calls `pd.DataFrame.to_markdown`
+via `tabulate`, which space-pads every column so the table is human-readable in plain text and
+renders correctly in any Markdown viewer.
+
+```python
+from retrosynformer.dataframes import df_to_markdown
+print(df_to_markdown(df))          # index=False by default
+```
+
+Requires `tabulate` (`uv pip install tabulate`).

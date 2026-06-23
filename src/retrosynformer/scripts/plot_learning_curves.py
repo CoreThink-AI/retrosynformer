@@ -28,6 +28,7 @@ import plotly.colors as pc
 from retrosynformer.dataframes import (
     build_trials_df,
     find_trial_base,
+    jsonl_best_metrics,
     jsonl_path,
     jsonl_rank_stats,
     load_jsonl,
@@ -35,6 +36,7 @@ from retrosynformer.dataframes import (
     print_and_save_trials_table,
     trials_df_from_db,
 )
+from retrosynformer.names import abbreviate
 from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
 METRICS = [
@@ -203,6 +205,10 @@ def main() -> None:
     )
     all_trials = all_trials.sort_values("rank_val", ascending=rank_lower_is_better).reset_index(drop=True)
 
+    # Table metrics: always include valid_action_accuracy and valid_route_accuracy
+    # so the table shows each per-epoch metric in its own correctly-labeled column.
+    TABLE_METRICS = ["valid_action_accuracy", "valid_route_accuracy"]
+
     if min_score is not None:
         # Keep trials with NaN rank_val (no local jsonl yet — e.g. RUNNING on remote);
         # only drop trials where we have data showing they're below the threshold.
@@ -215,6 +221,39 @@ def main() -> None:
             sys.exit(f"No trials passing the min-score filter.")
 
     top = all_trials.head(args.top).copy()
+
+    # Load best values for each table metric from each trial's jsonl.
+    # Each metric gets its own column _best_<metric> so build_trials_df can
+    # show them separately without cross-contaminating column labels.
+    all_table_metrics = sorted(set(TABLE_METRICS) | {rank_metric})
+    for m in all_table_metrics:
+        col = f"_best_{m}"
+        if col not in top.columns:
+            top[col] = top["jsonl_path"].apply(
+                lambda p, _m=m: jsonl_best_metrics(p, [_m]).get(_m)
+            )
+
+    # Overwrite _best_{rank_metric} with rank_val (already computed, consistent).
+    top[f"_best_{rank_metric}"] = top["rank_val"]
+
+    # Determine the Optuna objective metric from any trial that has a config file.
+    # The objective is a study-level property; trials without configs fall back to
+    # the default, which we should not let drown out an actual configured value.
+    from retrosynformer.models_optuna import (
+        _DEFAULT_OBJECTIVE_METRIC as _DOM,
+        _trial_objective_metric as _tom,
+    )
+    obj_metrics = top.apply(
+        lambda r: _tom(r["db_path"], int(r["original_trial"])), axis=1
+    )
+    # Prefer non-default values (i.e., values from trials that actually had configs).
+    real_obj_metrics = obj_metrics[obj_metrics != _DOM]
+    if not real_obj_metrics.empty:
+        optuna_objective_metric = real_obj_metrics.mode().iloc[0]
+    elif not obj_metrics.empty:
+        optuna_objective_metric = obj_metrics.mode().iloc[0]
+    else:
+        optuna_objective_metric = rank_metric
 
     # --estimate: polynomial extrapolation to the final epoch for each trial.
     # Key by (db_path, trial_number) to avoid collisions when multiple studies share
@@ -259,7 +298,10 @@ def main() -> None:
             )
 
     _non_param = {"trial", "state", "duration_min", "score", "rank_val", "n_epochs",
-                  "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial", "jsonl_path"}
+                  "study_name", "db_path", "db_dir", "trial_base_dir", "original_trial",
+                  "jsonl_path", "score_is_estimated", "_estimated_value", "_target_epoch"}
+    # Exclude all _best_* columns from the param list.
+    _non_param |= {f"_best_{m}" for m in all_table_metrics}
     PARAM_ORDER = ["dataset", "n_heads", "n_layers", "head_dim", "dropout", "lr"]
     _HIDDEN_PARAMS = {"structured_dropout_bottleneck", "structured_dropout_rate"}
     present_params = [c for c in PARAM_ORDER if c in top.columns]
@@ -277,9 +319,14 @@ def main() -> None:
             axis=1,
         )
 
-    rank_metric_short = rank_metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
-    df = build_trials_df(top, rank_metric, rank_metric_short, rank_lower_is_better,
-                                     param_cols, optuna_col_set, show_estimate=estimates is not None)
+    rank_metric_short = abbreviate(rank_metric)
+    df = build_trials_df(
+        top, rank_metric, rank_metric_short, rank_lower_is_better,
+        param_cols, optuna_col_set,
+        show_estimate=estimates is not None,
+        table_metrics=TABLE_METRICS,
+        optuna_objective_metric=optuna_objective_metric,
+    )
     df = print_and_save_trials_table(df, top, rank_metric)
 
     palette = pc.qualitative.D3  # 10 distinct colors
@@ -310,7 +357,7 @@ def main() -> None:
             if metric not in progress.columns:
                 print(f"  SKIP #{rank} {metric}: column missing in {jsonl}")
                 continue
-            metric_short = metric.replace("valid_", "v_").replace("train_", "t_").replace("_accuracy", "_acc")
+            metric_short = abbreviate(metric)
             lower = "loss" in metric
             if args.xmax is not None and "epoch" in progress.columns:
                 _mask = progress["epoch"] <= args.xmax

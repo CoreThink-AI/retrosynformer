@@ -1083,6 +1083,274 @@ def estimate_incomplete_objectives(
     return results
 
 
+# ---------------------------------------------------------------------------
+# Stale-trial cleanup
+# ---------------------------------------------------------------------------
+
+def _last_jsonl_timestamp(jsonl_path: Path):
+    """Return the datetime from the last non-empty line of a train_progress.jsonl.
+
+    Parses the ``timestamp`` field (ISO-8601 string).  Returns None if the
+    file does not exist, is empty, or has no timestamp field.
+    """
+    from datetime import datetime
+    try:
+        lines = jsonl_path.read_text().splitlines()
+    except Exception:
+        return None
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        ts = row.get("timestamp")
+        if ts:
+            try:
+                return datetime.fromisoformat(ts)
+            except ValueError:
+                continue
+    return None
+
+
+def _write_complete_trial(
+    db_path: Path,
+    trial_num: int,
+    value: float,
+    datetime_complete,
+    *,
+    is_estimated: bool = False,
+) -> None:
+    """Write COMPLETE state + objective value to the SQLite DB.
+
+    Only inserts a trial_values row when none exists for objective=0.
+    Always updates trials.state and datetime_complete.
+    When *is_estimated* is True, writes a ``rs_estimated_objective`` user
+    attribute so callers can distinguish proxy-filled values from real ones.
+    """
+    con = sqlite3.connect(str(db_path))
+    try:
+        row = con.execute(
+            "SELECT trial_id FROM trials WHERE number=?", (trial_num,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"trial number {trial_num} not found in {db_path}")
+        trial_id = row[0]
+
+        existing = con.execute(
+            "SELECT trial_value_id FROM trial_values WHERE trial_id=? AND objective=0",
+            (trial_id,),
+        ).fetchone()
+        if existing is None:
+            con.execute(
+                "INSERT INTO trial_values (trial_id, objective, value, value_type)"
+                " VALUES (?, 0, ?, 'FINITE')",
+                (trial_id, value),
+            )
+
+        dt_str = (
+            datetime_complete.strftime("%Y-%m-%d %H:%M:%S.%f")
+            if datetime_complete is not None
+            else None
+        )
+        con.execute(
+            "UPDATE trials SET state='COMPLETE', datetime_complete=? WHERE trial_id=?",
+            (dt_str, trial_id),
+        )
+
+        # Mark estimated (proxy-filled) objectives so the display table can
+        # distinguish them from objectives that were actually measured.
+        flag_val = '"1"' if is_estimated else '"0"'
+        con.execute(
+            "INSERT OR REPLACE INTO trial_user_attributes (trial_id, key, value_json)"
+            " VALUES (?, 'rs_estimated_objective', ?)",
+            (trial_id, flag_val),
+        )
+
+        con.commit()
+    finally:
+        con.close()
+
+
+def complete_stale_trials(
+    db_path: str | Path,
+    *,
+    stale_states: list[str] | None = None,
+    proxy_metric: str = "valid_action_accuracy",
+    min_epochs: int = 6,
+    value_range: tuple[float, float] = (0.0, 1.0),
+    dry_run: bool = False,
+) -> dict[int, dict]:
+    """Mark stale trials as COMPLETE using extrapolated training-curve estimates.
+
+    "Stale" means the trial is in an unresolved non-WAITING state (typically
+    RUNNING or FAILED after a crash) and has no objective value in
+    ``trial_values``.  Trials that already have an objective value are skipped.
+
+    For each eligible trial the function:
+
+    1. Reads the per-epoch metric series from ``trial_NNN/train_progress.jsonl``.
+    2. Determines the objective metric from the trial's ``model.config.yaml``
+       (``optuna.objective_metric``).  If that metric is not logged per-epoch
+       (e.g. ``fraction_solved`` requires end-of-run route evaluation), falls
+       back to *proxy_metric* (default: ``"valid_route_accuracy"``).
+    3. Calls :func:`extrapolate_objective` (four-model inverse-variance ensemble)
+       to estimate the final-epoch value.
+    4. Sets the trial state to COMPLETE with the estimated value, unless
+       *dry_run* is True.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the ``study.db`` SQLite file.
+    stale_states:
+        Trial states to treat as stale.  Defaults to
+        ``["RUNNING", "FAILED", "CANCELED"]``.
+    proxy_metric:
+        Per-epoch metric used when the configured objective metric is absent
+        from the training log.  Defaults to ``"valid_action_accuracy"``, which
+        is logged every epoch and sits in the same numerical range as
+        ``fraction_solved`` (~0.3–0.4).  ``valid_route_accuracy`` is a poor
+        proxy because it is an order of magnitude smaller.
+    min_epochs:
+        Minimum observed epochs before attempting extrapolation.  Trials with
+        fewer rows get ``action="skipped"``.
+    value_range:
+        ``(lo, hi)`` inclusive bounds for accepting an extrapolated estimate.
+        Estimates outside this range are treated as extrapolation artifacts and
+        the trial is skipped.  Defaults to ``(0.0, 1.0)``, which covers all
+        accuracy and fraction metrics.
+    dry_run:
+        If True, compute estimates without writing to the database.
+
+    Returns
+    -------
+    dict[int, dict]
+        ``{trial_number: result}`` for every stale trial examined.
+
+        Each result contains:
+            ``state_before``, ``action`` (``"completed"`` | ``"dry_run"`` |
+            ``"skipped"``), ``skip_reason`` (None or str),
+            ``metric_used``, ``n_epochs_observed``, ``estimated_value``,
+            ``se``, ``datetime_complete`` (ISO str or None).
+    """
+    if stale_states is None:
+        stale_states = ["RUNNING", "FAILED", "CANCELED"]
+
+    db_path = Path(db_path)
+
+    # ── find stale trials: matching state and no objective value ──────────
+    ro = connect(db_path, readonly=True)
+    stale_nums: list[int] = []
+    try:
+        for trial in ro.query(Trial).filter(Trial.state.in_(stale_states)).all():
+            if trial.objective_value is None:
+                stale_nums.append(trial.number)
+    finally:
+        ro.close()
+
+    if not stale_nums:
+        return {}
+
+    # ── extrapolate using the configured objective metric per trial ────────
+    ro = connect(db_path, readonly=True)
+    try:
+        primary = estimate_incomplete_objectives(
+            db_path, ro, metric=None, min_epochs=min_epochs, states=None,
+        )
+        # Retry trials where the configured metric is absent from the log,
+        # using proxy_metric instead.
+        needs_proxy = [
+            n for n in stale_nums if primary.get(n, {}).get("skipped", True)
+        ]
+        proxy: dict[int, dict] = {}
+        if needs_proxy:
+            all_proxy = estimate_incomplete_objectives(
+                db_path, ro, metric=proxy_metric, min_epochs=min_epochs, states=None,
+            )
+            proxy = {n: all_proxy[n] for n in needs_proxy if n in all_proxy}
+    finally:
+        ro.close()
+
+    # ── build result records and optionally write ──────────────────────────
+    results: dict[int, dict] = {}
+    for trial_num in stale_nums:
+        est = primary.get(trial_num, {})
+        metric_used = est.get("metric", proxy_metric)
+
+        if est.get("skipped", True) and trial_num in proxy:
+            est = proxy[trial_num]
+            metric_used = proxy_metric + " (proxy)"
+
+        state_before = est.get("state", "UNKNOWN")
+        n_obs = est.get("n_epochs_observed", 0)
+
+        if est.get("skipped") or est.get("estimated_value") is None:
+            results[trial_num] = {
+                "state_before": state_before,
+                "action": "skipped",
+                "skip_reason": est.get("skip_reason", "no estimate available"),
+                "metric_used": metric_used,
+                "n_epochs_observed": n_obs,
+                "estimated_value": None,
+                "se": None,
+                "datetime_complete": None,
+            }
+            continue
+
+        estimated_value = float(est["estimated_value"])
+
+        # Floor: never report below the trial's actual peak.  Polynomial
+        # extrapolation can dip below best-observed when the curve was
+        # declining at interruption (e.g. lr not yet reduced).
+        actual_metric = metric_used.removesuffix(" (proxy)").strip()
+        obs_pairs = _load_jsonl_metric(
+            db_path.parent / f"trial_{trial_num:03d}" / "train_progress.jsonl",
+            actual_metric,
+        )
+        if obs_pairs:
+            best_observed = max(v for _, v in obs_pairs)
+            if best_observed > estimated_value:
+                estimated_value = best_observed
+
+        lo, hi = value_range
+        if not (lo <= estimated_value <= hi):
+            results[trial_num] = {
+                "state_before": state_before,
+                "action": "skipped",
+                "skip_reason": (
+                    f"estimate {estimated_value:.4f} outside valid range "
+                    f"[{lo}, {hi}] — likely extrapolation artifact"
+                ),
+                "metric_used": metric_used,
+                "n_epochs_observed": n_obs,
+                "estimated_value": estimated_value,
+                "se": est.get("se"),
+                "datetime_complete": None,
+            }
+            continue
+        jsonl_path = db_path.parent / f"trial_{trial_num:03d}" / "train_progress.jsonl"
+        dt_complete = _last_jsonl_timestamp(jsonl_path)
+
+        results[trial_num] = {
+            "state_before": state_before,
+            "action": "dry_run" if dry_run else "completed",
+            "skip_reason": None,
+            "metric_used": metric_used,
+            "n_epochs_observed": n_obs,
+            "estimated_value": estimated_value,
+            "se": est.get("se"),
+            "datetime_complete": dt_complete.isoformat() if dt_complete else None,
+        }
+
+        if not dry_run:
+            _write_complete_trial(db_path, trial_num, estimated_value, dt_complete, is_estimated=True)
+
+    return results
+
+
 def fixed_params_diff(
     db_path_a: str | Path,
     session_a: Session,

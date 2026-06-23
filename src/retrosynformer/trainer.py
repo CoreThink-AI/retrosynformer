@@ -17,6 +17,7 @@ from sklearn.metrics import accuracy_score
 from .async_eval import AsyncRouteEvalPool
 from .epoch_logger import EpochLogger
 from .inference import RoutePredictor
+from .training_display import format_epoch_header, format_epoch_row
 from .utils import utils
 
 # ---------------------------------------------------------------------------
@@ -387,15 +388,11 @@ class RetroTrainer:
         )
 
         logger.info("Training epochs %d to %d.", start_epoch, n_epochs - 1)
+        _inc_trial = trial_number is not None
+        _inc_study = study_name is not None
         if verbose:
-            _hdr_prefix = [f"{'trial':>5}"] if trial_number is not None else []
-            _hdr_suffix = ["study"] if study_name is not None else []
-
             def _print_header():
-                print("  ".join(_hdr_prefix + [
-                    f"{'epoch':>5}", f"{'t_loss':>7}", f"{'t_acc':>7}", f"{'t_racc':>7}",
-                    f"{'v_loss':>7}", f"{'v_acc':>7}", f"{'v_racc':>7}", f"{'s/ep':>6}", f"{'note':<4}",
-                ] + _hdr_suffix), flush=True)
+                print(format_epoch_header(include_trial=_inc_trial, include_study=_inc_study), flush=True)
 
             _print_header()
 
@@ -585,21 +582,7 @@ class RetroTrainer:
             if verbose:
                 if epoch != start_epoch and (epoch - start_epoch) % 10 == 0:
                     _print_header()
-                _row_prefix = []
-                if trial_number is not None:
-                    _row_prefix.append(f"{trial_number:>5}")
-                _row_suffix = [str(study_name)] if study_name is not None else []
-                print("  ".join(_row_prefix + [
-                    f"{epoch:>5}",
-                    f"{train_loss:>7.5f}",
-                    f"{train_action_accuracy:>7.5f}",
-                    f"{train_route_accuracy:>7.5f}",
-                    f"{valid_loss:>7.5f}",
-                    f"{valid_action_accuracy:>7.5f}",
-                    f"{valid_route_accuracy:>7.5f}",
-                    f"{seconds_this_epoch:>6.1f}",
-                    f"{note:<4}",
-                ] + _row_suffix), flush=True)
+                print(format_epoch_row(record, include_trial=_inc_trial, include_study=_inc_study), flush=True)
 
             with open(eval_path, "w") as results:
                 json.dump(self.results_eval, results)

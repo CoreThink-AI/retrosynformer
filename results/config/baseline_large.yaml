@@ -1,48 +1,53 @@
-# Baseline config matching the paper's standard dataset experiment.
+# Baseline config for the large PaRoutes dataset.
 #
 # Paper: Granqvist et al., RetroSynFormer, Digital Discovery 2026, 5, 348-362
-#        DOI: 10.1039/d5dd00153f  (see docs/d5dd00153f-RetroSynFormer.md)
+#        DOI: 10.1039/d5dd00153f
 #
-# Target result (Table 6, small dataset, beam_width=50):
-#   N1 success rate: 0.950   N5 success rate: 0.833
-#   N1 top-1 accuracy: 0.182  N5 TED: 5.428
+# Target result (Table 6, large dataset, beam_width=50):
+#   N1 success rate: 0.929   N5 success rate: 0.887
+#   N1 top-1 accuracy: 0.082  N5 top-1 accuracy: 0.045
+#   N1 TED: 6.168            N5 TED: 7.540
+#   N1 avg route length: 2.276  N5 avg route length: 2.531
+#
+# Large dataset stats (paper Table 1):
+#   Templates: 2986   Building blocks: 72,737
+#   Training routes: 86,048   Valid: 10,645   N1 test: 5,631   N5 test: 5,260
 #
 # Architecture: GPT-2 Decision Transformer (Section 3.3).
-# Hyperparameters were found via Optuna search (paper Table S1).
-# The values below reproduce the standard dataset model as closely as possible
-# given the published description; n_heads/n_layers/head_dim/lr are taken
-# from the Optuna-tuned standard-dataset model (the SI table is not publicly
-# available, but these values produced the results in this codebase).
+# SI Table S1 gives Optuna-optimal hyperparameters for the standard dataset model:
+#   hidden_size=256, n_heads=4, n_layers=26, attn_pdrop=0.02, embd_pdrop=0.2,
+#   resid_pdrop=0.08, activation_function=relu, action_tanh=false, n_epochs=300.
+# The paper uses the same Optuna procedure for all three datasets; no separate
+# large-specific Optuna table is published.  Large dataset internal studies
+# (baseline_large_emma.yaml) searched n_heads=[4,5,6] and n_layers=[12,16,21,26],
+# finding that 19-26 layers consistently outperform fewer layers.  The best
+# trial used n_heads=5, head_dim=128 (hidden_size=640), lr≈9.685e-4.
 #
 # Usage:
-#   python -m retrosynformer.runner -c results/config/baseline_small.yaml
-#   rs-train -c results/config/baseline_small.yaml
+#   python -m retrosynformer.runner -c results/config/baseline_large.yaml
+#   rs-train -c results/config/baseline_large.yaml
 
 context:
-  building_blocks: data/standard_building_blocks.csv
+  building_blocks: data/large_building_blocks.csv
   random_state: 1
-  templates_path: data/standard_reaction_templates.pickle
+  templates_path: data/large_reaction_templates.pickle
 
 dataset:
-  # Small dataset: 588 templates, 53,626 unique targets (paper Table 1)
-  action_dim: 1572           # small=588, standard=1572, large=2986
+  action_dim: 2986          # paper Table 1: small=588, standard=1572, large=2986
   drop_duplicates: true
-  fp_dim: 1024              # 1024-bit Morgan radius-2 fingerprints (Section 3.3.2)
-  n_in_state: 2             # two molecules concatenated → state_dim = 2048 (Section 3.3.2)
-  routes_path: data/standard_routes.json
+  fp_dim: 1024              # paper Section 3.3.2: 1024-bit Morgan radius-2 fingerprints
+  n_in_state: 2             # paper Section 3.3.2: two molecules concatenated → state_dim=2048
+  routes_path: data/large_routes.json
   shuffle: true
   synthetic_routes_path: false
-  # N1+N5 PaRoutes benchmark targets are the held-out test set (Section 3.2)
-  valid_set: n1+n5          # random_split | n1+n5
+  valid_set: n1+n5          # paper Section 3.2: N1+N5 benchmark targets are the held-out test set
 
 evaluation:
   batch_size: 64
-  # beam_width=50 is what the paper calls "RetroSynFormer50" (Section 4)
-  # Use beam_width=1 (greedy) for fast sanity checks; 50 for paper-quality results
-  beam_width: 50            # 1=greedy, 50=paper default (Fig. 7 shows peak ~width 10 for top-1)
+  beam_width: 50            # paper "RetroSynFormer50"; use beam_width=1 for fast sanity checks
   eval_n_batches: 10
   eval_routes_frequency: 100
-  max_depth: 6              # maximum retrosynthesis depth (Section 3.7)
+  max_depth: 6              # paper Section 3.7
   test_frac: 0.1
   sort_on: trajectory_prob  # trajectory_prob | total_reward
   ted_exhaustive_limit: 64
@@ -52,15 +57,16 @@ evaluation:
   prevent_cyclic_routes: true
 
 model:
-  action_tanh: false        # discrete one-hot template selection; no tanh needed
-  activation_function: relu # Section 3.3; GPT-2 default
-  attn_pdrop: 0.08          # best Optuna trial (002): dropout~0.078; zero dropout slightly worse
-  embd_pdrop: 0.08
-  head_dim: 128             # best Optuna trial: 128 (2×128=256 hidden); paper value incorrect
+  action_tanh: false        # SI Table S1: optimal=false (discrete one-hot template selection)
+  activation_function: relu # SI Table S1: optimal=relu
+  attn_pdrop: 0.02          # SI Table S1: standard optimal=0.02; large study also used 0.02 as baseline
+  embd_pdrop: 0.2           # SI Table S1: standard optimal=0.2
+  head_dim: 128             # not in SI Table S1 (paper specifies hidden_size=256 directly);
+                            # large study best trial used head_dim=128 with n_heads=5 (hidden_size=640)
   max_ep_len: 20
-  n_heads: 2                # best Optuna trial: 2; paper value incorrect
-  n_layers: 4               # best Optuna trial: 4; paper value (26) is certainly wrong
-  resid_pdrop: 0.08
+  n_heads: 4                # SI Table S1: standard optimal=4; large study searched [4, 5, 6]
+  n_layers: 26              # SI Table S1: standard optimal=26; large studies confirm 19-26 > fewer layers
+  resid_pdrop: 0.08         # SI Table S1: standard optimal=0.08
   # --- Molecule-conditioned structured dropout ---
   # A learned MLP maps each target molecule's fingerprint to per-channel drop
   # probabilities, then applies inverted Bernoulli masking at the embedding
@@ -89,9 +95,9 @@ model:
   use_structured_dropout: false  # baseline: no structured dropout
 
   # --- Residual dropout mask tying (layer_shared_resid_dropout) ---
-  # Controls which residual dropout sites share a Bernoulli mask.  Three formats:
+  # Controls which residual dropout sites share a Bernoulli mask.  Four formats:
   #
-  # 1. List of bool / 0-1 (one entry per layer, 0-indexed, length >= n_layers):
+  # 1. Bool / list of bool-or-0/1 (one entry per layer, 0-indexed, length >= n_layers):
   #    Ties the attention and MLP residual dropout masks *within* each enabled
   #    transformer block.  Extra entries beyond n_layers are silently truncated.
   #
@@ -120,24 +126,24 @@ model:
   # layer_shared_resid_dropout: ~   # omit or set to null/false to disable
 
 optimizer:
-  lr: 0.001                 # best Optuna trial: 0.00099; lr=0.211 early-stops at epoch ~15
+  lr: 0.001                 # not in SI Table S1; large study best trial lr≈9.685e-4; ~0.001
   momentum: 0.98
 
 reward:
-  # Default reward function — best overall success rate (paper Table 5)
-  # reward = factor * (scale_with_depth^depth)  when scale_with_depth > 0
-  #        = factor                              otherwise
-  building_block_reward_factor: 0     # building blocks are the goal; neutral reward
-  building_block_scale_with_depth: 2  # scale by depth to incentivize shorter routes
-  dead_end_reward_factor: -2          # penalize dead ends
-  dead_end_scale_with_depth: 2        # harsher penalty at greater depth
-  intermediate_reward_factor: -2      # penalize intermediates to favor shorter routes
-  intermediate_scale_with_depth: 1    # mild depth scaling for intermediates
+  # Default reward — highest success rate across all variants tested (paper Table 5, Table S2).
+  # reward = factor * (scale_with_depth ^ depth)  when scale_with_depth > 0
+  #        = factor                               otherwise
+  building_block_reward_factor: 0     # SI Table S2: optimal=0
+  building_block_scale_with_depth: 2  # SI Table S2: optimal=2
+  dead_end_reward_factor: -2          # SI Table S2: optimal=-2
+  dead_end_scale_with_depth: 2        # SI Table S2: optimal=2
+  intermediate_reward_factor: -2      # SI Table S2: optimal=-2
+  intermediate_scale_with_depth: 1    # SI Table S2: optimal=1
 
 train:
-  batch_size: 64
+  batch_size: 128           # large study used 128; standard dataset uses 64
   loss: crossEntropyLoss
-  n_epochs: 300               # best trial still improving at epoch 199; extend budget
-  early_stopping_patience: 30  # stop after this many epochs with no valid_loss improvement
-  lr_scheduler_patience: 15    # ReduceLROnPlateau patience before halving lr
+  n_epochs: 300             # SI Table S1: 300 epochs
+  early_stopping_patience: 30
+  lr_scheduler_patience: 15
   results_path: results/

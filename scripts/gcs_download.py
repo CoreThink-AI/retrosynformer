@@ -28,6 +28,35 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+# Use compression module when retrosynformer is installed (container / editable install).
+# Fall back to stdlib gzip-only for standalone / test invocations.
+try:
+    from retrosynformer.compression import (
+        detect_codec as _detect_codec,
+        decompress_file as _decompress_file,
+        is_valid_model_file as _is_valid_model_file,
+    )
+    _COMPRESSION_AVAILABLE = True
+except ImportError:
+    _COMPRESSION_AVAILABLE = False
+
+    def _detect_codec(path):  # type: ignore[misc]
+        return "gz" if str(path).endswith(".gz") else None
+
+    def _decompress_file(src, dst):  # type: ignore[misc]
+        with gzip.open(src, "rb") as fi, open(dst, "wb") as fo:
+            shutil.copyfileobj(fi, fo)
+        return dst
+
+    def _is_valid_model_file(path):  # type: ignore[misc]
+        try:
+            with zipfile.ZipFile(path, "r") as z:
+                z.namelist()
+            return True
+        except Exception as exc:
+            print(f"  Model validation failed for {path}: {exc}", flush=True)
+            return False
+
 
 def _gcs_client():
     try:
@@ -123,17 +152,18 @@ def _download(gcs_uri: str, local_path: str) -> None:
     client = _gcs_client()
     bucket = client.bucket(bucket_name)
 
-    # --- Chunked path (upload_model_to_gcs.py wrote a manifest) ---
+    codec = _detect_codec(gcs_uri)
+
+    # --- Chunked path (rs-upload wrote a manifest) ---
     if _has_manifest(bucket, blob_name):
-        if gcs_uri.endswith(".gz"):
-            gz_path = path.with_suffix(path.suffix + ".gz")
-            chunk_sha = _download_chunked(bucket, blob_name, gz_path)
-            print(f"  Decompressing {gz_path} → {path} …", flush=True)
-            with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            gz_path.unlink()
+        if codec is not None:
+            compressed_ext = Path(gcs_uri).suffix  # e.g. ".gz", ".bz2", ".xz"
+            compressed_path = path.with_suffix(path.suffix + compressed_ext)
+            chunk_sha = _download_chunked(bucket, blob_name, compressed_path)
+            print(f"  Decompressing {compressed_path.name} ({codec}) → {path.name} …", flush=True)
+            _decompress_file(compressed_path, path)
+            compressed_path.unlink()
             print(f"  Done ({path.stat().st_size/1e6:.1f} MB decompressed)", flush=True)
-            # Compute sha256 of the decompressed model (what the server actually loads).
             print(f"  Computing SHA-256 of decompressed model …", flush=True)
             sha256 = _sha256_file(path)
             print(f"  SHA-256: {sha256}", flush=True)
@@ -150,14 +180,14 @@ def _download(gcs_uri: str, local_path: str) -> None:
     blob.reload()
     size_mb = blob.size / 1e6 if blob.size else 0.0
 
-    if gcs_uri.endswith(".gz"):
-        gz_path = path.with_suffix(path.suffix + ".gz")
-        print(f"  {gcs_uri} → {gz_path} ({size_mb:.1f} MB compressed) ...", flush=True)
-        blob.download_to_filename(str(gz_path))
-        print(f"  Decompressing {gz_path} → {path} ...", flush=True)
-        with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-        gz_path.unlink()
+    if codec is not None:
+        compressed_ext = Path(gcs_uri).suffix
+        compressed_path = path.with_suffix(path.suffix + compressed_ext)
+        print(f"  {gcs_uri} → {compressed_path.name} ({size_mb:.1f} MB compressed) ...", flush=True)
+        blob.download_to_filename(str(compressed_path))
+        print(f"  Decompressing ({codec}) → {path.name} ...", flush=True)
+        _decompress_file(compressed_path, path)
+        compressed_path.unlink()
         print(f"  Done ({path.stat().st_size/1e6:.1f} MB decompressed)", flush=True)
     else:
         print(f"  {gcs_uri} → {local_path} ({size_mb:.1f} MB) ...", flush=True)
@@ -177,17 +207,8 @@ def _download_if_missing(gcs_uri: str, local_path: str) -> None:
 
 
 def _is_valid_model(local_path: str) -> bool:
-    """Return True if local_path is a readable PyTorch checkpoint (ZIP archive).
-
-    Reads only the ZIP central directory — fast even for large .pth files.
-    """
-    try:
-        with zipfile.ZipFile(local_path, "r") as z:
-            z.namelist()
-        return True
-    except Exception as e:
-        print(f"  Model validation failed for {local_path}: {e}", flush=True)
-        return False
+    """Return True if local_path is a readable model file (PyTorch or SafeTensors)."""
+    return _is_valid_model_file(local_path)
 
 
 ARTIFACT_PAIRS = [

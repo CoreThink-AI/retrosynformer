@@ -5,6 +5,76 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.46] — 2026-06-23
+
+**evaluate.py refactor; names.py e_pdrop; coverage CI; eval meta-reports.**
+
+- `scripts/evaluate.py`: added `load_molecules()`, `load_routes_data()`, and `filter_solved_molecules()` — all accept file paths or already-deserialized Python objects. Added `--filter-routes` CLI flag to re-evaluate only previously-solved molecules.
+- `scripts/evaluate.py`: fixed `_load_local_predictor` to correctly pass `building_blocks_path` and `templates_path` to `ModelPredictor`.
+- `names.py`: added `e_pdrop` → `embd_pdrop` abbreviation.
+- CI: added `pytest-cov` to `dev` extra; GitHub Actions and GitLab CI now publish HTML coverage reports.
+- `docs/`: added `PLAN-persistent_cache.md` (PostgreSQL persistent cache + eval tracking + access log schema); `eval_meta_report.md`, `eval_runs_meta_report.csv`, `eval_molecules_meta_report.csv` (aggregate statistics across all 7 evaluation runs).
+
+## [0.1.45] — 2026-06-23
+
+**In-memory LRU cache for `/retrosynthesis`; Cloud Run switched to CPU-only (8 vCPU / 32 GiB).**
+
+- `serve/app.py`: 256-entry LRU cache keyed on `(canonical_smiles, max_routes, max_steps)`; cache hits bypass the inference semaphore entirely. Uses `collections.OrderedDict` + `threading.Lock` — thread-safe, no extra dependencies.
+- `serve/schemas.py`: `HealthResponse` exposes `route_cache_size: int` so callers can observe cache utilisation.
+- Cloud Run `retrosynformer-inference-v3`: removed NVIDIA L4 GPU (`--gpu 0`); kept `--cpu 8 --memory 32Gi`. PyTorch auto-detects CPU via `torch.cuda.is_available()` in `predictor.py`.
+
+## [0.1.44] — 2026-06-23
+
+**Reduce `max_routes` server cap to prevent OOM on 27-layer model.**
+
+- `serve/schemas.py`: `RetrosynthesisRequest.max_routes` upper bound lowered from 50 → 15; the 799MB 27-layer model OOMs on Cloud Run (NVIDIA L4 24GB) when beam width exceeds ~20 routes.
+- `scripts/evaluate.py`: `_RETRY_PASSES` updated to use `max_routes=15` for passes 2 and 3 (was 30 and 50); inline string literals and docstrings updated to match.
+
+## [0.1.43] — 2026-06-22
+
+**`compression.load_model` wired into `runner.init_model`; `prevent_cyclic_routes` beam pruning; test coverage report.**
+
+- `compression.py` (new): format/codec utilities — `save_model`/`load_model` with auto-detection of `.pth`, `.safetensors`, `.gz`/`.bz2`/`.xz`; `cast_state_dict` for fp16/bfloat16 dtype conversion; `is_valid_model_file` for header-only validation.
+- `scripts/compress_model.py` (new): `rs-compress` CLI — convert and/or compress a local model file.
+- `runner.py`: replaced bare `torch.load()` in `init_model` with `compression.load_model`, which auto-detects format and compression. Added `_CHECKPOINT_CANDIDATES` tuple and `_find_model_checkpoint()` so `--resume` probes all supported filenames rather than hardcoding `model.pth`. Raises `FileNotFoundError` with candidate list when nothing is found. Backward compatible: `model.pth` remains first in the probe order.
+- `scripts/upload_model.py`: extended `rs-upload` to support `--format safetensors`, `--dtype fp16/bfloat16`, and all three codecs; `--deploy` auto-uploads config alongside weights.
+- `scripts/gcs_download.py`: extended to support bz2/xz decompression (was gz-only); uses `compression.decompress_file` when available.
+- `environment.py`: `prevent_cyclic_routes` parameter (default `True`) — prunes beam branches that would revisit an already-decomposed molecule; stored as `_decomposed_molecules` set per branch. Set to `false` to reproduce pre-v0.1.43 behaviour.
+- `results/config/baseline_{small,standard,large}.yaml`: `prevent_cyclic_routes: true`; `baseline_large.yaml` added.
+- `tests/test_compression.py` (new): 49 tests covering all format/codec/dtype paths.
+- `docs/coverage.md` (new): test coverage report (298 tests, 20% overall; compression 92%, dropout 96%, extrapolate 90%).
+
+---
+
+## [0.1.41] — 2026-06-22
+
+**Unified `layer_shared_resid_dropout`: intra- and inter-layer residual mask tying in one parameter.**
+
+- `dropout.py`: `apply_shared_resid_dropout(model, p, spec)` — new unified entry point for `layer_shared_resid_dropout`. Accepts a list/bool (intra-layer, backward-compatible), a dict with integer keys N (1-based, intra-layer), float keys N.5 (inter-layer boundary with group-ID value), or any mix of the two. Internally delegates to `apply_layer_shared_resid_dropout` and `apply_interlayer_tied_dropout`.
+- `runner.py`: collapsed the separate `layer_shared_resid_dropout` and `tied_resid_drop` blocks in `init_model` into a single unified block; removed `_validate_tied_resid_drop`; extended `_validate_layer_shared_resid_dropout` to validate both list and dict formats.
+- `tests/test_dropout.py`: 10 new `TestUnifiedAPI` tests covering all spec formats (list, bool, dict intra-only, dict inter-only, combined overlapping, combined non-overlapping, zero-p); 23 tests total.
+- `results/config/baseline_{small,standard}.yaml`: consolidated comments under a single `layer_shared_resid_dropout` heading documenting all four usage forms.
+
+---
+
+## [0.1.40] — 2026-06-22
+
+**hplot column legend; `UNABBREV` dict and `unabbreviate()` in `names.py`.**
+
+- `names.py`: added `UNABBREV` (exact inversion of `ABBREV`) and `unabbreviate()` (reverses `abbreviate()` via UNABBREV lookup then systematic prefix/suffix rules). Added round-trip doctests covering all 16 cases.
+- `dataframes.py`: `print_and_save_trials_table` now prints a `Column legend:` block before the table mapping each abbreviated header to its full name, skipping columns whose abbreviation is identical to the full name.
+
+---
+
+## [0.1.39] — 2026-06-22
+
+**hplot table: dataset column populated for all trials; `dataset_name` abbreviation added.**
+
+- `names.py`: added `"dataset_name": "dataset"` to `ABBREV` so `abbreviate("dataset_name")` returns `"dataset"` for consistent column labelling.
+- `dataframes.py`: `load_run_params` now reads fixed study-level params (e.g. `dataset_name`) from `model.config.yaml` in any trial subdirectory and merges them into every trial's param dict — including trials whose `trial_start` event was never written to `run.jsonl`. This fills the `dataset` column for all trials rather than only those with a `trial_start` log entry.
+
+---
+
 ## [0.1.38] — 2026-06-22
 
 **Server-side disconnect detection; evaluate retry on timeout; pass 1 timeout raised.**

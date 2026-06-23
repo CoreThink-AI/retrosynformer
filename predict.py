@@ -1,16 +1,17 @@
 import argparse
 import json
-import yaml
-import time
 import os
+import time
+
+import yaml
 
 from retrosynformer.inference import RoutePredictor
 from retrosynformer.runner import (
-    read_config,
-    init_model,
-    init_data,
     create_dataloaders,
     create_dataloaders_n1_n5,
+    init_data,
+    init_model,
+    read_config,
 )
 
 

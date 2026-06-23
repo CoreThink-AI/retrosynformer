@@ -89,10 +89,12 @@ def _sync_results_from_remote() -> None:
     dst = "results/"
 
     logger.info("hplot: CPU-only environment — syncing %s → %s", src, dst)
-    from retrosynformer.rsync import sync
+    from retrosynformer.rsync import cleanup_stale, sync
     rc = sync(src, dst)
     if rc != 0:
         logger.warning("hplot: rsync exited with code %d — proceeding with local data", rc)
+    else:
+        cleanup_stale(dst)
 
 
 def main() -> None:

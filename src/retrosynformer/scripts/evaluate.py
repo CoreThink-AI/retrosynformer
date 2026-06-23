@@ -21,19 +21,95 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
+
+import yaml
+
+from retrosynformer.serve.predictor import ModelPredictor
+
+# ── Type aliases ──────────────────────────────────────────────────────────────
+
+MoleculeList = list[dict]
+RoutesData = dict  # {"molecules": list[dict]} — deserialized routes YAML
 
 _PUBCHEM_BASE = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound"
 _PUBCHEM_PROPS = "IsomericSMILES,CanonicalSMILES,InChI,InChIKey,MolecularWeight"
 
 # Progressive retry passes: (max_routes, max_steps, client_timeout_s, label).
-# max_routes ≤ 50, max_steps ≤ 20 (endpoint schema limits).
+# max_routes ≤ 15, max_steps ≤ 20 (endpoint schema limits).
+# The large 27-layer model (799MB) OOMs on Cloud Run with max_routes=30;
+# cap at 15 for all passes after pass 1.
 # Client timeouts should be < Cloud Run request timeout (see rs-upload --deploy).
+# Depths increment gradually (6 → 8 → 10) to avoid wasting GPU time on deep
+# searches for molecules that would be solved at shallower depths.
+# max_steps=10 is the hard ceiling — nothing is searched beyond depth 10.
 _RETRY_PASSES = [
-    (10,  6,  360,  "pass 1"),
-    (30, 10,  600,  "pass 2"),
-    (50, 15, 1500,  "pass 3"),
+    (10,  6,  360, "pass 1"),
+    (15,  8,  480, "pass 2"),
+    (15, 10,  900, "pass 3"),
 ]
+
+
+# ── Data loaders ─────────────────────────────────────────────────────────────
+
+def load_molecules(
+    source: Union[Path, str, MoleculeList, RoutesData],
+) -> MoleculeList:
+    """Return a list of molecule dicts from a file path or an already-loaded object.
+
+    Accepts:
+    - Path / str  → YAML file whose top-level key is ``molecules``
+    - list        → returned as-is (assumed to already be MoleculeList)
+    - dict        → treated as a deserialized YAML doc; ``molecules`` key extracted
+    """
+    if isinstance(source, list):
+        return source
+    if isinstance(source, dict):
+        return source.get("molecules", [])
+    import yaml
+    with open(source) as fh:
+        raw = yaml.safe_load(fh)
+    return (raw or {}).get("molecules", [])
+
+
+def load_routes_data(
+    source: Union[Path, str, RoutesData],
+) -> RoutesData:
+    """Return a routes data dict from a file path or an already-loaded dict."""
+    if isinstance(source, dict):
+        return source
+    import yaml
+    with open(source) as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def filter_solved_molecules(
+    molecules: Union[Path, str, MoleculeList, RoutesData],
+    routes_data: Union[Path, str, RoutesData],
+) -> MoleculeList:
+    """Return only molecules that have at least one solved route in *routes_data*.
+
+    Args:
+        molecules:   test_molecules.yml path, deserialized dict, or list of dicts.
+        routes_data: routes YAML path or deserialized dict (the ``*-routes.yml``
+                     output of a previous evaluation run).  A molecule is
+                     considered solved when any of its ``retrosynformer_routes``
+                     entries has ``all_leaves_purchasable=True``.
+
+    Returns:
+        Subset of *molecules* whose ``query_name`` appears as solved in *routes_data*.
+    """
+    mols = load_molecules(molecules)
+    data = load_routes_data(routes_data)
+    route_mols = data.get("molecules", [])
+    solved_names: set[str] = set()
+    for rm in route_mols:
+        routes = rm.get("retrosynformer_routes") or []
+        if any(r.get("all_leaves_purchasable") for r in routes):
+            name = rm.get("query_name")
+            if name:
+                solved_names.add(name)
+    return [m for m in mols if m.get("query_name") in solved_names]
 
 
 # ── PubChem lookup ────────────────────────────────────────────────────────────
@@ -153,11 +229,27 @@ def _load_local_predictor(model_path: Path, config_path: Path):
     global _local_predictor
     if _local_predictor is not None:
         return _local_predictor
-    from retrosynformer.serve.predictor import ModelPredictor
     print(f"Loading model from {model_path} with config {config_path} …", flush=True)
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh)
+    ctx = cfg.get("context", {})
+    # Resolve relative paths against the config file's directory, then cwd.
+    def _resolve(raw: str) -> str:
+        p = Path(raw)
+        if p.is_absolute():
+            return str(p)
+        candidate = config_path.parent / p
+        if candidate.exists():
+            return str(candidate)
+        return str(p)  # fall back to cwd-relative; let ModelPredictor error with a clear path
+
+    bb_path = _resolve(ctx["building_blocks"])
+    tpl_path = _resolve(ctx["templates_path"])
     _local_predictor = ModelPredictor(
         config_path=str(config_path),
         model_path=str(model_path),
+        building_blocks_path=bb_path,
+        templates_path=tpl_path,
     )
     return _local_predictor
 
@@ -296,37 +388,37 @@ def write_report(molecules: list[dict], path: Path, meta: dict) -> None:
             pass_counts[p - 1] += 1
 
     lines = [
-        f"# RetroSynFormer Evaluation Report",
-        f"",
+        "# RetroSynFormer Evaluation Report",
+        "",
         f"**Date:** {meta['date']}  ",
         f"**Study:** {meta['study_name']}  Trial: {meta['trial_num']}  ",
         f"**Mode:** {meta['mode']}  ",
         f"**Initial beam width (max_routes):** {meta['beam_width']}  ",
         f"**Top routes saved:** {meta['top_routes']}  ",
-        f"**Progressive retry:** pass 1 ({meta['beam_width']}/6), pass 2 (30/10), pass 3 (50/15)",
-        f"",
-        f"---",
-        f"",
-        f"## Summary",
-        f"",
-        f"| Metric | Value |",
-        f"|--------|-------|",
+        f"**Progressive retry:** pass 1 ({meta['beam_width']}/6), pass 2 (30/8), pass 3 (50/10)",
+        "",
+        "---",
+        "",
+        "## Summary",
+        "",
+        "| Metric | Value |",
+        "|--------|-------|",
         f"| Molecules tested | {valid} |",
         f"| Skipped (no SMILES / error) | {errors} |",
         f"| **Solved** (all_leaves_purchasable) | **{solved}/{valid}** |",
         f"| Solved on pass 1 (max_routes={meta['beam_width']}, max_steps=6) | {pass_counts[0]} |",
-        f"| Solved on pass 2 (max_routes=30, max_steps=10) | {pass_counts[1]} |",
-        f"| Solved on pass 3 (max_routes=50, max_steps=15) | {pass_counts[2]} |",
+        f"| Solved on pass 2 (max_routes=15, max_steps=8) | {pass_counts[1]} |",
+        f"| Solved on pass 3 (max_routes=15, max_steps=10) | {pass_counts[2]} |",
         f"| Trivially solved (depth=0, is a building block) | {trivial} |",
         f"| Cyclic best route | {cyclic_count} |",
         f"| Avg depth of non-trivial best route | {avg_depth:.1f} |",
-        f"",
-        f"---",
-        f"",
-        f"## Per-Molecule Results",
-        f"",
-        f"| Molecule | Complexity | Routes | Best depth | Solved | Pass | Cyclic | Leaves (purch/total) | Score |",
-        f"|----------|-----------|--------|-----------|--------|------|--------|----------------------|-------|",
+        "",
+        "---",
+        "",
+        "## Per-Molecule Results",
+        "",
+        "| Molecule | Complexity | Routes | Best depth | Solved | Pass | Cyclic | Leaves (purch/total) | Score |",
+        "|----------|-----------|--------|-----------|--------|------|--------|----------------------|-------|",
     ]
 
     for mol in molecules:
@@ -515,7 +607,6 @@ def _load_dotenv_defaults() -> dict[str, str]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    import datetime
 
     dotenv = _load_dotenv_defaults()
     default_endpoint = os.environ.get("RETROSYNFORMER_URL") or dotenv.get("RETROSYNFORMER_URL")
@@ -535,8 +626,8 @@ def main():
             "  rs-evaluate --model results/hypertune-large-23-layer/trial_000/model.pth\n\n"
             "  Progressive retry (endpoint mode only):\n"
             "    Pass 1: max_routes=10, max_steps=6\n"
-            "    Pass 2: max_routes=30, max_steps=10  (if not solved)\n"
-            "    Pass 3: max_routes=50, max_steps=15  (if still not solved)\n"
+            "    Pass 2: max_routes=15, max_steps=8   (if not solved)\n"
+            "    Pass 3: max_routes=15, max_steps=10  (if still not solved; hard ceiling)\n"
         ),
     )
     parser.add_argument(
@@ -564,12 +655,25 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("data"), help="Output directory (default: data/)")
     parser.add_argument("--study-name", help="Override auto-detected study name")
     parser.add_argument("--trial-num", help="Override auto-detected trial number (e.g. 000)")
+    parser.add_argument(
+        "--filter-routes", type=Path, metavar="ROUTES_YML",
+        help=(
+            "Path to a previous *-routes.yml output file.  When supplied, only "
+            "molecules that were **solved** in that run are evaluated this time.  "
+            "Useful for benchmarking the same solved subset against a new model or "
+            "endpoint without re-evaluating failures."
+        ),
+    )
     parser.add_argument("--pubchem", action="store_true", default=True,
                         help="Fill null fields from PubChem API (default: on)")
     parser.add_argument("--no-pubchem", dest="pubchem", action="store_false",
                         help="Skip PubChem lookups")
     parser.add_argument("--report", action="store_true", default=True, help="Write markdown report (default: on)")
     parser.add_argument("--no-report", dest="report", action="store_false")
+    parser.add_argument(
+        "--passes", type=int, default=3, choices=[1, 2, 3],
+        help="Maximum number of retry passes (default: 3). Use --passes 1 for fast single-pass evaluation.",
+    )
     args = parser.parse_args()
 
     if args.model:
@@ -611,17 +715,21 @@ def main():
             )
     print(f"Test molecules: {test_mol_path}", flush=True)
 
-    # Load YAML (avoid PyYAML dependency — parse manually if needed, else import)
     try:
-        import yaml
-        with open(test_mol_path) as f:
-            raw = yaml.safe_load(f)
-        molecules: list[dict] = raw.get("molecules", [])
-        yaml_header_comment = ""
+        import yaml  # noqa: F401 — ensure available before downstream calls
     except ImportError:
         sys.exit("PyYAML is required: pip install pyyaml")
 
+    molecules: MoleculeList = load_molecules(test_mol_path)
     print(f"Loaded {len(molecules)} molecules.", flush=True)
+
+    if args.filter_routes:
+        before = len(molecules)
+        molecules = filter_solved_molecules(molecules, args.filter_routes)
+        print(
+            f"Filtered to {len(molecules)}/{before} molecules solved in {args.filter_routes.name}.",
+            flush=True,
+        )
 
     # Resolve config for local model
     config_path = args.config
@@ -653,19 +761,19 @@ def main():
     pass_config = [
         (args.beam_width, _RETRY_PASSES[0][1], _RETRY_PASSES[0][2], _RETRY_PASSES[0][3]),
         *_RETRY_PASSES[1:],
-    ]
+    ][:args.passes]
 
     # Build YAML header (needed before the loop for incremental writes)
     import datetime as dt
     today = dt.date.today().isoformat()
     header_str = "\n".join([
-        f"# RetroSynFormer evaluation routes",
+        "# RetroSynFormer evaluation routes",
         f"# Generated: {today}",
         f"# Study: {study_name}  Trial: {trial_num}",
         f"# Mode: {mode}",
         f"# pass1: max_routes={args.beam_width} max_steps=6  "
-        f"pass2: max_routes=30 max_steps=10  "
-        f"pass3: max_routes=50 max_steps=15  top_routes: {args.top_routes}",
+        f"pass2: max_routes=15 max_steps=8  "
+        f"pass3: max_routes=15 max_steps=10  top_routes: {args.top_routes}",
     ])
 
     # Load existing YAML if present (purely informational; we always re-evaluate)

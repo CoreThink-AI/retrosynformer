@@ -111,7 +111,7 @@ class RetrosynthesisRequest(BaseModel):
 
     smiles: str = Field(..., description="Target molecule SMILES", examples=["CC(=O)Oc1ccccc1C(=O)O"])
     max_steps: int = Field(default=6, ge=1, le=20, description="Max retrosynthesis depth")
-    max_routes: int = Field(default=5, ge=1, le=50, description="Max routes to return")
+    max_routes: int = Field(default=5, ge=1, le=15, description="Max routes to return")
     molecule_name: Optional[str] = Field(
         default=None,
         description="Common or IUPAC name (accepted for API compatibility; not used by this model)",
@@ -200,3 +200,4 @@ class HealthResponse(BaseModel):
     model_released_at: Optional[str] = None
     model_sha256_hash: Optional[str] = None
     model_file_size_bytes: Optional[int] = None
+    route_cache_size: int = 0

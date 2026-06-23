@@ -6,16 +6,30 @@ startup without any change to env vars.
 
 Usage::
 
+    # gzip-compressed upload (fast, minimal size reduction for float weights):
     rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\
               gs://biochem-db-by-hobs/retrosynformer/models/large_emma_23layers_trial000/model.pth.gz \\
-              --compress
+              --codec gz
+
+    # bzip2 or xz for better compression ratio (slower):
+    rs-upload results/.../model.pth gs://.../model.pth.bz2 --codec bz2
+    rs-upload results/.../model.pth gs://.../model.pth.xz  --codec xz
+
+    # Convert to fp16 and safetensors before upload:
+    rs-upload results/.../model.pth gs://.../model.safetensors.gz \\
+              --format safetensors --dtype fp16 --codec gz
+
+    # Upload + redeploy the v3 inference endpoint:
+    rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\
+              gs://biochem-db-by-hobs/retrosynformer/models/large-23-layer-trial000/model.pth.gz \\
+              --codec gz \\
+              --deploy retrosynformer-inference-v3 \\
+              --deploy-region us-central1
 """
 import argparse
-import gzip
 import hashlib
 import io
 import math
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,6 +37,16 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from retrosynformer.compression import (
+    CODECS,
+    DTYPES,
+    FORMATS,
+    cast_state_dict,
+    codec_extension,
+    compress_file,
+    detect_codec,
+)
 
 CHUNK_SIZE_DEFAULT = 50 * 1024 * 1024  # 50 MB
 _PROGRESS_CHUNK = 4 * 1024 * 1024
@@ -203,8 +227,10 @@ def upload_chunked(
     gcs_uri: str,
     chunk_size: int = CHUNK_SIZE_DEFAULT,
     max_workers: int = 1,
-    compress: bool = False,
+    codec: "str | None" = None,
     skip_existing: bool = False,
+    fmt: str = "pth",
+    dtype: "str | None" = None,
 ) -> None:
     assert gcs_uri.startswith("gs://"), f"Expected gs:// URI, got {gcs_uri!r}"
     bucket_name, blob_name = gcs_uri[5:].split("/", 1)
@@ -214,18 +240,37 @@ def upload_chunked(
     except ImportError:
         sys.exit("google-cloud-storage not installed; run: pip install google-cloud-storage")
 
-    if compress and not str(local_path).endswith(".gz"):
-        print(f"Compressing {local_path} …", flush=True)
-        tmp = tempfile.NamedTemporaryFile(suffix=".gz", delete=False)
-        # mtime=0 makes gzip output deterministic for identical input →
-        # --skip-existing MD5 checks match across separate invocations.
-        with open(local_path, "rb") as src, open(tmp.name, "wb") as raw_out:
-            with gzip.GzipFile(fileobj=raw_out, mode="wb", compresslevel=1, mtime=0) as gz:
-                shutil.copyfileobj(src, gz)
-        source_path = Path(tmp.name)
-        print(f"  {local_path.stat().st_size/1e9:.2f} GB → {source_path.stat().st_size/1e9:.2f} GB compressed", flush=True)
-    else:
-        source_path = local_path
+    source_path = local_path
+    _tmp_files: list[Path] = []
+
+    # --- dtype conversion and/or format change (creates a temp file) ---
+    if dtype is not None or fmt != "pth":
+        import torch
+        print(f"Loading {local_path} for conversion …", flush=True)
+        state_dict = torch.load(local_path, map_location="cpu", weights_only=True)
+        suffix = ".safetensors" if fmt == "safetensors" else ".pth"
+        tmp_model = Path(tempfile.mktemp(suffix=suffix))
+        _tmp_files.append(tmp_model)
+        from retrosynformer.compression import save_model as _save_model
+        _save_model(state_dict, tmp_model, fmt=fmt, dtype=dtype)
+        print(
+            f"  {local_path.stat().st_size/1e9:.2f} GB → {tmp_model.stat().st_size/1e9:.2f} GB "
+            f"({fmt}{' '+dtype if dtype else ''})",
+            flush=True,
+        )
+        source_path = tmp_model
+
+    # --- compression ---
+    if codec is not None and not str(source_path).endswith(codec_extension(codec)):
+        print(f"Compressing {source_path} with {codec} …", flush=True)
+        tmp_compressed = Path(tempfile.mktemp(suffix=codec_extension(codec)))
+        _tmp_files.append(tmp_compressed)
+        compress_file(source_path, tmp_compressed, codec)
+        print(
+            f"  {source_path.stat().st_size/1e9:.2f} GB → {tmp_compressed.stat().st_size/1e9:.2f} GB compressed",
+            flush=True,
+        )
+        source_path = tmp_compressed
 
     total_bytes = source_path.stat().st_size
     n_chunks = math.ceil(total_bytes / chunk_size)
@@ -304,8 +349,8 @@ def upload_chunked(
     print(f"Manifest written → {blob_name}.manifest", flush=True)
     print(f"Done. {n_chunks} chunks, {total_bytes/1e9:.3f} GB.", flush=True)
 
-    if compress and source_path != local_path:
-        source_path.unlink()
+    for tmp in _tmp_files:
+        tmp.unlink(missing_ok=True)
 
 
 def deploy_to_cloud_run(
@@ -341,24 +386,51 @@ def main():
         description="Upload a model file to GCS as parallel 50 MB chunks.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            "Codec inference order: --codec flag → GCS URI extension → local path extension.\n"
+            "GCS URI may be a directory (trailing /) — filename is derived from the local path.\n\n"
             "Examples:\n"
-            "  # Upload only:\n"
-            "  rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\\n"
-            "            gs://biochem-db-by-hobs/retrosynformer/models/large-23-layer-trial000/model.pth.gz \\\n"
-            "            --compress\n\n"
-            "  # Upload and redeploy the v3 inference endpoint:\n"
-            "  rs-upload results/hypertune-large-23-layer/trial_000/model.pth \\\n"
-            "            gs://biochem-db-by-hobs/retrosynformer/models/large-23-layer-trial000/model.pth.gz \\\n"
-            "            --compress \\\n"
-            "            --deploy retrosynformer-inference-v3 \\\n"
-            "            --deploy-region us-central1\n"
+            "  # Codec inferred from local filename; GCS filename derived automatically:\n"
+            "  rs-upload results/.../model.pth.gz gs://.../large-23-layer-trial003/\n\n"
+            "  # GCS directory + explicit codec:\n"
+            "  rs-upload results/.../model.pth gs://.../large-23-layer-trial003/ --codec bz2\n\n"
+            "  # Full GCS URI with extension (codec inferred from it):\n"
+            "  rs-upload results/.../model.pth gs://.../model.pth.xz\n\n"
+            "  # fp16 safetensors:\n"
+            "  rs-upload results/.../model.pth gs://.../large-23-layer-trial003/ \\\n"
+            "            --format safetensors --dtype fp16 --codec gz\n\n"
+            "  # Upload + deploy:\n"
+            "  rs-upload results/.../model.pth.gz gs://.../large-23-layer-trial003/ \\\n"
+            "            --deploy retrosynformer-inference-v3\n"
         ),
     )
     parser.add_argument("local_path", type=Path, help="Local model file to upload")
-    parser.add_argument("gcs_uri", help="Destination gs:// URI (suffix with .gz to enable decompression at startup)")
+    parser.add_argument(
+        "gcs_uri",
+        help=(
+            "Destination gs:// URI. May be a full path (gs://bucket/path/model.pth.gz) "
+            "or a directory (gs://bucket/path/) — in the latter case the filename is "
+            "derived from local_path."
+        ),
+    )
     parser.add_argument("--chunk-mb", type=int, default=50, help="Chunk size in MB (default: 50)")
     parser.add_argument("--workers", type=int, default=1, help="Upload workers (default: 1 — network is the bottleneck)")
-    parser.add_argument("--compress", action="store_true", help="gzip the file before chunking (.pth → .pth.gz)")
+    parser.add_argument(
+        "--codec", choices=list(CODECS), metavar="CODEC",
+        help="Compress before upload: gz (fast), bz2 (better ratio), xz (best ratio, slowest). "
+             "Inferred from local_path or gcs_uri extension when omitted.",
+    )
+    parser.add_argument(
+        "--compress", action="store_true",
+        help="Alias for --codec gz (backwards compatibility)",
+    )
+    parser.add_argument(
+        "--format", dest="fmt", choices=list(FORMATS), default="pth",
+        help="Model serialisation format: pth (PyTorch, default) or safetensors",
+    )
+    parser.add_argument(
+        "--dtype", choices=list(DTYPES),
+        help="Cast float32 weights before upload: fp16 or bfloat16 halve file size",
+    )
     parser.add_argument("--skip-existing", action="store_true", help="Skip chunks already in GCS with matching size+MD5")
     parser.add_argument(
         "--deploy", metavar="SERVICE",
@@ -374,13 +446,48 @@ def main():
     )
     args = parser.parse_args()
 
+    # --- Resolve codec from all three sources (explicit > URI ext > local path ext) ---
+    explicit_codec = args.codec or ("gz" if args.compress else None)
+    is_gcs_dir = args.gcs_uri.endswith("/")
+    uri_codec = None if is_gcs_dir else detect_codec(args.gcs_uri)
+    local_codec = detect_codec(args.local_path)
+
+    codecs = {c for c in (explicit_codec, uri_codec, local_codec) if c is not None}
+    if len(codecs) > 1:
+        sources = []
+        if explicit_codec: sources.append(f"--codec {explicit_codec!r}")
+        if uri_codec:       sources.append(f"GCS URI (.{uri_codec})")
+        if local_codec:     sources.append(f"local path (.{local_codec})")
+        sys.exit(f"Conflicting codec sources — use only one: {', '.join(sources)}")
+
+    codec = explicit_codec or uri_codec or local_codec
+
+    # --- Resolve GCS URI (expand directory → full path with filename) ---
+    gcs_uri = args.gcs_uri
+    if is_gcs_dir:
+        # Derive filename from local path; strip any local codec ext so we can
+        # append the resolved one cleanly regardless of source.
+        local_name = args.local_path.name
+        if local_codec is not None:
+            local_name = local_name[: -len(codec_extension(local_codec))]
+        if codec is not None:
+            local_name = local_name + codec_extension(codec)
+        gcs_uri = gcs_uri + local_name
+        print(f"Note: derived GCS URI → {gcs_uri}", flush=True)
+    elif codec is not None and uri_codec is None:
+        # Full URI given but no extension — append codec ext.
+        gcs_uri = gcs_uri + codec_extension(codec)
+        print(f"Note: appended codec extension to GCS URI → {gcs_uri}", flush=True)
+
     upload_chunked(
         local_path=args.local_path,
-        gcs_uri=args.gcs_uri,
+        gcs_uri=gcs_uri,
         chunk_size=args.chunk_mb * 1024 * 1024,
         max_workers=args.workers,
-        compress=args.compress,
+        codec=codec,
         skip_existing=args.skip_existing,
+        fmt=args.fmt,
+        dtype=args.dtype,
     )
 
     if args.deploy:
@@ -389,7 +496,7 @@ def main():
         config_gcs_uri = args.deploy_config_gcs
         if not config_gcs_uri:
             model_dir = args.local_path.parent
-            gcs_dir = args.gcs_uri.rsplit("/", 1)[0]
+            gcs_dir = gcs_uri.rsplit("/", 1)[0]
             for candidate in ("model.config.yaml", "config.yaml"):
                 local_cfg = model_dir / candidate
                 if local_cfg.exists():
@@ -406,7 +513,7 @@ def main():
                     break
 
         deploy_to_cloud_run(
-            gcs_uri=args.gcs_uri,
+            gcs_uri=gcs_uri,
             service=args.deploy,
             region=args.deploy_region,
             config_gcs_uri=config_gcs_uri,

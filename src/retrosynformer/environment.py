@@ -16,6 +16,7 @@ class RetroGymEnvironment:
         reward_mapping,
         max_depth,
         process_routes=False,
+        prevent_cyclic_routes=True,
     ):
         self.building_blocks = building_blocks
         self.action2templates = action2templates
@@ -27,6 +28,8 @@ class RetroGymEnvironment:
             "smiles"
         ].values  # SMARTS NOT SMILES!
         self.process_routes = process_routes
+        self.prevent_cyclic_routes = prevent_cyclic_routes
+        logger.warning(f'{self}.prevent_cyclic_routes: {self.prevent_cyclic_routes}')
 
         self.state = None
         self.all_rewards = None
@@ -37,6 +40,7 @@ class RetroGymEnvironment:
         self.total_reward = None
         self.route_done = False
         self.route_solved = False
+        self._decomposed_molecules = None
 
     def copy(self):
         # Create a dictionary of all attributes
@@ -48,6 +52,7 @@ class RetroGymEnvironment:
             self.reward_mapping,
             self.max_depth,
             self.process_routes,
+            self.prevent_cyclic_routes,
         )
         for key, value in vars(self).items():
             # Perform deep copy only on mutable objects (for example, lists, dicts)
@@ -63,6 +68,7 @@ class RetroGymEnvironment:
                 "visited_intermediates",
                 "visited_intermediates_branch",
                 "leafs",
+                "_decomposed_molecules",
             ]:
                 setattr(copied_environment, key, copy.deepcopy(value))
             else:
@@ -98,6 +104,9 @@ class RetroGymEnvironment:
         self.number_of_branchings = 0
         self.dead_ends = []
         self.leafs = []
+        if self.prevent_cyclic_routes:
+            mol = Chem.MolFromSmiles(target_compound)
+            self._decomposed_molecules = {Chem.MolToSmiles(mol) if mol else target_compound}
 
     def _get_reward(self, n):
         """ Return the reward for each state, calculated for each reaction step.
@@ -164,6 +173,18 @@ class RetroGymEnvironment:
             if len(reactants) > 0:
                 reactants = reactants[0]
                 ordered_reactants = self._decide_reactant_order(reactants)
+                if self.prevent_cyclic_routes and self._decomposed_molecules:
+                    canonical_reactants = set()
+                    for r in reactants:
+                        m = Chem.MolFromSmiles(r)
+                        if m:
+                            canonical_reactants.add(Chem.MolToSmiles(m))
+                    if canonical_reactants & self._decomposed_molecules:
+                        logger.debug(
+                            "Cyclic route pruned: %s already decomposed in this branch",
+                            canonical_reactants & self._decomposed_molecules,
+                        )
+                        continue
                 self._step_impl(ordered_reactants)
                 if (
                     len(
@@ -196,6 +217,14 @@ class RetroGymEnvironment:
 
         self.visited_intermediates_branch = self.state.pop()
         assert isinstance(self.visited_intermediates_branch, list)
+        if self.prevent_cyclic_routes and self._decomposed_molecules is not None:
+            for mol_smiles in self.visited_intermediates_branch:
+                if isinstance(mol_smiles, str) and mol_smiles not in (
+                    self._branch_solved_state, self._branch_not_solved_state
+                ):
+                    m = Chem.MolFromSmiles(mol_smiles)
+                    if m:
+                        self._decomposed_molecules.add(Chem.MolToSmiles(m))
         # adjust the depth and branching parameter
         self.current_depth += 1
         if self.current_depth > self.route_depth:
