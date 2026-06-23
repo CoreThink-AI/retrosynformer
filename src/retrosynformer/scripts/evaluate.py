@@ -158,11 +158,29 @@ def _load_local_predictor(model_path: Path, config_path: Path):
     global _local_predictor
     if _local_predictor is not None:
         return _local_predictor
+    import yaml
     from retrosynformer.serve.predictor import ModelPredictor
     print(f"Loading model from {model_path} with config {config_path} …", flush=True)
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh)
+    ctx = cfg.get("context", {})
+    # Resolve relative paths against the config file's directory, then cwd.
+    def _resolve(raw: str) -> str:
+        p = Path(raw)
+        if p.is_absolute():
+            return str(p)
+        candidate = config_path.parent / p
+        if candidate.exists():
+            return str(candidate)
+        return str(p)  # fall back to cwd-relative; let ModelPredictor error with a clear path
+
+    bb_path = _resolve(ctx["building_blocks"])
+    tpl_path = _resolve(ctx["templates_path"])
     _local_predictor = ModelPredictor(
         config_path=str(config_path),
         model_path=str(model_path),
+        building_blocks_path=bb_path,
+        templates_path=tpl_path,
     )
     return _local_predictor
 
