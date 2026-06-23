@@ -2,6 +2,8 @@
 
 import asyncio
 import os
+import threading
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
@@ -26,6 +28,32 @@ from .schemas import (
 
 # Module-level state populated during lifespan startup.
 _state: dict = {}
+
+# ---------------------------------------------------------------------------
+# In-memory LRU response cache keyed on (canonical_smiles, max_routes, max_steps).
+# Bypasses the inference semaphore entirely for cache hits.
+# ---------------------------------------------------------------------------
+_ROUTE_CACHE_MAX = 256
+_route_cache: OrderedDict[tuple, list] = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def _cache_get(key: tuple) -> list | None:
+    with _cache_lock:
+        val = _route_cache.get(key)
+        if val is not None:
+            _route_cache.move_to_end(key)
+        return val
+
+
+def _cache_put(key: tuple, value: list) -> None:
+    with _cache_lock:
+        if key in _route_cache:
+            _route_cache.move_to_end(key)
+        else:
+            if len(_route_cache) >= _ROUTE_CACHE_MAX:
+                _route_cache.popitem(last=False)
+            _route_cache[key] = value
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=True)
 
@@ -63,6 +91,8 @@ app = FastAPI(
 def health() -> HealthResponse:
     """Liveness + readiness check.  Returns 200 even while model is loading."""
     predictor: ModelPredictor | None = _state.get("predictor")
+    with _cache_lock:
+        cache_size = len(_route_cache)
     return HealthResponse(
         status="ok" if predictor else "loading",
         model_loaded=predictor is not None,
@@ -74,6 +104,7 @@ def health() -> HealthResponse:
         model_released_at=predictor.model_released_at if predictor else None,
         model_sha256_hash=predictor.model_sha256_hash if predictor else None,
         model_file_size_bytes=predictor.model_file_size_bytes if predictor else None,
+        route_cache_size=cache_size,
     )
 
 
@@ -129,6 +160,16 @@ async def retrosynthesis(request: Request, req: RetrosynthesisRequest) -> Retros
         raise HTTPException(status_code=422, detail=f"Invalid SMILES: {req.smiles!r}")
     canon = Chem.MolToSmiles(mol)
 
+    cache_key = (canon, req.max_routes, req.max_steps)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return RetrosynthesisResponse(
+            target_smiles=req.smiles,
+            canonical_smiles=canon,
+            literature_routes=[],
+            ai_routes=[RouteResponse(**d) for d in cached],
+        )
+
     loop = asyncio.get_event_loop()
     sem: asyncio.Semaphore = _state["sem"]
     async with sem:
@@ -145,12 +186,12 @@ async def retrosynthesis(request: Request, req: RetrosynthesisRequest) -> Retros
             await asyncio.sleep(10)
         route_dicts = future.result()
 
-    ai_routes = [RouteResponse(**d) for d in route_dicts]
+    _cache_put(cache_key, route_dicts)
     return RetrosynthesisResponse(
         target_smiles=req.smiles,
         canonical_smiles=canon,
         literature_routes=[],
-        ai_routes=ai_routes,
+        ai_routes=[RouteResponse(**d) for d in route_dicts],
     )
 
 

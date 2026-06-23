@@ -200,3 +200,4 @@ class HealthResponse(BaseModel):
     model_released_at: Optional[str] = None
     model_sha256_hash: Optional[str] = None
     model_file_size_bytes: Optional[int] = None
+    route_cache_size: int = 0

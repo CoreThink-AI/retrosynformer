@@ -5,6 +5,14 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.45] — 2026-06-23
+
+**In-memory LRU cache for `/retrosynthesis`; Cloud Run switched to CPU-only (8 vCPU / 32 GiB).**
+
+- `serve/app.py`: 256-entry LRU cache keyed on `(canonical_smiles, max_routes, max_steps)`; cache hits bypass the inference semaphore entirely. Uses `collections.OrderedDict` + `threading.Lock` — thread-safe, no extra dependencies.
+- `serve/schemas.py`: `HealthResponse` exposes `route_cache_size: int` so callers can observe cache utilisation.
+- Cloud Run `retrosynformer-inference-v3`: removed NVIDIA L4 GPU (`--gpu 0`); kept `--cpu 8 --memory 32Gi`. PyTorch auto-detects CPU via `torch.cuda.is_available()` in `predictor.py`.
+
 ## [0.1.44] — 2026-06-23
 
 **Reduce `max_routes` server cap to prevent OOM on 27-layer model.**
