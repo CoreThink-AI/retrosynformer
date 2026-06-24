@@ -102,7 +102,7 @@ optuna:
 
   shared_resid_dropout: [
       {11.5: 1, 12.5: 1, 13.5: 1, 14.5: 1, 15.5: 1, 16.5: 1, 17.5, 18.5: 1, 19.5: 1, 20.5: 1, 21.5: 1, 22.5: 1, 23.5: 1},
-      {},
+      {1: 0},
     ]
   # --- Objective ---
   # fraction_solved is measured at beam_width=1 (greedy) during training and is
