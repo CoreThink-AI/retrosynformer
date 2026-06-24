@@ -402,3 +402,191 @@ def test_n_trials_written_to_model_config_yaml(tmp_path):
 
     result = yaml.safe_load(saved_cfg_path.read_text())
     assert result["train"]["n_trials"] == 20
+
+
+# ---------------------------------------------------------------------------
+# layer_shared_resid_dropout — optuna and model section handling
+# ---------------------------------------------------------------------------
+
+class TestPreprocessOptunaCfgLSRD:
+    """_preprocess_optuna_config normalises layer_shared_resid_dropout choices."""
+
+    def test_int_keyed_dicts_converted_to_lists(self):
+        cfg = {"optuna": {"layer_shared_resid_dropout": [
+            {0: True, 2: True},
+            {1: True, 3: True},
+        ]}}
+        out = ht._preprocess_optuna_config(cfg)
+        lsrd = out["optuna"]["layer_shared_resid_dropout"]
+        assert lsrd == [
+            [True, False, True, False],
+            [False, True, False, True],
+        ]
+
+    def test_float_keyed_dicts_serialised_to_json_strings(self):
+        import json
+        cfg = {"optuna": {"layer_shared_resid_dropout": [
+            {1.5: 1, 2.5: 1},
+            {},
+        ]}}
+        out = ht._preprocess_optuna_config(cfg)
+        lsrd = out["optuna"]["layer_shared_resid_dropout"]
+        assert len(lsrd) == 2
+        assert all(isinstance(s, str) for s in lsrd)
+        # First choice deserialises to the original dict (keys as strings in JSON).
+        assert json.loads(lsrd[0]) == {"1.5": 1, "2.5": 1}
+        # Second choice is an empty JSON object.
+        assert json.loads(lsrd[1]) == {}
+
+    def test_empty_dict_choice_serialised_correctly(self):
+        import json
+        cfg = {"optuna": {"layer_shared_resid_dropout": [
+            {3.5: 2},
+            {},
+        ]}}
+        out = ht._preprocess_optuna_config(cfg)
+        lsrd = out["optuna"]["layer_shared_resid_dropout"]
+        assert json.loads(lsrd[1]) == {}
+
+    def test_non_lsrd_params_unchanged(self):
+        cfg = {"optuna": {"n_heads": [2, 4], "lr": {"low": 1e-4, "high": 1e-2}}}
+        out = ht._preprocess_optuna_config(cfg)
+        assert out["optuna"]["n_heads"] == [2, 4]
+        assert out["optuna"]["lr"] == {"low": 1e-4, "high": 1e-2}
+
+    def test_no_optuna_section_is_noop(self):
+        cfg = {"model": {"n_layers": 4}}
+        out = ht._preprocess_optuna_config(cfg)
+        assert out == {"model": {"n_layers": 4}}
+
+    def test_deep_copy_does_not_mutate_original(self):
+        original = {"optuna": {"layer_shared_resid_dropout": [{1.5: 1}, {}]}}
+        ht._preprocess_optuna_config(original)
+        # Original must be unchanged.
+        assert isinstance(original["optuna"]["layer_shared_resid_dropout"][0], dict)
+
+
+class TestSuggestLSRD:
+    """_suggest handles JSON-string dict choices from _preprocess_optuna_config."""
+
+    def _trial(self, chosen_index=0):
+        """Mock trial that returns choices[chosen_index] from suggest_categorical."""
+        t = MagicMock()
+        t.suggest_categorical.side_effect = lambda name, choices: choices[chosen_index]
+        return t
+
+    def test_float_keyed_dict_choice_deserialised(self):
+        import json
+        # Simulate what _preprocess_optuna_config produces for float-keyed dicts.
+        choices = [
+            json.dumps({"1.5": 1, "2.5": 1}, separators=(",", ":"), sort_keys=True),
+            "{}",
+        ]
+        result = ht._suggest(self._trial(0), "layer_shared_resid_dropout", choices)
+        assert result == {1.5: 1, 2.5: 1}
+
+    def test_empty_dict_choice_deserialised(self):
+        import json
+        choices = [
+            json.dumps({"1.5": 1}, separators=(",", ":"), sort_keys=True),
+            "{}",
+        ]
+        result = ht._suggest(self._trial(1), "layer_shared_resid_dropout", choices)
+        assert result == {}
+
+    def test_integer_keys_restored_correctly(self):
+        import json
+        # Keys that are whole-number floats (e.g. "2.0") → int.
+        choices = [json.dumps({"2.0": 1}, separators=(",", ":"), sort_keys=True)]
+        result = ht._suggest(self._trial(0), "x", choices)
+        assert result == {2: 1}
+        assert isinstance(list(result.keys())[0], int)
+
+    def test_fractional_keys_remain_float(self):
+        import json
+        choices = [json.dumps({"11.5": 1, "23.5": 1}, separators=(",", ":"), sort_keys=True)]
+        result = ht._suggest(self._trial(0), "x", choices)
+        assert all(isinstance(k, float) for k in result)
+
+
+class TestRestoreNumericDictKeys:
+    """_restore_numeric_dict_keys converts string keys back to int/float."""
+
+    def test_float_key_restored(self):
+        assert ht._restore_numeric_dict_keys({"1.5": 1}) == {1.5: 1}
+
+    def test_whole_number_key_becomes_int(self):
+        result = ht._restore_numeric_dict_keys({"2.0": 1})
+        assert result == {2: 1}
+        assert isinstance(list(result.keys())[0], int)
+
+    def test_integer_string_key_becomes_int(self):
+        result = ht._restore_numeric_dict_keys({"3": 1})
+        assert result == {3: 1}
+        assert isinstance(list(result.keys())[0], int)
+
+    def test_non_numeric_key_unchanged(self):
+        assert ht._restore_numeric_dict_keys({"foo": 1}) == {"foo": 1}
+
+    def test_empty_dict(self):
+        assert ht._restore_numeric_dict_keys({}) == {}
+
+    def test_mixed_keys(self):
+        result = ht._restore_numeric_dict_keys({"1": 0, "1.5": 1, "foo": 2})
+        assert result[1] == 0
+        assert result[1.5] == 1
+        assert result["foo"] == 2
+
+
+class TestPreprocessMixedKeyDicts:
+    """_preprocess_optuna_config handles mixed int/float key dicts (baseline={1:0})."""
+
+    def test_mixed_float_and_int_keyed_takes_float_branch(self):
+        import json
+        # Float-keyed first dict triggers float branch; int-keyed second serialised too.
+        cfg = {"optuna": {"layer_shared_resid_dropout": [
+            {1.5: 1, 2.5: 1},
+            {1: 0},
+        ]}}
+        out = ht._preprocess_optuna_config(cfg)
+        lsrd = out["optuna"]["layer_shared_resid_dropout"]
+        assert all(isinstance(s, str) for s in lsrd)
+        # Second choice: {1: 0} serialised — key "1" restored to int via _restore.
+        second = json.loads(lsrd[1])
+        assert second == {"1": 0}   # JSON keys are strings
+
+    def test_suggest_restores_int_key_from_mixed_dict(self):
+        import json
+        choices = [
+            json.dumps({"1.5": 1}, separators=(",", ":"), sort_keys=True),
+            json.dumps({"1": 0}, separators=(",", ":"), sort_keys=True),
+        ]
+        t = MagicMock()
+        t.suggest_categorical.side_effect = lambda name, c: c[1]  # pick {1: 0}
+        result = ht._suggest(t, "layer_shared_resid_dropout", choices)
+        assert result == {1: 0}
+        assert isinstance(list(result.keys())[0], int)
+
+
+class TestEnumerateOrderedParamsLSRD:
+    """_enumerate_ordered_params handles JSON-string LSRD choices correctly."""
+
+    def test_float_keyed_lsrd_choices_enumerated_as_strings(self):
+        import json
+        # After _preprocess_optuna_config, float-keyed dicts become JSON strings.
+        choices = [
+            json.dumps({"1.5": 1}, separators=(",", ":"), sort_keys=True),
+            "{}",
+        ]
+        cfg = {"layer_shared_resid_dropout": choices}
+        combos = ht._enumerate_ordered_params(cfg)
+        assert len(combos) == 2
+        assert combos[0]["layer_shared_resid_dropout"] == choices[0]
+        assert combos[1]["layer_shared_resid_dropout"] == choices[1]
+
+    def test_lsrd_combined_with_other_params(self):
+        import json
+        choices = [json.dumps({"1.5": 1}, separators=(",", ":"), sort_keys=True), "{}"]
+        cfg = {"n_heads": [2, 4], "layer_shared_resid_dropout": choices}
+        combos = ht._enumerate_ordered_params(cfg)
+        assert len(combos) == 4

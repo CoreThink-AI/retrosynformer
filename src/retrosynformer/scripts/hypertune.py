@@ -125,40 +125,87 @@ def _setup_jsonl_logging(run_jsonl: str) -> None:
 # Config preprocessing
 # ---------------------------------------------------------------------------
 
+def _restore_numeric_dict_keys(d: dict) -> dict:
+    """Convert string keys back to int or float after a JSON round-trip.
+
+    JSON requires string keys, so ``{1.5: 1}`` serialises to ``{"1.5": 1}``.
+    This function converts those string keys back to their numeric types:
+    a key that round-trips through ``float()`` and equals its integer value
+    (e.g. ``"2.0"``) becomes an ``int``; otherwise it becomes a ``float``
+    (e.g. ``"1.5"``).  Non-numeric keys are left unchanged.
+    """
+    result = {}
+    for k, v in d.items():
+        try:
+            f = float(k)
+            result[int(f) if f == int(f) else f] = v
+        except (ValueError, TypeError):
+            result[k] = v
+    return result
+
+
 def _preprocess_optuna_config(config: dict) -> dict:
     """Return a copy of *config* with optuna search-space specs normalised.
 
-    Currently handles one transformation:
+    Handles two transformations for ``optuna.layer_shared_resid_dropout``:
 
-    ``optuna.layer_shared_resid_dropout`` list-of-dicts → list-of-lists
-        Each dict maps integer layer indices to bool/int values; missing
+    **Integer-keyed dicts → list-of-lists (intra-layer)**
+        Each dict maps 0-based layer indices to bool/int values; missing
         indices are filled with ``False``.  The conversion uses
-        ``mask_dict_to_list`` so all inner lists reach the same length
-        (determined by the largest key across all dicts in the list).
+        ``mask_dict_to_list`` so all inner lists reach the same length.
 
-        YAML example (dict form)::
+        YAML::
 
             optuna:
               layer_shared_resid_dropout:
                 - {0: true, 2: true}
                 - {1: true, 3: true}
 
-        is equivalent to the existing list-of-lists form::
+        is equivalent to::
 
             optuna:
               layer_shared_resid_dropout:
                 - [true, false, true, false]
                 - [false, true, false, true]
+
+    **Float-keyed dicts → list of JSON strings (inter-layer)**
+        Each dict maps N.5 boundary keys to group IDs; since dict keys are
+        not hashable, each dict is serialised to a JSON string so Optuna's
+        ``CategoricalDistribution`` can store and compare choices.
+        ``_suggest`` detects the JSON-string form and deserialises the
+        result back to a dict (restoring float/int key types).
+
+        YAML::
+
+            optuna:
+              layer_shared_resid_dropout:
+                - {1.5: 1, 2.5: 1}   # inter-layer tying enabled
+                - {}                   # no inter-layer tying (baseline)
     """
     import copy
+    import json as _json
     config = copy.deepcopy(config)
     lsrd = config.get("optuna", {}).get("layer_shared_resid_dropout")
     if isinstance(lsrd, list) and lsrd and isinstance(lsrd[0], dict):
-        max_key = max(max(d.keys()) for d in lsrd if d)
-        length = max_key + 1
-        config["optuna"]["layer_shared_resid_dropout"] = [
-            mask_dict_to_list(d, fillna=False, length=length) for d in lsrd
-        ]
+        has_float_keys = any(
+            isinstance(k, float)
+            for d in lsrd if d
+            for k in d
+        )
+        if has_float_keys:
+            # Inter-layer (float-keyed): JSON-serialise to hashable string choices.
+            config["optuna"]["layer_shared_resid_dropout"] = [
+                _json.dumps({str(k): v for k, v in d.items()},
+                            separators=(",", ":"), sort_keys=True)
+                for d in lsrd
+            ]
+        else:
+            # Intra-layer (integer-keyed): convert to bool lists.
+            max_key = max(max(d.keys()) for d in lsrd if d)
+            length = max_key + 1
+            config["optuna"]["layer_shared_resid_dropout"] = [
+                mask_dict_to_list(d, fillna=False, length=length) for d in lsrd
+            ]
     return config
 
 
@@ -384,15 +431,21 @@ def _suggest(trial: optuna.Trial, name: str, spec) -> object:
         # Plain scalar — fixed value, not a search dimension; return as-is.
         return spec
     if isinstance(spec, list):
+        import json as _json
         # List-of-lists → categorical over list choices.
         # Each inner list is serialised to a JSON string because Optuna's
         # categorical storage requires hashable (scalar) choices.  The result
         # is deserialised back to a Python list before being passed to runner.
         if spec and isinstance(spec[0], list):
-            import json as _json
             choices = [_json.dumps(lst, separators=(",", ":")) for lst in spec]
             result = trial.suggest_categorical(name, choices)
             return _json.loads(result)
+        # List-of-JSON-strings → float-keyed dict choices pre-processed by
+        # _preprocess_optuna_config.  Deserialise the chosen string back to a
+        # dict and restore numeric key types (JSON forces string keys).
+        if spec and isinstance(spec[0], str) and spec[0].startswith("{"):
+            result = trial.suggest_categorical(name, spec)
+            return _restore_numeric_dict_keys(_json.loads(result))
         return trial.suggest_categorical(name, spec)
     if "choices" in spec:
         return trial.suggest_categorical(name, spec["choices"])

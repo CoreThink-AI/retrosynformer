@@ -407,8 +407,8 @@ def main(
         config["model"]["resid_pdrop"] = resid_pdrop
         logger.info("resid_pdrop override: %s", resid_pdrop)
     if layer_shared_resid_dropout is not None:
-        # May be a list (from Optuna categorical) or a bool (from CLI flag)
-        if isinstance(layer_shared_resid_dropout, list):
+        # May be a list or dict (from Optuna categorical) or a bool (from CLI flag)
+        if isinstance(layer_shared_resid_dropout, (list, dict)):
             config["model"]["layer_shared_resid_dropout"] = layer_shared_resid_dropout
         else:
             config["model"]["layer_shared_resid_dropout"] = bool(layer_shared_resid_dropout)
