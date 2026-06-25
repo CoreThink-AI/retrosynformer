@@ -1,0 +1,18 @@
+study,dataset,trial,epochs,v_a_acc↑,v_r_acc^,state,heads,layers,h_dim,drop,lr,a_pdrop,e_pdrop,r_pdrop,fp,n_state,eval_freq,es_pat,obj_metric,bs,bw,vset,epoch,t_loss,t_a_acc,t_r_acc,v_loss,s/epch
+standard-v2-dropout-details,standard,1,100,0.3399,0.0862,COMPLETE,5,10,128,-,9.69e-04,0.166,0.006,0.087,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   77,0.01764,0.34919,0.08242,0.05232,  73.2
+standard-v2-dropout-details,standard,2,100,0.3050,0.0658,COMPLETE,5,8,96,-,8.34e-04,0.129,0.015,0.180,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   91,0.02796,0.31997,0.06959,0.06449,  40.5
+standard-v2-lr0005,standard,4,100,0.3035,0.0651,COMPLETE,2,8,128,0.047,9.79e-04,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   97,0.04168,0.30328,0.06073,0.09265,  24.9
+standard-v2-lr0005,standard,8,100,0.3011,0.0626,COMPLETE,4,4,64,0.147,2.04e-03,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   78,0.03022,0.30468,0.06343,0.08585,  17.7
+standard-v2-lr0005,standard,2,100,0.2966,0.0620,COMPLETE,4,6,128,0.204,5.36e-04,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   99,0.06781,0.30106,0.06299,0.10323,  40.4
+standard-v2-lr0005,standard,1,100,0.2924,0.0603,COMPLETE,2,4,256,0.247,1.01e-03,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   82,0.04857,0.29793,0.05878,0.08454,  30.9
+standard-v2-lr0005,standard,7,100,0.2920,0.0622,COMPLETE,2,2,256,0.067,1.93e-04,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   99,0.14947,0.29506,0.05968,0.17784,  18.8
+standard-v2-lr0005,standard,12,32,0.2912,0.0592,FAIL,4,12,64,0.142,3.95e-03,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   16,0.07801,0.29188,0.05642,0.11298,  31.2
+standard-v2-dropout-details,standard,4,100,0.2759,0.0518,COMPLETE,3,8,96,-,1.03e-03,0.049,0.251,0.052,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   59,0.08635,0.28211,0.05371,0.11346,  26.1
+standard-v2-lr0005,standard,0,100,0.2674,0.0465,COMPLETE,4,3,256,0.100,5.00e-04,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   86,0.03197,0.26864,0.04283,0.06129,  55.8
+standard-v2-lr0005,standard,11,100,0.2648,0.0518,COMPLETE,2,24,128,0.285,1.60e-03,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   25,0.12904,0.26479,0.04783,0.14276,  51.9
+standard-v2-lr0005,standard,5,7,0.2645,0.0493,COMPLETE,4,2,64,0.266,3.39e-03,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   14,0.25165,0.26845,0.05010,0.26168,  24.5
+standard-v2-lr0005,standard,10,100,0.2535,0.0424,COMPLETE,1,32,128,0.096,5.92e-04,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   58,0.15243,0.25474,0.04326,0.17795,  36.3
+standard-v2-dropout-details,standard,5,2,0.2517,0.0514,RUNNING,4,10,96,-,4.16e-03,0.012,0.029,0.239,1024,2,50,15,valid_route_acc…,512,1,n1+n5,    1,0.41045,0.21986,0.04134,0.32505,  38.7
+standard-v2-dropout-details,standard,3,100,0.2513,0.0455,COMPLETE,3,10,96,-,2.88e-04,0.037,0.376,0.038,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   86,0.20327,0.25369,0.04504,0.19930,  29.9
+standard-v2-lr0005,standard,9,100,0.2409,0.0462,COMPLETE,1,8,256,0.014,6.07e-05,-,-,-,1024,2,50,15,valid_route_acc…,512,1,n1+n5,   99,0.40405,0.24413,0.04629,0.41070,  24.3
+standard-v2-dropout-details,-,0,0,(no data),(no data),FAIL,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,,,,,,

@@ -17,6 +17,7 @@ Usage
     rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
 """
 import argparse
+import datetime
 import glob
 import logging
 import os
@@ -53,6 +54,17 @@ METRICS = [
 ]
 
 _LINEDASHES = ["solid", "dash", "dot", "dashdot"]
+
+
+def _auto_html_path(top_df: "pd.DataFrame", root_dir: str) -> str:
+    """Return a filename like ``<study_dir>/learning_curves_t42_e100_2026-06-25.html``."""
+    study_dirs = top_df["db_dir"].dropna().unique() if "db_dir" in top_df.columns else []
+    save_dir = str(study_dirs[0]) if len(study_dirs) == 1 else root_dir
+    max_trial = int(top_df["original_trial"].dropna().max()) if not top_df["original_trial"].dropna().empty else 0
+    n_epochs_col = top_df["n_epochs"].dropna() if "n_epochs" in top_df.columns else pd.Series(dtype=float)
+    max_epoch = int(n_epochs_col.max()) if not n_epochs_col.empty else 0
+    date_str = datetime.date.today().isoformat()
+    return os.path.join(save_dir, f"learning_curves_t{max_trial}_e{max_epoch}_{date_str}.html")
 
 
 def _resolve_study_paths(study_names: list[str], root: str) -> list[str]:
@@ -157,6 +169,10 @@ def main() -> None:
                         help="Show polynomial extrapolation of the final-epoch objective: "
                              "adds obj_estim column to the table and an x marker on each "
                              "trial's curve at the projected target epoch.")
+    parser.add_argument("--table-only", action="store_true",
+                        help="Print the hyperparameter/performance table and exit without "
+                             "building or displaying the figure. "
+                             "Use --out <file>.csv or --out <file>.html to save the table.")
     add_log_args(parser)
     args = parser.parse_args()
     configure_logging(args)
@@ -375,6 +391,18 @@ def main() -> None:
     )
     df = print_and_save_trials_table(df, top, rank_metric, verbose=getattr(args, "verbose", 0) or 0)
 
+    if args.table_only:
+        if args.out:
+            ext = os.path.splitext(args.out)[1].lower()
+            if ext == ".csv":
+                df.to_csv(args.out, index=False)
+            elif ext == ".html":
+                df.to_html(args.out, index=False)
+            else:
+                df.to_csv(args.out, index=False)
+            print(f"Table saved to {args.out}")
+        return
+
     palette = pc.qualitative.D3  # 10 distinct colors
     fig = go.Figure()
     plotted = 0
@@ -478,6 +506,9 @@ def main() -> None:
                 sys.exit(f"Could not write image to {args.out}: {exc}\nHint: pip install kaleido")
         print(f"Saved to {args.out}")
     else:
+        auto_path = _auto_html_path(top, args.root)
+        fig.write_html(auto_path)
+        print(f"Saved to {auto_path}")
         fig.show()
 
 
