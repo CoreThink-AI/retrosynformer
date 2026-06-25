@@ -1,16 +1,23 @@
 def add_log_args(parser) -> None:
-    """Add --debug and -v/--verbose log-level flags to an ArgumentParser."""
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--debug", action="store_true", help="Set log level to DEBUG")
-    group.add_argument("-v", "--verbose", action="store_true", help="Set log level to INFO")
+    """Add --debug and -v/--verbose log-level flags to an ArgumentParser.
+
+    -v   → INFO logging + brief column legend
+    -vv  → DEBUG logging + full column legend
+    """
+    parser.add_argument("--debug", action="store_true", help="Set log level to DEBUG")
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Increase verbosity (-v: INFO + brief legend, -vv: DEBUG + full legend)",
+    )
 
 
 def configure_logging(args) -> None:
     """Apply --debug / --verbose to the root logger. Call after parse_args()."""
     import logging
-    if getattr(args, "debug", False):
+    verbose = getattr(args, "verbose", 0) or 0
+    if getattr(args, "debug", False) or verbose >= 2:
         level = logging.DEBUG
-    elif getattr(args, "verbose", False):
+    elif verbose >= 1:
         level = logging.INFO
     else:
         level = logging.WARNING

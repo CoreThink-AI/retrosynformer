@@ -82,6 +82,7 @@ ABBREV: dict[str, str] = {
     "attn_pdrop": "a_pdrop",
     "embd_pdrop": "e_pdrop",
     "resid_pdrop": "r_pdrop",
+    "layer_shared_resid_dropout": "shared_r_drop",
     "weight_decay": "wd",
     # Optimisation
     "batch_size": "bs",

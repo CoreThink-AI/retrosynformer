@@ -328,6 +328,19 @@ def build_trials_df(
                     return f"[{parsed[0]} ... {parsed[-1]}]"
             except (ValueError, json.JSONDecodeError):
                 pass
+        if isinstance(val, dict) and val:
+            first_k, first_v = next(iter(val.items()))
+            suffix = ",..." if len(val) > 1 else ""
+            return f"{{{first_k}: {first_v}{suffix}}}"
+        if isinstance(val, str) and val.startswith("{"):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, dict) and parsed:
+                    first_k, first_v = next(iter(parsed.items()))
+                    suffix = ",..." if len(parsed) > 1 else ""
+                    return f"{{{first_k}: {first_v}{suffix}}}"
+            except (ValueError, json.JSONDecodeError):
+                pass
         try:
             if pd.isna(val):
                 return "-"
@@ -339,7 +352,8 @@ def build_trials_df(
             return str(int(val))
         if isinstance(val, float):
             return f"{val:.3f}"
-        return str(val)
+        s = str(val)
+        return s if len(s) <= 16 else s[:15] + "…"
 
     # Determine column headers for each table metric.
     # The Optuna objective metric gets a "^" suffix; the rank metric gets "↑"/"↓".
@@ -431,7 +445,7 @@ def df_to_markdown(df: pd.DataFrame, index: bool = False) -> str:
         ) from exc
 
 
-def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric: str) -> pd.DataFrame:
+def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric: str, verbose: int = 0) -> pd.DataFrame:
     """Merge per-trial best-epoch columns into the summary table, then print and save.
 
     The two logical tables (Optuna summary + per-epoch training metrics) are
@@ -509,11 +523,19 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
     from retrosynformer.names import unabbreviate
     legend = {col: unabbreviate(col.rstrip("*^↑↓")) for col in df.columns}
     legend = {k: v for k, v in legend.items() if v != k.rstrip("*^↑↓")}
-    if legend:
-        print("Column legend:")
-        for abbr, full in legend.items():
-            print(f"  {abbr}: {full}")
-        print()
+    if legend and verbose >= 1:
+        if verbose >= 2:
+            display_legend = legend
+        else:
+            def _show_in_brief(col: str) -> bool:
+                base = col.rstrip("*^↑↓")
+                return base.startswith(("v", "t", "e", "a", "r")) or base == "bw"
+            display_legend = {k: v for k, v in legend.items() if _show_in_brief(k)}
+        if display_legend:
+            print("Column legend:")
+            for abbr, full in display_legend.items():
+                print(f"  {abbr}: {full}")
+            print()
 
     print(f"Top {len(top)} trials by {rank_metric}:")
     print(df.to_string(index=False))

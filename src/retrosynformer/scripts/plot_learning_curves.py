@@ -18,12 +18,16 @@ Usage
 """
 import argparse
 import glob
+import logging
 import os
+import subprocess
 import sys
 
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.colors as pc
+
+logger = logging.getLogger(__name__)
 
 from retrosynformer.dataframes import (
     build_trials_df,
@@ -49,6 +53,46 @@ METRICS = [
 ]
 
 _LINEDASHES = ["solid", "dash", "dot", "dashdot"]
+
+
+def _resolve_study_paths(study_names: list[str], root: str) -> list[str]:
+    """Return study.db paths for each named study, using default paths first.
+
+    Tries ``results/hypertune-{name}/study.db`` before falling back to
+    ``find`` for directories with similar names.
+    """
+    result_paths: list[str] = []
+    seen: set[str] = set()
+    for name in study_names:
+        default_path = os.path.join(root, "results", f"hypertune-{name}", "study.db")
+        if os.path.exists(default_path):
+            rp = os.path.realpath(default_path)
+            if rp not in seen:
+                seen.add(rp)
+                result_paths.append(default_path)
+                logger.info("Study '%s': %s", name, default_path)
+            continue
+        # Fallback: find directories with a similar name
+        base_dir = os.path.join(root, "results")
+        try:
+            proc = subprocess.run(
+                ["find", base_dir, "-type", "d", "-iname", f"*{name}*"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for d in proc.stdout.splitlines():
+                d = d.strip()
+                if not d:
+                    continue
+                candidate = os.path.join(d, "study.db")
+                if os.path.exists(candidate):
+                    rp = os.path.realpath(candidate)
+                    if rp not in seen:
+                        seen.add(rp)
+                        result_paths.append(candidate)
+                        logger.info("Study '%s' (via find): %s", name, candidate)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+    return result_paths
 
 
 def _resolve_metrics(spec: str) -> list[str]:
@@ -138,23 +182,25 @@ def main() -> None:
             print("WARNING: --also-train has no effect (no valid_* metrics without a train counterpart already listed).")
         metrics = metrics + extras
 
-    paths = sorted(glob.glob(os.path.join(args.root, args.pattern), recursive=True))
-    if not paths:
-        sys.exit(f"No study.db files found matching {args.pattern!r} under {args.root!r}")
-
-    seen: set[str] = set()
-    unique_paths: list[str] = []
-    for p in paths:
-        rp = os.path.realpath(p)
-        if rp not in seen:
-            seen.add(rp)
-            unique_paths.append(p)
-    paths = unique_paths
-
-    print(f"Found {len(paths)} study.db file(s) (after dedup):")
-    for p in paths:
-        print(f"  {p}")
-    print()
+    if args.study:
+        paths = _resolve_study_paths(args.study, args.root)
+        if not paths:
+            sys.exit(f"No study.db files found for study name(s): {args.study}")
+    else:
+        paths = sorted(glob.glob(os.path.join(args.root, args.pattern), recursive=True))
+        if not paths:
+            sys.exit(f"No study.db files found matching {args.pattern!r} under {args.root!r}")
+        seen: set[str] = set()
+        unique_paths: list[str] = []
+        for p in paths:
+            rp = os.path.realpath(p)
+            if rp not in seen:
+                seen.add(rp)
+                unique_paths.append(p)
+        paths = unique_paths
+        logger.info("Found %d study.db file(s) (after dedup):", len(paths))
+        for p in paths:
+            logger.info("  %s", p)
 
     parts: list[pd.DataFrame] = []
     for db_path in paths:
@@ -327,7 +373,7 @@ def main() -> None:
         table_metrics=TABLE_METRICS,
         optuna_objective_metric=optuna_objective_metric,
     )
-    df = print_and_save_trials_table(df, top, rank_metric)
+    df = print_and_save_trials_table(df, top, rank_metric, verbose=getattr(args, "verbose", 0) or 0)
 
     palette = pc.qualitative.D3  # 10 distinct colors
     fig = go.Figure()
