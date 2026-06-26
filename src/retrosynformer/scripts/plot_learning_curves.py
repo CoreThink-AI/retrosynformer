@@ -1,21 +1,4 @@
 #!/usr/bin/env python
-"""Plot learning curves from train_progress.jsonl for the top-N Optuna trials.
-
-Loads all study.db files matching a glob, ranks completed trials by Optuna
-score (fraction_targets_solved), then overlays the per-epoch metric from each
-trial's train_progress.jsonl.
-
-Output is an interactive Plotly HTML file (or browser window when --out is omitted).
-Use --out curves.png to save a static image (requires: pip install kaleido).
-
-Usage
------
-    rs-plot-learning-curves
-    rs-plot-learning-curves --top 5 --metric valid_action_accuracy
-    rs-plot-learning-curves --metric valid_route_accuracy --metric train_route_accuracy --metric valid_action_accuracy
-    rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.html
-    rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
-"""
 import argparse
 import datetime
 import glob
@@ -44,6 +27,62 @@ from retrosynformer.dataframes import (
 from retrosynformer.names import abbreviate
 from retrosynformer.scripts import add_log_args, configure_logging, print_banner
 
+# ---------------------------------------------------------------------------
+# Filename-format constants — referenced in __doc__ and --out help= to keep
+# the description in one place.
+# ---------------------------------------------------------------------------
+_AUTO_FILENAME_PATTERN = (
+    "learning_curves_{n_top}top_of{total_trials}trials_{max_epoch}maxepochs_{YYYY-MM-DD}.html"
+)
+_AUTO_FILENAME_EXAMPLE = (
+    "learning_curves_10top_of47trials_129maxepochs_2026-06-25.html"
+)
+_AUTO_FILENAME_LEGEND = (
+    "  n_top          — rows shown in the table (the --top N value)\n"
+    "  total_trials   — total completed trials loaded across all study.db files\n"
+    "  max_epoch      — highest epoch reached by any of the top-N trials"
+)
+_OUT_HELP = (
+    "Save to file (.html for interactive, .png/.svg for static image). "
+    f"Omit to auto-save a standalone HTML to the study directory and open in browser. "
+    f"Auto-saved filename: {_AUTO_FILENAME_PATTERN} "
+    f"(e.g. {_AUTO_FILENAME_EXAMPLE}). "
+    "When trials span multiple study directories the file is written to --root instead. "
+    "With --table-only: .csv saves CSV, .html saves an HTML table, other extensions also save CSV."
+)
+
+__doc__ = f"""Plot learning curves from train_progress.jsonl for the top-N Optuna trials.
+
+Loads all study.db files matching a glob, ranks completed trials by Optuna
+score (fraction_targets_solved), then overlays the per-epoch metric from each
+trial's train_progress.jsonl.
+
+Output is an interactive Plotly HTML file (or browser window when --out is omitted).
+When --out is omitted the plot is also auto-saved to the study directory as:
+    {_AUTO_FILENAME_PATTERN}
+e.g. {_AUTO_FILENAME_EXAMPLE}
+{_AUTO_FILENAME_LEGEND}
+Use --out curves.png to save a static image (requires: pip install kaleido).
+
+Use --table-only to skip the figure entirely and just print (or save) the
+hyperparameter/performance table.  This is useful for comparing all trials
+across multiple studies without waiting for the plot to render.
+
+Usage
+-----
+    rs-plot-learning-curves
+    rs-plot-learning-curves --top 5 --metric valid_action_accuracy
+    rs-plot-learning-curves --metric valid_route_accuracy --metric train_route_accuracy --metric valid_action_accuracy
+    rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.html
+    rs-plot-learning-curves "results/hypertune-small*/study.db" --out curves.png
+
+Table-only examples (no figure):
+    rs-plot-learning-curves --table-only
+    rs-plot-learning-curves "results/**/study.db" --top 9999 --table-only
+    rs-plot-learning-curves "results/**/study.db" --top 9999 --table-only --out all_trials.csv
+    rs-plot-learning-curves "results/**/study.db" --top 9999 --table-only --out all_trials.html
+"""
+
 METRICS = [
     "valid_loss",
     "valid_action_accuracy",
@@ -56,15 +95,26 @@ METRICS = [
 _LINEDASHES = ["solid", "dash", "dot", "dashdot"]
 
 
-def _auto_html_path(top_df: "pd.DataFrame", root_dir: str) -> str:
-    """Return a filename like ``<study_dir>/learning_curves_t42_e100_2026-06-25.html``."""
+def _auto_html_path(top_df: "pd.DataFrame", all_trials_df: "pd.DataFrame", root_dir: str) -> str:
+    """Return an auto-save path in the study directory.
+
+    Filename format:
+        learning_curves_{n_top}top_of{total_trials}trials_{max_epoch}maxepochs_{YYYY-MM-DD}.html
+
+    ``n_top`` — rows shown in the table (the --top N value).
+    ``total_trials`` — total completed trials loaded across all study.db files.
+    ``max_epoch`` — highest epoch reached by any of the top-N trials.
+
+    When trials span multiple study directories the file is written to ``root_dir``.
+    """
     study_dirs = top_df["db_dir"].dropna().unique() if "db_dir" in top_df.columns else []
     save_dir = str(study_dirs[0]) if len(study_dirs) == 1 else root_dir
-    max_trial = int(top_df["original_trial"].dropna().max()) if not top_df["original_trial"].dropna().empty else 0
+    n_top = len(top_df)
+    total_trials = len(all_trials_df)
     n_epochs_col = top_df["n_epochs"].dropna() if "n_epochs" in top_df.columns else pd.Series(dtype=float)
     max_epoch = int(n_epochs_col.max()) if not n_epochs_col.empty else 0
     date_str = datetime.date.today().isoformat()
-    return os.path.join(save_dir, f"learning_curves_t{max_trial}_e{max_epoch}_{date_str}.html")
+    return os.path.join(save_dir, f"learning_curves_{n_top}top_of{total_trials}trials_{max_epoch}maxepochs_{date_str}.html")
 
 
 def _resolve_study_paths(study_names: list[str], root: str) -> list[str]:
@@ -156,9 +206,7 @@ def main() -> None:
                              "For loss metrics: exclude trials above this threshold.")
     parser.add_argument("-s", "--study", metavar="STUDY_NAME", action="append", default=None,
                         help="Only include trials from this study name (repeat for multiple studies)")
-    parser.add_argument("--out", default=None,
-                        help="Save to file (.html for interactive, .png/.svg for static image). "
-                             "Omit to open in browser.")
+    parser.add_argument("--out", default=None, help=_OUT_HELP)
     parser.add_argument("--root", default=".",
                         help="Root directory for glob resolution (default: .)")
     parser.add_argument("--xmin", type=float, default=None)
@@ -506,7 +554,7 @@ def main() -> None:
                 sys.exit(f"Could not write image to {args.out}: {exc}\nHint: pip install kaleido")
         print(f"Saved to {args.out}")
     else:
-        auto_path = _auto_html_path(top, args.root)
+        auto_path = _auto_html_path(top, all_trials, args.root)
         fig.write_html(auto_path)
         print(f"Saved to {auto_path}")
         fig.show()
