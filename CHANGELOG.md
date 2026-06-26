@@ -5,6 +5,17 @@ Full release notes are in [`docs/`](docs/).
 
 ---
 
+## [0.1.47] — 2026-06-26
+
+**`rs-plot-learning-curves`: `--table-only` flag, auto-save HTML, DRY help strings.**
+
+- `--table-only`: skips figure rendering and prints (or saves) the hyperparameter/performance table only; `--out <file>.csv` saves CSV, `--out <file>.html` saves an HTML table.
+- Auto-saves a standalone HTML to the study directory when `--out` is omitted; filename encodes display count, total completed trials, max epoch, and date: `learning_curves_{n_top}top_of{total_trials}trials_{max_epoch}maxepochs_{YYYY-MM-DD}.html`.
+- `_auto_html_path` now takes `all_trials_df` so `total_trials` reflects all completed trials in the study, not just the top-N subset shown in the table.
+- Filename-format constants (`_AUTO_FILENAME_PATTERN`, `_AUTO_FILENAME_EXAMPLE`, `_OUT_HELP`) shared between `__doc__` and `--out help=` to eliminate duplication.
+
+---
+
 ## [0.1.46] — 2026-06-23
 
 **evaluate.py refactor; names.py e_pdrop; coverage CI; eval meta-reports.**
