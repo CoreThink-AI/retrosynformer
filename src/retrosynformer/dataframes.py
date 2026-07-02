@@ -453,7 +453,13 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
     occupies exactly one row.  Columns that appear in both tables (trial,
     study, valid_action_accuracy, valid_route_accuracy) are kept from the
     Optuna summary side and dropped from the training-metrics side.  The
-    leading columns are reordered to: study, dataset, trial, epochs.
+    leading columns are reordered to: study, dataset, trial, epochs, best_ep.
+
+    ``EPOCH_TABLE_COLS`` labels its first column "epoch" because it doubles as
+    the live per-epoch training printout, where that means "current epoch".
+    Here it instead means "the epoch at which best *rank_metric* occurred",
+    so it's relabeled ``best_ep`` to avoid reading as a duplicate of the
+    ``epochs`` (total epoch count) column.
     """
     from retrosynformer.training_display import EPOCH_TABLE_COLS, iter_jsonl_rows
 
@@ -464,6 +470,7 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
         "valid_action_accuracy",
         "valid_route_accuracy",
     }
+    _HDR_OVERRIDES = {"epoch": "best_ep"}
 
     lower = "loss" in rank_metric
 
@@ -490,6 +497,7 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
         for hdr, key, _, fmt_fn in EPOCH_TABLE_COLS:
             if key in _SKIP_JSONL_KEYS:
                 continue
+            hdr = _HDR_OVERRIDES.get(hdr, hdr)
             val = best_rec.get(key)
             if val is None:
                 t2_row[hdr] = "-"
@@ -507,8 +515,8 @@ def print_and_save_trials_table(df: pd.DataFrame, top: pd.DataFrame, rank_metric
     # Drop display-only columns not useful in the summary table.
     df = df.drop(columns=["rank", "note"], errors="ignore")
 
-    # Reorder leading columns: study, dataset, trial, epochs.
-    _LEAD = ["study", "dataset", "trial", "epochs"]
+    # Reorder leading columns: study, dataset, trial, epochs, best_ep.
+    _LEAD = ["study", "dataset", "trial", "epochs", "best_ep"]
     _rest = [c for c in df.columns if c not in _LEAD]
     df = df[[c for c in _LEAD if c in df.columns] + _rest]
 
