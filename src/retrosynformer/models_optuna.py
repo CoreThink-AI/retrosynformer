@@ -875,6 +875,141 @@ def widen_categorical_choices(
     return result
 
 
+def widen_numerical_range(
+    db_path: str | Path,
+    param_name: str,
+    *,
+    low: float | int | None = None,
+    high: float | int | None = None,
+    log: bool | None = None,
+    step: float | int | None = None,
+    dry_run: bool = False,
+) -> Optional[dict]:
+    """Widen a Float/IntDistribution's low/high/log/step in an existing study.db, in place.
+
+    Optuna's own ``check_distribution_compatibility`` only rejects a *log*
+    mismatch for numerical params — ``low``/``high`` may already differ
+    freely across trials of the same study without Optuna raising, so
+    resuming with a wider range in the hypertune config generally needs no
+    patch. This function exists for the one case Optuna does reject
+    (flipping ``log``), and to keep the *recorded* historical distribution
+    consistent with the widened range for reporting (``rs-show-study``,
+    ``rs-plot``, etc.) and for any downstream code that assumes a single
+    distribution per param name.
+
+    Only ever grows the recorded range: the merged ``[low, high]`` is
+    ``min(old_low, low)`` .. ``max(old_high, high)`` (mirroring the merge
+    strategy documented in this module's docstring for combining two
+    studies). Explicitly requesting a narrower bound raises
+    ``UnsafeWideningError`` — start a new study instead.
+
+    Parameters
+    ----------
+    low, high, log, step:
+        New values for the distribution's attributes; ``None`` leaves that
+        attribute unchanged (for ``low``/``high``, unchanged means "don't
+        widen past whatever the study already recorded").
+
+    Returns
+    -------
+    Optional[dict]
+        ``None`` if the param has no recorded trials yet, or the recorded
+        distribution already matches the requested range. Otherwise
+        ``{"param": ..., "old": {...}, "new": {...}, "backup_path": ...}``.
+    """
+    db_path = Path(db_path)
+    session = connect(db_path, readonly=True)
+    try:
+        row = (
+            session.query(TrialParam)
+            .filter(TrialParam.param_name == param_name)
+            .first()
+        )
+        if row is None:
+            return None
+        dist = row.distribution
+    finally:
+        session.close()
+
+    if dist["name"] not in ("FloatDistribution", "IntDistribution"):
+        raise UnsafeWideningError(
+            f"{param_name!r} is recorded as {dist['name']}, not a Float/IntDistribution "
+            "— widen_numerical_range only applies to continuous or int-range search params."
+        )
+
+    old_attrs = dict(dist["attributes"])
+    old_low, old_high = old_attrs["low"], old_attrs["high"]
+    new_low = old_low if low is None else min(low, old_low)
+    new_high = old_high if high is None else max(high, old_high)
+    new_log = old_attrs.get("log", False) if log is None else log
+    new_step = old_attrs.get("step") if step is None else step
+
+    if low is not None and low > old_low:
+        raise UnsafeWideningError(
+            f"optuna.{param_name}: requested low={low} is greater than the recorded "
+            f"low={old_low} in {db_path} — narrowing would misrepresent already-explored "
+            "trials. Pass a low <= the recorded low, or start a new study if the range "
+            "genuinely needs to shrink."
+        )
+    if high is not None and high < old_high:
+        raise UnsafeWideningError(
+            f"optuna.{param_name}: requested high={high} is less than the recorded "
+            f"high={old_high} in {db_path} — narrowing would misrepresent already-explored "
+            "trials. Pass a high >= the recorded high, or start a new study if the range "
+            "genuinely needs to shrink."
+        )
+
+    unchanged = (
+        new_low == old_low and new_high == old_high
+        and new_log == old_attrs.get("log", False) and new_step == old_attrs.get("step")
+    )
+    if unchanged:
+        return None
+
+    print(
+        f"\n⚠️  WARNING: optuna.{param_name} search space widened for an existing study.\n"
+        f"    stored range : low={old_low} high={old_high} log={old_attrs.get('log', False)} step={old_attrs.get('step')}\n"
+        f"    new range    : low={new_low} high={new_high} log={new_log} step={new_step}\n"
+        f"    Patching {db_path} in place — existing trials' recorded values are unchanged;\n"
+        f"    only the distribution's bounds grow."
+    )
+
+    result = {
+        "param": param_name,
+        "old": {"low": old_low, "high": old_high, "log": old_attrs.get("log", False), "step": old_attrs.get("step")},
+        "new": {"low": new_low, "high": new_high, "log": new_log, "step": new_step},
+        "backup_path": None,
+    }
+    if dry_run:
+        print("    [dry run] no changes written.")
+        return result
+
+    backup_path = db_path.with_name(db_path.name + f".bak-{param_name}")
+    suffix = 0
+    while backup_path.exists():
+        suffix += 1
+        backup_path = db_path.with_name(db_path.name + f".bak-{param_name}-{suffix}")
+    shutil.copy2(db_path, backup_path)
+    result["backup_path"] = str(backup_path)
+    print(f"    backup written to {backup_path}")
+
+    new_attrs = dict(old_attrs)
+    new_attrs.update(low=new_low, high=new_high, log=new_log, step=new_step)
+    distribution_json = json.dumps({"name": dist["name"], "attributes": new_attrs})
+    con = sqlite3.connect(str(db_path))
+    try:
+        con.execute(
+            "UPDATE trial_params SET distribution_json = ? WHERE param_name = ?",
+            (distribution_json, param_name),
+        )
+        con.commit()
+    finally:
+        con.close()
+    print(f"    done — {param_name} range now low={new_low} high={new_high} log={new_log} step={new_step}\n")
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Config-file augmentation — parameters not stored in study.db
 # ---------------------------------------------------------------------------
