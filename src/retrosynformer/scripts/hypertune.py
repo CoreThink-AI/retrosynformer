@@ -64,7 +64,10 @@ import argparse
 import json
 import logging
 import os
+import re
 import time
+from pathlib import Path
+from typing import Optional
 
 import optuna
 
@@ -382,6 +385,129 @@ def _validate_config(config: dict, n_trials: int | None = None) -> None:
                 f"parameter combinations ({combos}). Set --n-trials {combos}, "
                 f"or add a continuous parameter to the search space."
             )
+
+
+# ---------------------------------------------------------------------------
+# Study resume reconciliation
+# ---------------------------------------------------------------------------
+
+_CONFIG_PATH_COMMENT_RE = re.compile(r"(-c\s+)(results/config/\S+\.yaml)")
+
+
+def _fix_stale_config_path_comment(config_path: str) -> Optional[tuple[str, str]]:
+    """Correct a stale ``-c results/config/OTHER.yaml`` reference in a config's
+    own header comment so it points at the file's actual path.
+
+    These hypertune configs document their own invocation command in a header
+    comment for reproducibility (see ``# Run with:`` blocks). That comment
+    goes stale whenever a config is copied to start the next search round —
+    e.g. ``large_21_26.yaml`` was copied from ``large_24_26_layer.yaml`` and
+    kept referencing the old filename. Prints a warning and rewrites the file
+    when a mismatch is found.
+
+    Returns ``(stale_reference, corrected_reference)`` if a correction was
+    made, else ``None``.
+    """
+    path = Path(config_path)
+    actual = f"results/config/{path.name}"
+    text = path.read_text()
+
+    stale = sorted({
+        m.group(2) for m in _CONFIG_PATH_COMMENT_RE.finditer(text)
+        if m.group(2) != actual
+    })
+    if not stale:
+        return None
+
+    def _replace(m: re.Match) -> str:
+        return m.group(1) + actual if m.group(2) in stale else m.group(0)
+
+    print(
+        f"\n⚠️  WARNING: {config_path} has a stale config path in its header "
+        f"comment ({stale[0]!r}) — correcting to {actual!r}.\n"
+    )
+    path.write_text(_CONFIG_PATH_COMMENT_RE.sub(_replace, text))
+    return (stale[0], actual)
+
+
+def _update_yaml_categorical_lists(config_path: str, updates: dict[str, list]) -> None:
+    """Rewrite bracketed categorical-list values in a YAML config, in place.
+
+    Only touches lines of the form ``  key: [a, b, c]  # trailing comment``,
+    preserving indentation and any inline comment. Used to persist a merged
+    search-space list back to disk so every subsequent ``rs-hypertune`` trial
+    — which re-reads the YAML from scratch via ``objective()`` — requests the
+    exact same Optuna distribution that was just patched into ``study.db``.
+    """
+    path = Path(config_path)
+    text = path.read_text()
+    for name, choices in updates.items():
+        choices_str = ", ".join(repr(c) if isinstance(c, str) else str(c) for c in choices)
+        pattern = re.compile(rf"^(\s*{re.escape(name)}:\s*)\[[^\]]*\](.*)$", re.MULTILINE)
+        text, n = pattern.subn(lambda m: f"{m.group(1)}[{choices_str}]{m.group(2)}", text, count=1)
+        if n == 0:
+            raise ValueError(
+                f"Could not find a bracketed list for optuna.{name!r} in {config_path} "
+                "to update after widening its search space."
+            )
+    path.write_text(text)
+
+
+def _reconcile_categorical_search_space(
+    config_path: str, db_path: str, raw_optuna_cfg: dict,
+) -> dict:
+    """Widen any categorical param in *raw_optuna_cfg* that outgrew a resumed study.
+
+    *raw_optuna_cfg* must be the ``optuna`` section straight from
+    ``read_config()`` — i.e. **before** ``_preprocess_optuna_config`` runs.
+    Preprocessing turns ``layer_shared_resid_dropout``'s list-of-dicts into
+    JSON-string choices, which would otherwise look just like an ordinary
+    flat categorical list and get swept up here by mistake.
+
+    For every flat-list or ``{choices: [...]}`` param of scalars (the two
+    forms ``_suggest`` maps straight to ``trial.suggest_categorical`` without
+    JSON-string re-encoding), checks whether the study's existing trials
+    recorded a smaller choice set. If so, patches ``study.db`` via
+    :func:`retrosynformer.models_optuna.widen_categorical_choices` (which
+    prints its own warning) and immediately rewrites the YAML file for that
+    one param — the DB patch and the YAML rewrite happen together per param,
+    not batched at the end, so a failure partway through never leaves the DB
+    widened for a param whose YAML still requests the old (mismatched) order.
+
+    List-of-lists and dict-with-choices-of-dicts forms (e.g.
+    ``layer_shared_resid_dropout``) are skipped — those are JSON-string
+    encoded before storage and widening them safely would need a different
+    merge strategy.
+
+    Returns *raw_optuna_cfg* with any widened params updated in place.
+    """
+    from retrosynformer.models_optuna import widen_categorical_choices
+
+    if not db_path or not os.path.exists(db_path):
+        return raw_optuna_cfg  # fresh study — nothing to reconcile against
+
+    for name, spec in raw_optuna_cfg.items():
+        if name in _RESERVED_OPTUNA_KEYS:
+            continue
+        if isinstance(spec, list) and spec and not isinstance(spec[0], (list, dict)):
+            choices = list(spec)
+        elif isinstance(spec, dict) and "choices" in spec and spec["choices"] and not isinstance(spec["choices"][0], (list, dict)):
+            choices = list(spec["choices"])
+        else:
+            continue  # range spec, list-of-lists, or list-of-dicts — not handled here
+
+        change = widen_categorical_choices(db_path, name, choices)
+        if change is None:
+            continue
+
+        merged = change["merged_choices"]
+        _update_yaml_categorical_lists(config_path, {name: merged})
+        if isinstance(spec, dict):
+            raw_optuna_cfg[name]["choices"] = merged
+        else:
+            raw_optuna_cfg[name] = merged
+
+    return raw_optuna_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -718,15 +844,30 @@ def main():
     args = parser.parse_args()
     configure_logging(args)
 
+    # Self-heal a stale "Run with: rs-hypertune -c results/config/OTHER.yaml"
+    # header comment before anything else — cheap and independent of storage.
+    _fix_stale_config_path_comment(args.config_path)
+
     # Preprocess then validate config eagerly so bad configs fail before any study setup.
-    _validate_config(_preprocess_optuna_config(read_config(args.config_path)), n_trials=args.n_trials)
+    preprocessed_config = _preprocess_optuna_config(read_config(args.config_path))
+    _validate_config(preprocessed_config, n_trials=args.n_trials)
 
     results_base = f"results/hypertune-{args.study_name}"
     run_jsonl = os.path.join(results_base, "run.jsonl")
     storage = args.storage or f"sqlite:///{results_base}/study.db"
+    db_path = os.path.join(results_base, "study.db") if storage.startswith("sqlite:///") else None
 
     os.makedirs(results_base, exist_ok=True)
     is_fresh = not os.path.exists(os.path.join(results_base, "study.db"))
+
+    # If this config's search space outgrew a study that already has trials
+    # (e.g. n_layers widened between rounds), patch study.db + the YAML file
+    # to match before Optuna ever calls suggest_categorical on a mismatch.
+    # Must use the RAW (pre-_preprocess_optuna_config) optuna section — see
+    # _reconcile_categorical_search_space's docstring.
+    if not is_fresh and db_path:
+        raw_optuna_cfg = read_config(args.config_path).get("optuna", {})
+        _reconcile_categorical_search_space(args.config_path, db_path, raw_optuna_cfg)
 
     _setup_jsonl_logging(run_jsonl)
     _write({"event": "study_start" if is_fresh else "study_resume", "config": {
