@@ -115,6 +115,7 @@ rs-cleanup-study        = "retrosynformer.scripts.cleanup_study:main"
 rs-upload               = "retrosynformer.scripts.upload_model:main"
 rs-compress             = "retrosynformer.scripts.compress_model:main"
 rs-evaluate             = "retrosynformer.scripts.evaluate:main"
+rs-report               = "retrosynformer.scripts.generate_report:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
