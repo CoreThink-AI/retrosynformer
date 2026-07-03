@@ -68,6 +68,7 @@ you lose the original ``trial_id`` lineage.
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -724,6 +725,289 @@ def plan_merge(
         "changes": changes,
         "warnings": warnings,
     }
+
+
+# ---------------------------------------------------------------------------
+# Single-study categorical widening — resuming a study with a bigger search space
+# ---------------------------------------------------------------------------
+
+class UnsafeWideningError(ValueError):
+    """Raised when a config's categorical choices would drop an already-explored value."""
+
+
+def widen_categorical_choices(
+    db_path: str | Path,
+    param_name: str,
+    new_choices: list,
+    *,
+    dry_run: bool = False,
+) -> Optional[dict]:
+    """Widen a CategoricalDistribution's choices in an existing study.db, in place.
+
+    Optuna refuses to resume a study when a categorical param's config choices
+    differ from what earlier trials recorded, raising::
+
+        ValueError: CategoricalDistribution does not support dynamic value space.
+
+    This happens whenever a hypertune config is edited between rounds to widen
+    a list-typed search dimension (e.g. ``n_layers: [24, 26]`` -> ``[21, 22,
+    23, 24, 25, 26]``) while reusing the same ``--study-name``. It is safe to
+    patch around *only* when every already-recorded choice is still present in
+    *new_choices* — i.e. the search space grew, nothing was removed.
+
+    Each ``trial_params.param_value`` for a categorical param is stored as an
+    INTEGER INDEX into the distribution's ``choices`` list, not the value
+    itself (see module docstring). So widening must preserve the existing
+    choices' order/index positions exactly and only ever *append* new values;
+    reordering (e.g. sorting the union) would silently reinterpret historical
+    trials as having sampled different values, corrupting both the run's
+    provenance and the TPE surrogate model that resumes from it.
+
+    Prints a warning describing the patch (old choices, merged choices, and
+    the backup path) before mutating the database. Pass ``dry_run=True`` to
+    get the same warning and the returned plan without writing anything.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the study's ``study.db`` SQLite file.
+    param_name:
+        The Optuna param name (e.g. ``"n_layers"``).
+    new_choices:
+        The full choices list from the *current* config for this param.
+    dry_run:
+        If True, compute and report the plan but do not touch the database.
+
+    Returns
+    -------
+    Optional[dict]
+        None if the param has no recorded trials yet (fresh study — nothing
+        to widen) or its stored choices already match *new_choices*.
+        Otherwise ``{"param": param_name, "old_choices": [...],
+        "merged_choices": [...], "backup_path": str | None}``.
+
+    Raises
+    ------
+    UnsafeWideningError
+        If *new_choices* is missing a value that earlier trials already
+        recorded — that is a shrink/reorder, not a widening, and cannot be
+        patched around safely. Start a new study instead.
+    """
+    db_path = Path(db_path)
+    session = connect(db_path, readonly=True)
+    try:
+        row = (
+            session.query(TrialParam)
+            .filter(TrialParam.param_name == param_name)
+            .first()
+        )
+        if row is None:
+            return None
+        dist = row.distribution
+        if dist["name"] != "CategoricalDistribution":
+            raise UnsafeWideningError(
+                f"{param_name!r} is recorded as {dist['name']}, not "
+                "CategoricalDistribution — widening only applies to "
+                "list-valued (categorical) search params."
+            )
+        old_choices = list(dist["attributes"]["choices"])
+    finally:
+        session.close()
+
+    dropped = [c for c in old_choices if c not in new_choices]
+    if dropped:
+        raise UnsafeWideningError(
+            f"optuna.{param_name}: choice(s) {dropped} were already explored in "
+            f"{db_path} but are missing from the new config's choices "
+            f"{new_choices!r}. Removing or reordering already-explored values "
+            "is not a safe widening — add them back to the config, or start a "
+            "new --study-name if the search space genuinely needs to shrink."
+        )
+
+    merged = old_choices + [c for c in new_choices if c not in old_choices]
+    if merged == old_choices:
+        return None  # already consistent — config matches what's stored
+
+    print(
+        f"\n⚠️  WARNING: optuna.{param_name} search space widened for an existing study.\n"
+        f"    stored choices : {old_choices}\n"
+        f"    config choices : {new_choices}\n"
+        f"    merged choices : {merged}\n"
+        f"    Patching {db_path} in place — existing trials keep their original\n"
+        f"    index positions ({old_choices}), so their recorded {param_name} values\n"
+        f"    are unchanged; only the distribution's choice list grows."
+    )
+
+    result = {
+        "param": param_name,
+        "old_choices": old_choices,
+        "merged_choices": merged,
+        "backup_path": None,
+    }
+    if dry_run:
+        print("    [dry run] no changes written.")
+        return result
+
+    backup_path = db_path.with_name(db_path.name + f".bak-{param_name}")
+    suffix = 0
+    while backup_path.exists():
+        suffix += 1
+        backup_path = db_path.with_name(db_path.name + f".bak-{param_name}-{suffix}")
+    shutil.copy2(db_path, backup_path)
+    result["backup_path"] = str(backup_path)
+    print(f"    backup written to {backup_path}")
+
+    distribution_json = json.dumps({
+        "name": "CategoricalDistribution",
+        "attributes": {"choices": merged},
+    })
+    con = sqlite3.connect(str(db_path))
+    try:
+        con.execute(
+            "UPDATE trial_params SET distribution_json = ? WHERE param_name = ?",
+            (distribution_json, param_name),
+        )
+        con.commit()
+    finally:
+        con.close()
+    print(f"    done — {param_name} choices now {merged}\n")
+
+    return result
+
+
+def widen_numerical_range(
+    db_path: str | Path,
+    param_name: str,
+    *,
+    low: float | int | None = None,
+    high: float | int | None = None,
+    log: bool | None = None,
+    step: float | int | None = None,
+    dry_run: bool = False,
+) -> Optional[dict]:
+    """Widen a Float/IntDistribution's low/high/log/step in an existing study.db, in place.
+
+    Optuna's own ``check_distribution_compatibility`` only rejects a *log*
+    mismatch for numerical params — ``low``/``high`` may already differ
+    freely across trials of the same study without Optuna raising, so
+    resuming with a wider range in the hypertune config generally needs no
+    patch. This function exists for the one case Optuna does reject
+    (flipping ``log``), and to keep the *recorded* historical distribution
+    consistent with the widened range for reporting (``rs-show-study``,
+    ``rs-plot``, etc.) and for any downstream code that assumes a single
+    distribution per param name.
+
+    Only ever grows the recorded range: the merged ``[low, high]`` is
+    ``min(old_low, low)`` .. ``max(old_high, high)`` (mirroring the merge
+    strategy documented in this module's docstring for combining two
+    studies). Explicitly requesting a narrower bound raises
+    ``UnsafeWideningError`` — start a new study instead.
+
+    Parameters
+    ----------
+    low, high, log, step:
+        New values for the distribution's attributes; ``None`` leaves that
+        attribute unchanged (for ``low``/``high``, unchanged means "don't
+        widen past whatever the study already recorded").
+
+    Returns
+    -------
+    Optional[dict]
+        ``None`` if the param has no recorded trials yet, or the recorded
+        distribution already matches the requested range. Otherwise
+        ``{"param": ..., "old": {...}, "new": {...}, "backup_path": ...}``.
+    """
+    db_path = Path(db_path)
+    session = connect(db_path, readonly=True)
+    try:
+        row = (
+            session.query(TrialParam)
+            .filter(TrialParam.param_name == param_name)
+            .first()
+        )
+        if row is None:
+            return None
+        dist = row.distribution
+    finally:
+        session.close()
+
+    if dist["name"] not in ("FloatDistribution", "IntDistribution"):
+        raise UnsafeWideningError(
+            f"{param_name!r} is recorded as {dist['name']}, not a Float/IntDistribution "
+            "— widen_numerical_range only applies to continuous or int-range search params."
+        )
+
+    old_attrs = dict(dist["attributes"])
+    old_low, old_high = old_attrs["low"], old_attrs["high"]
+    new_low = old_low if low is None else min(low, old_low)
+    new_high = old_high if high is None else max(high, old_high)
+    new_log = old_attrs.get("log", False) if log is None else log
+    new_step = old_attrs.get("step") if step is None else step
+
+    if low is not None and low > old_low:
+        raise UnsafeWideningError(
+            f"optuna.{param_name}: requested low={low} is greater than the recorded "
+            f"low={old_low} in {db_path} — narrowing would misrepresent already-explored "
+            "trials. Pass a low <= the recorded low, or start a new study if the range "
+            "genuinely needs to shrink."
+        )
+    if high is not None and high < old_high:
+        raise UnsafeWideningError(
+            f"optuna.{param_name}: requested high={high} is less than the recorded "
+            f"high={old_high} in {db_path} — narrowing would misrepresent already-explored "
+            "trials. Pass a high >= the recorded high, or start a new study if the range "
+            "genuinely needs to shrink."
+        )
+
+    unchanged = (
+        new_low == old_low and new_high == old_high
+        and new_log == old_attrs.get("log", False) and new_step == old_attrs.get("step")
+    )
+    if unchanged:
+        return None
+
+    print(
+        f"\n⚠️  WARNING: optuna.{param_name} search space widened for an existing study.\n"
+        f"    stored range : low={old_low} high={old_high} log={old_attrs.get('log', False)} step={old_attrs.get('step')}\n"
+        f"    new range    : low={new_low} high={new_high} log={new_log} step={new_step}\n"
+        f"    Patching {db_path} in place — existing trials' recorded values are unchanged;\n"
+        f"    only the distribution's bounds grow."
+    )
+
+    result = {
+        "param": param_name,
+        "old": {"low": old_low, "high": old_high, "log": old_attrs.get("log", False), "step": old_attrs.get("step")},
+        "new": {"low": new_low, "high": new_high, "log": new_log, "step": new_step},
+        "backup_path": None,
+    }
+    if dry_run:
+        print("    [dry run] no changes written.")
+        return result
+
+    backup_path = db_path.with_name(db_path.name + f".bak-{param_name}")
+    suffix = 0
+    while backup_path.exists():
+        suffix += 1
+        backup_path = db_path.with_name(db_path.name + f".bak-{param_name}-{suffix}")
+    shutil.copy2(db_path, backup_path)
+    result["backup_path"] = str(backup_path)
+    print(f"    backup written to {backup_path}")
+
+    new_attrs = dict(old_attrs)
+    new_attrs.update(low=new_low, high=new_high, log=new_log, step=new_step)
+    distribution_json = json.dumps({"name": dist["name"], "attributes": new_attrs})
+    con = sqlite3.connect(str(db_path))
+    try:
+        con.execute(
+            "UPDATE trial_params SET distribution_json = ? WHERE param_name = ?",
+            (distribution_json, param_name),
+        )
+        con.commit()
+    finally:
+        con.close()
+    print(f"    done — {param_name} range now low={new_low} high={new_high} log={new_log} step={new_step}\n")
+
+    return result
 
 
 # ---------------------------------------------------------------------------

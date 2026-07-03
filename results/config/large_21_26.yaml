@@ -1,7 +1,18 @@
 # Hyperparameter search for architecture + dropout on the large PaRoutes dataset.
-# Round 2: search space narrowed from large-23-layer round 1 (10 trials, 2026-06-21 – 2026-06-23).
+# Round 3: n_layers widened lower from large-24-26-layer round 2 (8 completed trials, 2026-06-23 – 2026-07-02).
 #
-# Study: large-24-26-layer
+# Study: large-24-26-layer (same study/results dir as round 2 — see note below)
+#
+# NOTE: n_layers widened from [24, 26] to [21..26] here, which used to make Optuna
+# refuse to resume this study ("CategoricalDistribution does not support dynamic
+# value space"). rs-hypertune now self-heals this automatically on startup: it
+# patches study.db's stored n_layers distribution to the merged choice list
+# (preserving the original index->value mapping for the 8 completed trials — see
+# widen_categorical_choices() in models_optuna.py) and rewrites this file's
+# optuna.n_layers list to match, so every later trial agrees with what's stored.
+# Keeping the same study name (rather than starting a fresh one) also avoids
+# orphaning trial_000..007's multi-GB checkpoint directories under
+# results/hypertune-large-24-26-layer/.
 #
 # Round 1 best (large-23-layer trial_003): n_layers=27, n_heads=3, lr=3.70e-4, attn_pdrop=0.123
 #   valid_action_accuracy=0.4187  valid_route_accuracy=0.1305  frac_solved=0.307
@@ -18,8 +29,8 @@
 #   - best trials still improving at epoch 85; n_epochs and patience increased
 #
 # Run with:
-#   rs-hypertune -c results/config/large_24_26_layer.yaml \
-#       --n-trials 8 --dataset large --study-name large-24-26-layer
+#   rs-hypertune -c results/config/large_21_26.yaml \
+#       --n-trials 12 --dataset large --study-name large-24-26-layer
 
 context:
   building_blocks: data/large_building_blocks.csv
@@ -65,7 +76,7 @@ optuna:
   # Trial 003 (n_layers=27, n_heads=3) gave best valid_action_accuracy (0.4187) and
   # best test solve rate (9/27=33%); n_heads=3 beat 4 and 5 in every comparison.
   # Narrow to [24, 27] and add n_heads=2 as an unexplored direction.
-  n_layers: [21, 22, 23, 24, 25, 26]           # was [19, 27]; 27 clearly beats 19; add 24 to test between
+  n_layers: [24, 26, 21, 22, 23, 25]           # was [19, 27]; 27 clearly beats 19; add 24 to test between
   n_heads: [2, 3]           # was [3, 4, 5]; n_heads=3 dominates; try 2; drop 5 (worst)
   # --- Learning rate ---
   # Trials with lr > 1e-3 (t004, t005) early-stopped at 49–85 epochs without
